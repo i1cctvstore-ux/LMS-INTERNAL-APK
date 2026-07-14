@@ -150,7 +150,7 @@ export function EmployeeManagement({
         disabled={!isAdmin}
       >
         <SelectTrigger className="h-9 w-[140px]">
-          <SelectValue />
+          <SelectValue>{(value: Role) => ROLE_LABELS[value]}</SelectValue>
         </SelectTrigger>
         <SelectContent>
           {ROLES.map((r) => (
@@ -171,7 +171,13 @@ export function EmployeeManagement({
         disabled={!isAdmin}
       >
         <SelectTrigger className="h-9 w-[140px]">
-          <SelectValue placeholder="Belum di-assign" />
+          <SelectValue placeholder="Belum di-assign">
+            {(value: string) =>
+              value === '__none__'
+                ? 'Belum di-assign'
+                : branches.find((b) => b.id === value)?.name ?? 'Belum di-assign'
+            }
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__none__">Belum di-assign</SelectItem>
