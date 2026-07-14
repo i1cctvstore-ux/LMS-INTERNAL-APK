@@ -30,21 +30,9 @@ create trigger trg_branches_updated_at
   before update on public.branches
   for each row execute function public.set_branches_updated_at();
 
-alter table public.branches enable row level security;
-
--- Semua staf login boleh LIHAT daftar cabang (buat dropdown pilih cabang
--- di form karyawan/proyek). Cuma Super Admin yang boleh ubah/hapus.
-drop policy if exists "branches_select_authenticated" on public.branches;
-create policy "branches_select_authenticated"
-  on public.branches for select to authenticated using (true);
-
-drop policy if exists "branches_write_super_admin" on public.branches;
-create policy "branches_write_super_admin"
-  on public.branches for all to authenticated
-  using (public.is_super_admin())
-  with check (public.is_super_admin());
-
 -- ---------- Kolom branch_id di tabel yang sudah ada ----------
+-- (Harus ditambah SEBELUM helper function di bawah, karena
+-- current_branch_id() query kolom profiles.branch_id ini.)
 
 alter table public.profiles
   add column if not exists branch_id uuid references public.branches(id);
@@ -53,6 +41,8 @@ alter table public.projects
   add column if not exists branch_id uuid references public.branches(id);
 
 -- ---------- Helper function dipakai di banyak policy ----------
+-- (Harus dibuat SEBELUM semua "create policy" di bawah, karena semua
+-- policy di file ini manggil function-function ini.)
 
 create or replace function public.current_branch_id()
 returns uuid
@@ -72,6 +62,22 @@ as $$
     where id = auth.uid() and role = 'super_admin' and active = true
   )
 $$;
+
+-- ---------- RLS tabel branches ----------
+
+alter table public.branches enable row level security;
+
+-- Semua staf login boleh LIHAT daftar cabang (buat dropdown pilih cabang
+-- di form karyawan/proyek). Cuma Super Admin yang boleh ubah/hapus.
+drop policy if exists "branches_select_authenticated" on public.branches;
+create policy "branches_select_authenticated"
+  on public.branches for select to authenticated using (true);
+
+drop policy if exists "branches_write_super_admin" on public.branches;
+create policy "branches_write_super_admin"
+  on public.branches for all to authenticated
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
 
 -- ---------- Ganti policy profiles: dari "semua boleh lihat semua" ----------
 -- jadi "cuma lihat karyawan di cabang sendiri, kecuali super_admin".
