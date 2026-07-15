@@ -51,6 +51,8 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Kelola Cabang',
     description: 'Daftar cabang dan penugasan karyawan/proyek per cabang',
     icon: Building2,
+    // Tetap eksklusif super_admin: Admin cabang tidak boleh lihat/kelola
+    // cabang lain ataupun membuat cabang baru.
     roles: ['super_admin'],
   },
   {
@@ -58,7 +60,10 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'User Role',
     description: 'Manajemen pengguna dan hak akses',
     icon: Users,
-    roles: ['super_admin'],
+    // Admin cabang juga boleh akses halaman ini, tapi dibatasi di dalam
+    // komponennya sendiri (EmployeeManagement) supaya cuma bisa kelola
+    // staff kasir/gudang/teknisi di cabangnya sendiri.
+    roles: ['super_admin', 'admin'],
   },
 ]
 
