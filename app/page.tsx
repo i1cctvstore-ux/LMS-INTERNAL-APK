@@ -72,7 +72,7 @@ export default function Page() {
   }
 
   // Jaga-jaga: kalau activePage somehow menunjuk ke halaman yang tidak boleh
-  // dilihat role ini (mis. 'user-role' oleh selain super_admin), render
+  // dilihat role ini (mis. 'user-role' oleh selain super_admin/admin), render
   // dashboard sebagai gantinya. Normalnya tidak akan kejadian karena menu
   // yang tidak boleh dilihat memang tidak dirender di Sidebar.
   const visibleKeys = new Set(getVisibleNavItems(profile.role).map((i) => i.key))
@@ -92,6 +92,7 @@ export default function Page() {
           <EmployeeManagement
             currentUserRole={profile!.role}
             currentUserId={profile!.id}
+            currentUserBranchId={profile!.branch_id}
           />
         )
       default:
