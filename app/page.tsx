@@ -7,6 +7,7 @@ import { DashboardPage } from '@/components/dashboard/dashboard-page'
 import { ProjectsPage } from '@/components/projects/projects-page'
 import { BranchManagement } from '@/components/branches/branch-management'
 import { EmployeeManagement } from '@/components/employees/employee-management'
+import ServisModule from '@/components/servis/servis-module'
 import { ModulePlaceholder } from '@/components/module-placeholder'
 import { NAV_ITEMS, getVisibleNavItems, type PageKey } from '@/lib/nav-config'
 import { createClient } from '@/lib/supabase/client'
@@ -92,6 +93,14 @@ export default function Page() {
           <EmployeeManagement
             currentUserRole={profile!.role}
             currentUserId={profile!.id}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'servis':
+        return (
+          <ServisModule
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
             currentUserBranchId={profile!.branch_id}
           />
         )
