@@ -9,7 +9,7 @@ import { BranchManagement } from '@/components/branches/branch-management'
 import { EmployeeManagement } from '@/components/employees/employee-management'
 import ServisModule from '@/components/servis/servis-module'
 import { ModulePlaceholder } from '@/components/module-placeholder'
-import { NAV_ITEMS, getVisibleNavItems, type PageKey } from '@/lib/nav-config'
+import { NAV_ITEMS, getVisibleNavItems, getDefaultPage, type PageKey } from '@/lib/nav-config'
 import { createClient } from '@/lib/supabase/client'
 import type { Profile } from '@/lib/supabase/types'
 
@@ -73,11 +73,12 @@ export default function Page() {
   }
 
   // Jaga-jaga: kalau activePage somehow menunjuk ke halaman yang tidak boleh
-  // dilihat role ini (mis. 'user-role' oleh selain super_admin/admin), render
-  // dashboard sebagai gantinya. Normalnya tidak akan kejadian karena menu
-  // yang tidak boleh dilihat memang tidak dirender di Sidebar.
+  // dilihat role ini (mis. 'dashboard'/'proyek' oleh gudang, atau 'user-role'
+  // oleh selain super_admin/admin), jatuhkan ke halaman default yang memang
+  // boleh diakses role itu. Normalnya tidak akan kejadian karena menu yang
+  // tidak boleh dilihat memang tidak dirender di Sidebar.
   const visibleKeys = new Set(getVisibleNavItems(profile.role).map((i) => i.key))
-  const effectivePage: PageKey = visibleKeys.has(activePage) ? activePage : 'dashboard'
+  const effectivePage: PageKey = visibleKeys.has(activePage) ? activePage : getDefaultPage(profile.role)
   const activeItem = NAV_ITEMS.find((i) => i.key === effectivePage)
 
   function renderPage() {
