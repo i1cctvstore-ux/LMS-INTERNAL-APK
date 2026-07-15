@@ -21,18 +21,24 @@ export type NavItem = {
   roles?: Role[]
 }
 
+// Role gudang cuma kerja di area Servis & Stok — gak perlu (dan gak boleh)
+// lihat Dashboard ringkasan bisnis, Proyek, apalagi Kelola Cabang/User Role.
+const NON_GUDANG_ROLES: Role[] = ['super_admin', 'admin', 'kasir', 'teknisi']
+
 export const NAV_ITEMS: NavItem[] = [
   {
     key: 'dashboard',
     label: 'Dashboard',
     description: 'Ringkasan operasional toko',
     icon: LayoutDashboard,
+    roles: NON_GUDANG_ROLES,
   },
   {
     key: 'proyek',
     label: 'Proyek',
     description: 'Pantau progres pemasangan CCTV dari survey sampai serah terima',
     icon: FolderKanban,
+    roles: NON_GUDANG_ROLES,
   },
   {
     key: 'stok',
@@ -71,4 +77,12 @@ export const NAV_ITEMS: NavItem[] = [
 // dilihat role tertentu.
 export function getVisibleNavItems(role: Role): NavItem[] {
   return NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(role))
+}
+
+// Halaman default waktu login/refresh — dashboard untuk yang boleh lihat,
+// kalau tidak (mis. gudang) jatuh ke menu pertama yang memang boleh diakses.
+export function getDefaultPage(role: Role): PageKey {
+  const visible = getVisibleNavItems(role)
+  if (visible.some((item) => item.key === 'dashboard')) return 'dashboard'
+  return visible[0]?.key ?? 'dashboard'
 }
