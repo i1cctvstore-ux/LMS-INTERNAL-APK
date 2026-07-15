@@ -29,7 +29,7 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { AddEmployeeDialog } from '@/components/employees/add-employee-dialog'
 import { RegeneratePasswordDialog } from '@/components/employees/regenerate-password-dialog'
-import { ROLES, ROLE_LABELS, type Employee, type Role } from '@/lib/employees'
+import { ROLES, ROLE_LABELS, STAFF_ROLES, type Employee, type Role } from '@/lib/employees'
 import { createClient } from '@/lib/supabase/client'
 import type { Branch } from '@/lib/branches'
 
@@ -45,21 +45,42 @@ function initials(name: string) {
 type EmployeeManagementProps = {
   currentUserRole: Role
   currentUserId: string
+  // Cabang milik user yang sedang login. Wajib diisi kalau currentUserRole
+  // === 'admin' (dipakai buat batasi baris mana yang boleh diedit, dan
+  // di-pass ke AddEmployeeDialog supaya karyawan baru otomatis masuk
+  // cabang yang sama). Untuk super_admin nilai ini tidak dipakai untuk
+  // pembatasan apa pun.
+  currentUserBranchId: string | null
 }
 
 export function EmployeeManagement({
   currentUserRole,
   currentUserId,
+  currentUserBranchId,
 }: EmployeeManagementProps) {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Halaman ini sekarang cuma bisa diakses super_admin (lihat lib/nav-config.tsx),
-  // jadi di titik ini currentUserRole harusnya selalu 'super_admin'. Tetap dicek
-  // eksplisit sebagai jaga-jaga kalau komponen ini dipakai ulang di tempat lain.
-  const isAdmin = currentUserRole === 'super_admin'
+  const isSuperAdmin = currentUserRole === 'super_admin'
+  const isBranchAdmin = currentUserRole === 'admin'
+  // Boleh membuka halaman ini & menambah karyawan baru sama sekali.
+  const canManage = isSuperAdmin || isBranchAdmin
+
+  // Baris mana saja yang boleh diubah (role/status/reset password) oleh
+  // user yang sedang login. Super Admin: semua baris. Admin cabang: cuma
+  // karyawan staff (kasir/gudang/teknisi) yang satu cabang dengannya.
+  function canEditRow(emp: Employee) {
+    if (isSuperAdmin) return true
+    if (isBranchAdmin) {
+      return (
+        emp.branch_id === currentUserBranchId &&
+        STAFF_ROLES.includes(emp.role)
+      )
+    }
+    return false
+  }
 
   useEffect(() => {
     loadEmployees()
@@ -143,17 +164,21 @@ export function EmployeeManagement({
   const activeCount = employees.filter((e) => e.active).length
 
   function RoleSelect({ emp }: { emp: Employee }) {
+    const editable = canEditRow(emp)
+    // Admin cabang cuma boleh pilih role staff — gak bisa naikkan siapa
+    // pun jadi admin/super_admin lewat dropdown ini.
+    const options = isSuperAdmin ? ROLES : STAFF_ROLES
     return (
       <Select
         value={emp.role}
         onValueChange={(v) => updateRole(emp.id, v as Role)}
-        disabled={!isAdmin}
+        disabled={!editable}
       >
         <SelectTrigger className="h-9 w-[140px]">
           <SelectValue>{(value: Role) => ROLE_LABELS[value]}</SelectValue>
         </SelectTrigger>
         <SelectContent>
-          {ROLES.map((r) => (
+          {options.map((r) => (
             <SelectItem key={r} value={r}>
               {ROLE_LABELS[r]}
             </SelectItem>
@@ -164,11 +189,12 @@ export function EmployeeManagement({
   }
 
   function BranchSelect({ emp }: { emp: Employee }) {
+    // Cuma Super Admin yang boleh memindahkan karyawan antar cabang.
     return (
       <Select
         value={emp.branch_id ?? '__none__'}
         onValueChange={(v) => updateBranch(emp.id, v === '__none__' ? '' : v)}
-        disabled={!isAdmin}
+        disabled={!isSuperAdmin}
       >
         <SelectTrigger className="h-9 w-[140px]">
           <SelectValue placeholder="Belum di-assign">
@@ -193,13 +219,14 @@ export function EmployeeManagement({
 
   function StatusToggle({ emp }: { emp: Employee }) {
     const isSelf = emp.id === currentUserId
+    const editable = canEditRow(emp)
     return (
       <div className="flex items-center gap-2">
         <Switch
           checked={emp.active}
           onCheckedChange={(v) => toggleActive(emp.id, v)}
           aria-label={`Status ${emp.name}`}
-          disabled={!isAdmin || isSelf}
+          disabled={!editable || isSelf}
           title={isSelf ? 'Tidak bisa menonaktifkan akun sendiri' : undefined}
         />
         <Badge
@@ -228,7 +255,13 @@ export function EmployeeManagement({
             Kelola akun, role, dan status akses karyawan toko.
           </p>
         </div>
-        {isAdmin ? <AddEmployeeDialog onAdd={addEmployee} /> : null}
+        {canManage ? (
+          <AddEmployeeDialog
+            onAdd={addEmployee}
+            currentUserRole={currentUserRole}
+            currentUserBranchId={currentUserBranchId}
+          />
+        ) : null}
       </div>
 
       {error ? (
@@ -278,7 +311,7 @@ export function EmployeeManagement({
                             {emp.email}
                           </p>
                         </div>
-                        {isAdmin ? <RegeneratePasswordDialog employee={emp} /> : null}
+                        {canEditRow(emp) ? <RegeneratePasswordDialog employee={emp} /> : null}
                       </div>
 
                       <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
@@ -337,7 +370,7 @@ export function EmployeeManagement({
                             <StatusToggle emp={emp} />
                           </TableCell>
                           <TableCell className="text-right">
-                            {isAdmin ? <RegeneratePasswordDialog employee={emp} /> : null}
+                            {canEditRow(emp) ? <RegeneratePasswordDialog employee={emp} /> : null}
                           </TableCell>
                         </TableRow>
                       ))}
