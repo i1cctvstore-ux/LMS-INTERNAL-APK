@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   Boxes,
+  Wrench,
   Package,
   Truck,
   Layers,
@@ -118,6 +119,32 @@ export const NAV_ITEMS: NavItem[] = [
 export function getVisibleNavItems(role: Role): NavItem[] {
   return NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(role))
 }
+
+export type NavGroup = {
+  key: string
+  label: string
+  icon: LucideIcon
+  itemKeys: PageKey[]
+}
+
+// Menu yang dikelompokkan jadi satu "folder" yang bisa dibuka/tutup di
+// Sidebar (bukan tab di dalam halaman lagi) — item-itemnya sendiri tetap
+// terdaftar sebagai NavItem biasa di NAV_ITEMS di atas, ini cuma metadata
+// tambahan buat cara Sidebar merender & mengelompokkannya secara visual.
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    key: 'servis',
+    label: 'Servis',
+    icon: Wrench,
+    itemKeys: [
+      'servis-claim',
+      'servis-supplier',
+      'servis-inventaris',
+      'servis-kas',
+      'servis-master',
+    ],
+  },
+]
 
 // Halaman default waktu login/refresh — dashboard untuk yang boleh lihat,
 // kalau tidak (mis. gudang) jatuh ke menu pertama yang memang boleh diakses.
