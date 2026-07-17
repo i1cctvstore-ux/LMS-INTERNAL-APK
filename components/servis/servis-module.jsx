@@ -911,6 +911,17 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
   const [loadError, setLoadError] = useState(false);
 
   const [tab, setTab] = useState(section || "claims");
+  // Karena kelima menu Servis di sidebar sama-sama merender komponen
+  // ServisModule/App yang sama, React tidak selalu me-remount ulang
+  // komponennya waktu kamu pindah menu (cuma prop `section` yang berubah).
+  // useState di atas cuma jalan sekali pas mount pertama, jadi tab internal
+  // perlu disinkronkan manual tiap kali `section` berubah — supaya pindah
+  // dari "Claim Barang" ke "Proses ke Supplier" dst di sidebar beneran
+  // ganti konten, bukan nyangkut di section yang pertama dibuka.
+  useEffect(() => {
+    if (section && section !== tab) setTab(section);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section]);
   const [navOpen, setNavOpen] = useState(false);
   const [viewMode, setViewMode] = useState("auto");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
