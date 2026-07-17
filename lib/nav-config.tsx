@@ -1,7 +1,11 @@
 import {
   LayoutDashboard,
   Boxes,
-  Wrench,
+  Package,
+  Truck,
+  Layers,
+  Wallet,
+  Settings2,
   Users,
   FolderKanban,
   Building2,
@@ -9,7 +13,17 @@ import {
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/types'
 
-export type PageKey = 'dashboard' | 'proyek' | 'stok' | 'servis' | 'user-role' | 'cabang'
+export type PageKey =
+  | 'dashboard'
+  | 'proyek'
+  | 'stok'
+  | 'servis-claim'
+  | 'servis-supplier'
+  | 'servis-inventaris'
+  | 'servis-kas'
+  | 'servis-master'
+  | 'user-role'
+  | 'cabang'
 
 export type NavItem = {
   key: PageKey
@@ -46,11 +60,37 @@ export const NAV_ITEMS: NavItem[] = [
     description: 'Kelola inventaris perangkat CCTV',
     icon: Boxes,
   },
+  // ---------- Servis (dulu 1 menu dengan tab di dalamnya, sekarang
+  // 5 menu terpisah langsung di sidebar utama) ----------
   {
-    key: 'servis',
-    label: 'Servis',
-    description: 'Antrian dan riwayat perbaikan',
-    icon: Wrench,
+    key: 'servis-claim',
+    label: 'Claim Barang',
+    description: 'Klaim garansi & servis yang masuk dari customer',
+    icon: Package,
+  },
+  {
+    key: 'servis-supplier',
+    label: 'Proses ke Supplier',
+    description: 'Pengiriman barang servis ke supplier',
+    icon: Truck,
+  },
+  {
+    key: 'servis-inventaris',
+    label: 'Inventaris Servis',
+    description: 'Stok sparepart untuk servis',
+    icon: Layers,
+  },
+  {
+    key: 'servis-kas',
+    label: 'Kas Service',
+    description: 'Invoice dan setoran kas hasil servis',
+    icon: Wallet,
+  },
+  {
+    key: 'servis-master',
+    label: 'Data Master Servis',
+    description: 'Brand, supplier, dan produk untuk modul servis',
+    icon: Settings2,
   },
   {
     key: 'cabang',
