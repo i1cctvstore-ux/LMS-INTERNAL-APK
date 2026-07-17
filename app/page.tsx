@@ -97,9 +97,49 @@ export default function Page() {
             currentUserBranchId={profile!.branch_id}
           />
         )
-      case 'servis':
+      // Modul Servis: 5 menu sidebar terpisah, semua manggil komponen yang
+      // sama (ServisModule) tapi dikasih tau lagi di section mana lewat
+      // prop `section` — bukan tab internal lagi.
+      case 'servis-claim':
         return (
           <ServisModule
+            section="claims"
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'servis-supplier':
+        return (
+          <ServisModule
+            section="supplier"
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'servis-inventaris':
+        return (
+          <ServisModule
+            section="stok"
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'servis-kas':
+        return (
+          <ServisModule
+            section="kas"
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'servis-master':
+        return (
+          <ServisModule
+            section="settings"
             currentUserId={profile!.id}
             currentUserRole={profile!.role}
             currentUserBranchId={profile!.branch_id}
