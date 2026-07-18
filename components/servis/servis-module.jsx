@@ -1085,6 +1085,23 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
     });
   }
 
+  async function importBrands(rows) {
+    const list = settings.brands || [];
+    const existing = new Set(list.map((b) => b.trim().toLowerCase()));
+    const additions = [];
+    rows.forEach((r) => {
+      const name = (r.name || "").trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (existing.has(key)) return;
+      existing.add(key);
+      additions.push(name);
+    });
+    if (additions.length === 0) return;
+    const next = { ...settings, brands: [...list, ...additions] };
+    await persist({ settings: next });
+  }
+
   function addSupplier(data) {
     const name = (data.name || "").trim();
     if (!name) return;
@@ -1849,7 +1866,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
           />
         )}
         {tab === "settings" && (
-          <DataMasterTab settings={settings} onSave={(s) => persist({ settings: s })} claims={claims} batches={batches} role={role} onAddProduct={addProduct} onUpdateProduct={updateProduct} onRemoveProduct={removeProduct} onAddCustomer={addCustomer} onUpdateCustomer={updateCustomer} onRemoveCustomer={removeCustomer} onImportProducts={importProducts} onImportCustomers={importCustomers} onAddSupplier={addSupplier} onUpdateSupplier={updateSupplier} onRemoveSupplier={removeSupplier} onImportSuppliers={importSuppliers} />
+          <DataMasterTab settings={settings} onSave={(s) => persist({ settings: s })} claims={claims} batches={batches} role={role} onAddProduct={addProduct} onUpdateProduct={updateProduct} onRemoveProduct={removeProduct} onAddCustomer={addCustomer} onUpdateCustomer={updateCustomer} onRemoveCustomer={removeCustomer} onImportProducts={importProducts} onImportCustomers={importCustomers} onAddSupplier={addSupplier} onUpdateSupplier={updateSupplier} onRemoveSupplier={removeSupplier} onImportSuppliers={importSuppliers} onImportBrands={importBrands} />
         )}
         </div>
 
@@ -5311,9 +5328,10 @@ function ImportPasteModal({ title, description, columns, sampleRow, onClose, onI
   );
 }
 
-function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, onUpdateProduct, onRemoveProduct, onAddCustomer, onUpdateCustomer, onRemoveCustomer, onImportProducts, onImportCustomers, onAddSupplier, onUpdateSupplier, onRemoveSupplier, onImportSuppliers }) {
+function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, onUpdateProduct, onRemoveProduct, onAddCustomer, onUpdateCustomer, onRemoveCustomer, onImportProducts, onImportCustomers, onAddSupplier, onUpdateSupplier, onRemoveSupplier, onImportSuppliers, onImportBrands }) {
   const [newBrand, setNewBrand] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [showImportBrand, setShowImportBrand] = useState(false);
   const canManage = role === "pusat";
 
   const addBrand = () => { if (newBrand.trim()) { onSave({ ...settings, brands: [...settings.brands, newBrand.trim()] }); setNewBrand(""); } };
@@ -5338,7 +5356,12 @@ function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, 
       )}
 
       <div className="bg-white rounded-3xl border border-slate-200 p-5 mb-4">
-        <div className="text-sm font-semibold text-slate-700 mb-3">Brand</div>
+        <div className="flex items-center justify-between mb-3 gap-2">
+          <div className="text-sm font-semibold text-slate-700">Brand</div>
+          <button onClick={() => setShowImportBrand(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Upload size={13} /> Import
+          </button>
+        </div>
         <div className="flex flex-wrap gap-2 mb-3">
           {settings.brands.map((b) => (
             <span key={b} className="flex items-center gap-1 bg-slate-100 rounded-full pl-3 pr-1 py-1 text-sm">
@@ -5372,6 +5395,16 @@ function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, 
           <input className={inputCls} value={newBrand} onChange={(e) => setNewBrand(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addBrand()} placeholder="Tambah brand..." />
           <button onClick={addBrand} className={`px-4 text-sm ${btnPrimaryCls}`}>Tambah</button>
         </div>
+        {showImportBrand && (
+          <ImportPasteModal
+            title="Import Brand"
+            description="Isi daftar brand sekaligus banyak"
+            columns={[{ key: "name", label: "Nama Brand", required: true }]}
+            sampleRow="Hikvision"
+            onClose={() => setShowImportBrand(false)}
+            onImport={onImportBrands}
+          />
+        )}
       </div>
 
       <SupplierSettingsPanel settings={settings} claims={claims} batches={batches} role={role} onAddSupplier={onAddSupplier} onUpdateSupplier={onUpdateSupplier} onRemoveSupplier={onRemoveSupplier} onImportSuppliers={onImportSuppliers} />
