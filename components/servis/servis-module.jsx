@@ -11,7 +11,19 @@ import {
 import { loadServiceData, persistServiceData, uploadServiceFile } from "@/lib/service/api";
 
 // ---------- helpers ----------
-const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+// PENTING: fungsi ini HARUS menghasilkan UUID valid (bukan string acak
+// sembarang), karena dipakai sebagai nilai kolom `id` (tipe uuid) waktu
+// data baru dibuat di sisi browser lalu dikirim ke Supabase — kalau
+// formatnya bukan UUID, insert-nya ditolak database ("invalid input
+// syntax for type uuid"). crypto.randomUUID() tersedia di semua browser
+// modern (Chrome/Edge/Firefox/Safari versi baru) selama halamannya HTTPS,
+// yang mana selalu benar untuk deployment Vercel.
+const uid = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) =>
+        (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16)
+      );
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
 const fmtDate = (d) => {
