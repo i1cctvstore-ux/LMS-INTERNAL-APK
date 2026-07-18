@@ -1253,6 +1253,70 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
     if (role !== "pusat") return;
     persist({ settings: { ...settings, spareParts: (settings.spareParts || []).filter((p) => p.id !== id) } });
   }
+  // ---------- Import massal (paste dari Excel/Sheets) ----------
+  // Ketiganya menghindari duplikat (dicek dari nama, atau SKU untuk
+  // produk) dan cuma sekali persist() per batch import, bukan satu-satu.
+  function importProducts(rows) {
+    setSettings((prev) => {
+      const list = prev.products || [];
+      const existingNames = new Set(list.map((p) => p.name.trim().toLowerCase()));
+      const existingSkus = new Set(list.map((p) => (p.sku || "").trim().toLowerCase()));
+      const additions = [];
+      rows.forEach((r) => {
+        const name = (r.name || "").trim();
+        const sku = (r.sku || "").trim();
+        if (!name || !sku) return;
+        const nameKey = name.toLowerCase();
+        const skuKey = sku.toLowerCase();
+        if (existingNames.has(nameKey) || existingSkus.has(skuKey)) return;
+        existingNames.add(nameKey);
+        existingSkus.add(skuKey);
+        additions.push({ id: uid(), sku, name });
+      });
+      if (additions.length === 0) return prev;
+      const next = { ...prev, products: [...list, ...additions] };
+      persist({ settings: next });
+      return next;
+    });
+  }
+  function importSpareParts(rows) {
+    setSettings((prev) => {
+      const list = prev.spareParts || [];
+      const existingNames = new Set(list.map((p) => p.name.trim().toLowerCase()));
+      const additions = [];
+      rows.forEach((r) => {
+        const name = (r.name || "").trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (existingNames.has(key)) return;
+        existingNames.add(key);
+        additions.push({ id: uid(), name, unit: (r.unit || "pcs").trim() || "pcs", qty: Number(r.qty) || 0 });
+      });
+      if (additions.length === 0) return prev;
+      const next = { ...prev, spareParts: [...list, ...additions] };
+      persist({ settings: next });
+      return next;
+    });
+  }
+  function importCustomers(rows) {
+    setSettings((prev) => {
+      const list = prev.customers || [];
+      const existingNames = new Set(list.map((c) => c.name.trim().toLowerCase()));
+      const additions = [];
+      rows.forEach((r) => {
+        const name = (r.name || "").trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (existingNames.has(key)) return;
+        existingNames.add(key);
+        additions.push({ id: uid(), name, phone: (r.phone || "").trim(), alamat: (r.alamat || "").trim() });
+      });
+      if (additions.length === 0) return prev;
+      const next = { ...prev, customers: [...list, ...additions] };
+      persist({ settings: next });
+      return next;
+    });
+  }
   function uploadTandaTerimaPhoto(claimIds, dataUrl) {
     persist({ claims: claims.map((c) => (claimIds.includes(c.id) ? { ...c, fotoTandaTerimaCustomer: dataUrl } : c)) });
   }
@@ -1708,6 +1772,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
             onDeleteStockInEntry={deleteSparepartStockInEntry}
             onGoToSupplierTab={() => setTab("supplier")}
             onOpenTicket={(claimId) => setTicketDetailId(claimId)}
+            onImportSpareparts={importSpareParts}
           />
         )}
         {tab === "kas" && (
@@ -1725,7 +1790,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
           />
         )}
         {tab === "settings" && (
-          <DataMasterTab settings={settings} onSave={(s) => persist({ settings: s })} claims={claims} batches={batches} role={role} onAddProduct={addProduct} onUpdateProduct={updateProduct} onRemoveProduct={removeProduct} onAddCustomer={addCustomer} onUpdateCustomer={updateCustomer} onRemoveCustomer={removeCustomer} />
+          <DataMasterTab settings={settings} onSave={(s) => persist({ settings: s })} claims={claims} batches={batches} role={role} onAddProduct={addProduct} onUpdateProduct={updateProduct} onRemoveProduct={removeProduct} onAddCustomer={addCustomer} onUpdateCustomer={updateCustomer} onRemoveCustomer={removeCustomer} onImportProducts={importProducts} onImportCustomers={importCustomers} />
         )}
         </div>
 
@@ -4325,10 +4390,11 @@ function StockItemFormModal({ title, subtitle, initial, onClose, onSave }) {
   );
 }
 
-function SparepartStockTable({ items, canManage, onAdd, onUpdate, onRemove, onOpenStockIn }) {
+function SparepartStockTable({ items, canManage, onAdd, onUpdate, onRemove, onOpenStockIn, onImportSpareparts }) {
   const [addOpen, setAddOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [deleteItem, setDeleteItem] = useState(null);
+  const [showImport, setShowImport] = useState(false);
   const [query, setQuery] = useState("");
   const filtered = sortByName(query.trim()
     ? items.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()))
@@ -4338,6 +4404,9 @@ function SparepartStockTable({ items, canManage, onAdd, onUpdate, onRemove, onOp
       <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
         <div className="text-sm font-semibold text-slate-700">Stok Sparepart</div>
         <div className="flex gap-2">
+          <button onClick={() => setShowImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Upload size={13} /> Import
+          </button>
           <button onClick={() => setAddOpen(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${btnSecondaryCls}`}>
             <Plus size={13} /> Jenis Baru
           </button>
@@ -4421,6 +4490,16 @@ function SparepartStockTable({ items, canManage, onAdd, onUpdate, onRemove, onOp
           </div>
         </Modal>
       )}
+      {showImport && (
+        <ImportPasteModal
+          title="Import Sparepart"
+          description="Isi jenis sparepart & stok awal sekaligus banyak"
+          columns={[{ key: "name", label: "Nama", required: true }, { key: "unit", label: "Satuan" }, { key: "qty", label: "Qty Awal" }]}
+          sampleRow="Kabel UTP Cat6, meter, 100"
+          onClose={() => setShowImport(false)}
+          onImport={onImportSpareparts}
+        />
+      )}
     </div>
   );
 }
@@ -4473,7 +4552,7 @@ function StockMovementHistoryPanel({ log, claims, canDelete, onDelete, onOpenTic
   );
 }
 
-function SparepartTab({ spareParts, sparepartStockLog, claims, role, onAddSparepart, onUpdateSparepart, onRemoveSparepart, onStockInSpareparts, onDeleteStockInEntry, onOpenTicket }) {
+function SparepartTab({ spareParts, sparepartStockLog, claims, role, onAddSparepart, onUpdateSparepart, onRemoveSparepart, onStockInSpareparts, onDeleteStockInEntry, onOpenTicket, onImportSpareparts }) {
   const [stockInOpen, setStockInOpen] = useState(false);
   const canManage = role === "pusat";
   return (
@@ -4485,6 +4564,7 @@ function SparepartTab({ spareParts, sparepartStockLog, claims, role, onAddSparep
         onUpdate={onUpdateSparepart}
         onRemove={onRemoveSparepart}
         onOpenStockIn={() => setStockInOpen(true)}
+        onImportSpareparts={onImportSpareparts}
       />
       <StockMovementHistoryPanel log={sparepartStockLog} claims={claims} canDelete={canManage} onDelete={onDeleteStockInEntry} onOpenTicket={onOpenTicket} />
       {!canManage && (
@@ -4576,7 +4656,7 @@ function SparepartStockInModal({ spareParts, onClose, onConfirm }) {
   );
 }
 
-function InventarisTab({ claims, settings, spareParts, sparepartStockLog, role, isDesktopLayout, onAddSparepart, onUpdateSparepart, onRemoveSparepart, onStockInSpareparts, onDeleteStockInEntry, onGoToSupplierTab, onOpenTicket }) {
+function InventarisTab({ claims, settings, spareParts, sparepartStockLog, role, isDesktopLayout, onAddSparepart, onUpdateSparepart, onRemoveSparepart, onStockInSpareparts, onDeleteStockInEntry, onGoToSupplierTab, onOpenTicket, onImportSpareparts }) {
   const [invTab, setInvTab] = useState("tertahan");
   return (
     <div>
@@ -4603,6 +4683,7 @@ function InventarisTab({ claims, settings, spareParts, sparepartStockLog, role, 
           onStockInSpareparts={onStockInSpareparts}
           onDeleteStockInEntry={onDeleteStockInEntry}
           onOpenTicket={onOpenTicket}
+          onImportSpareparts={onImportSpareparts}
         />
       )}
     </div>
@@ -5060,7 +5141,83 @@ function KasServiceTab({ claims, invoices, setoranList, role, isDesktopLayout, o
 }
 
 // ---------- Data Master (dulu "Kelola Brand & Supplier") ----------
-function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, onUpdateProduct, onRemoveProduct, onAddCustomer, onUpdateCustomer, onRemoveCustomer }) {
+function ImportPasteModal({ title, description, columns, sampleRow, onClose, onImport }) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState("");
+
+  function parseRows() {
+    return text
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const parts = line.includes("\t") ? line.split("\t") : line.split(",");
+        const obj = {};
+        columns.forEach((col, i) => { obj[col.key] = (parts[i] || "").trim(); });
+        return obj;
+      });
+  }
+
+  const preview = text.trim() ? parseRows() : [];
+  const validRows = preview.filter((r) => columns.every((c) => !c.required || r[c.key]));
+  const invalidCount = preview.length - validRows.length;
+
+  function handleSubmit() {
+    if (validRows.length === 0) { setError("Belum ada baris valid buat diimport."); return; }
+    onImport(validRows);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-3xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <div>
+            <p className="font-semibold text-slate-800">{title}</p>
+            <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+        </div>
+        <div className="p-5 overflow-y-auto space-y-3">
+          <div className="bg-slate-50 rounded-xl p-3 text-xs text-slate-500">
+            <p className="font-medium text-slate-600 mb-1">
+              Paste dari Excel/Sheets langsung bisa — satu baris satu data, kolom otomatis kebaca dari Tab.
+              Kalau ngetik manual, pisahkan kolom pakai koma. Urutan kolom:
+            </p>
+            <p className="font-mono text-[11px]">
+              {columns.map((c) => c.label + (c.required ? "*" : "")).join("  ,  ")}
+            </p>
+            {sampleRow && <p className="font-mono text-[11px] text-slate-400 mt-1">Contoh: {sampleRow}</p>}
+            <p className="text-[10px] text-slate-400 mt-1">* wajib diisi, baris tanpa ini dilewati</p>
+          </div>
+          <textarea
+            value={text}
+            onChange={(e) => { setText(e.target.value); setError(""); }}
+            rows={8}
+            placeholder="Paste data di sini, satu baris per data..."
+            className="w-full rounded-xl border border-slate-200 p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          />
+          {text.trim() && (
+            <p className="text-xs text-slate-500">
+              {validRows.length} baris siap diimport
+              {invalidCount > 0 ? `, ${invalidCount} baris dilewati (data belum lengkap)` : ""}.
+              Data yang namanya/SKU-nya sudah ada otomatis dilewati (gak dobel).
+            </p>
+          )}
+          {error && <p className="text-xs text-rose-500">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
+          <button onClick={onClose} className="px-4 py-2 rounded-full text-sm font-medium text-slate-500 hover:bg-slate-100">Batal</button>
+          <button onClick={handleSubmit} className="px-4 py-2 rounded-full text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700">
+            Import{validRows.length > 0 ? ` (${validRows.length})` : ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, onUpdateProduct, onRemoveProduct, onAddCustomer, onUpdateCustomer, onRemoveCustomer, onImportProducts, onImportCustomers }) {
   const [newBrand, setNewBrand] = useState("");
   const [newSupplier, setNewSupplier] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -5168,17 +5325,18 @@ function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, 
         </div>
       </div>
 
-      <ProdukSettingsPanel settings={settings} claims={claims} role={role} onAddProduct={onAddProduct} onUpdateProduct={onUpdateProduct} onRemoveProduct={onRemoveProduct} />
-      <CustomerSettingsPanel settings={settings} claims={claims} role={role} onAddCustomer={onAddCustomer} onUpdateCustomer={onUpdateCustomer} onRemoveCustomer={onRemoveCustomer} />
+      <ProdukSettingsPanel settings={settings} claims={claims} role={role} onAddProduct={onAddProduct} onUpdateProduct={onUpdateProduct} onRemoveProduct={onRemoveProduct} onImportProducts={onImportProducts} />
+      <CustomerSettingsPanel settings={settings} claims={claims} role={role} onAddCustomer={onAddCustomer} onUpdateCustomer={onUpdateCustomer} onRemoveCustomer={onRemoveCustomer} onImportCustomers={onImportCustomers} />
     </div>
   );
 }
 
-function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdateProduct, onRemoveProduct }) {
+function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdateProduct, onRemoveProduct, onImportProducts }) {
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [showImport, setShowImport] = useState(false);
   const canManage = role === "pusat";
   const list = settings.products || [];
   const filtered = sortByName(query.trim()
@@ -5208,6 +5366,9 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
         <div className="text-sm font-semibold text-slate-700">Daftar Produk</div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-slate-400">{list.length} produk</span>
+          <button onClick={() => setShowImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Upload size={13} /> Import
+          </button>
           <button onClick={() => setAddOpen(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${btnPrimaryCls}`}>
             <Plus size={13} /> Tambah Produk
           </button>
@@ -5280,6 +5441,16 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
           )}
         </Modal>
       )}
+      {showImport && (
+        <ImportPasteModal
+          title="Import Produk"
+          description="Isi katalog produk sekaligus banyak"
+          columns={[{ key: "sku", label: "SKU", required: true }, { key: "name", label: "Nama Produk", required: true }]}
+          sampleRow="HIK-DVR-4CH, DVR Hikvision 4 Channel"
+          onClose={() => setShowImport(false)}
+          onImport={onImportProducts}
+        />
+      )}
     </div>
   );
 }
@@ -5304,11 +5475,12 @@ function ProductFormModal({ title, initial, isTaken, onClose, onSave }) {
   );
 }
 
-function CustomerSettingsPanel({ settings, claims, role, onAddCustomer, onUpdateCustomer, onRemoveCustomer }) {
+function CustomerSettingsPanel({ settings, claims, role, onAddCustomer, onUpdateCustomer, onRemoveCustomer, onImportCustomers }) {
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [editCustomer, setEditCustomer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [showImport, setShowImport] = useState(false);
   const canDelete = role === "pusat";
   const list = settings.customers || [];
   const filtered = query.trim()
@@ -5332,6 +5504,9 @@ function CustomerSettingsPanel({ settings, claims, role, onAddCustomer, onUpdate
         <div className="text-sm font-semibold text-slate-700">Daftar Customer</div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-slate-400">{list.length} customer</span>
+          <button onClick={() => setShowImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Upload size={13} /> Import
+          </button>
           <button onClick={() => setAddOpen(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${btnPrimaryCls}`}>
             <Plus size={13} /> Tambah Customer
           </button>
@@ -5390,6 +5565,16 @@ function CustomerSettingsPanel({ settings, claims, role, onAddCustomer, onUpdate
             </>
           )}
         </Modal>
+      )}
+      {showImport && (
+        <ImportPasteModal
+          title="Import Customer"
+          description="Isi daftar customer sekaligus banyak"
+          columns={[{ key: "name", label: "Nama", required: true }, { key: "phone", label: "No HP" }, { key: "alamat", label: "Alamat" }]}
+          sampleRow="Budi Santoso, 081234567890, Jl. Merdeka No.1"
+          onClose={() => setShowImport(false)}
+          onImport={onImportCustomers}
+        />
       )}
     </div>
   );
