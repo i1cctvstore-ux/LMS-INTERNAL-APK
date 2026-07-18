@@ -1826,6 +1826,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
           claimNeedsInvoice={claimNeedsInvoice}
           canDeleteFn={canDeleteClaim}
           onClose={() => setProgressClaim(null)}
+          onAddSparepart={addSparePart}
           onSetJenis={(claimId, jenis) => {
             const c = claims.find((x) => x.id === claimId);
             setJenis(claimId, jenis);
@@ -1927,6 +1928,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
           preselectIds={supplierPreselectIds}
           onClose={() => { setShowSendModal(false); setSupplierPreselectIds(null); }}
           onSend={markSentToSupplier}
+          onAddOption={addSettingValue}
         />
       )}
 
@@ -2840,7 +2842,7 @@ function BulkPickupBar({ items, onConfirm }) {
   );
 }
 
-function ProgressItemPanel({ claim, settings, batches, hasInvoice, claimNeedsInvoice, onSetJenis, onMarkReadyFromStock, onMarkServicedOnSite, onMarkPickedUp, onGoToSendSupplier, onGoToReceiveSupplier, onOpenInvoice, onPrintPickup }) {
+function ProgressItemPanel({ claim, settings, batches, hasInvoice, claimNeedsInvoice, onSetJenis, onMarkReadyFromStock, onMarkServicedOnSite, onMarkPickedUp, onGoToSendSupplier, onGoToReceiveSupplier, onOpenInvoice, onPrintPickup, onAddSparepart }) {
   const pending = claim.status === "Menunggu Konfirmasi";
   const [jenisDraft, setJenisDraft] = useState(claim.garansi !== "Ya" ? "Servis" : "");
   const [path, setPath] = useState(null);
@@ -2853,6 +2855,16 @@ function ProgressItemPanel({ claim, settings, batches, hasInvoice, claimNeedsInv
   const [confirmServis, setConfirmServis] = useState(false);
   const [confirmPickup, setConfirmPickup] = useState(false);
   const [metodeBayarDraft, setMetodeBayarDraft] = useState("Cash");
+  const [quickAddPartOpen, setQuickAddPartOpen] = useState(false);
+  const [quickAddPartName, setQuickAddPartName] = useState("");
+  const [quickAddPartUnit, setQuickAddPartUnit] = useState("pcs");
+  function submitQuickAddPart() {
+    if (!quickAddPartName.trim()) return;
+    onAddSparepart({ name: quickAddPartName.trim(), unit: quickAddPartUnit.trim() || "pcs", qty: 0 });
+    setQuickAddPartName("");
+    setQuickAddPartUnit("pcs");
+    setQuickAddPartOpen(false);
+  }
   const batch = batches.find((b) => b.id === claim.batchId);
   const effectiveJenis = pending ? jenisDraft : claim.jenis;
   const sparepartTotal = servisParts.reduce((sum, r) => sum + (Number(r.qty) || 0) * (Number(r.price) || 0), 0);
@@ -2978,6 +2990,17 @@ function ProgressItemPanel({ claim, settings, batches, hasInvoice, claimNeedsInv
               </div>
             ))}
             <button onClick={addServisPart} className="flex items-center gap-1.5 text-xs text-indigo-600 font-medium"><Plus size={12} /> Tambah sparepart</button>
+            {!quickAddPartOpen ? (
+              <button onClick={() => setQuickAddPartOpen(true)} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-600 font-medium">
+                <Upload size={12} /> Jenis sparepart belum ada di daftar? Tambah baru
+              </button>
+            ) : (
+              <div className="grid grid-cols-6 gap-2 items-center p-2 rounded-xl bg-indigo-50/60 border border-indigo-100">
+                <input placeholder="Nama sparepart" className={inputCls + " col-span-3"} value={quickAddPartName} onChange={(e) => setQuickAddPartName(e.target.value)} />
+                <input placeholder="Satuan (pcs)" className={inputCls + " col-span-2"} value={quickAddPartUnit} onChange={(e) => setQuickAddPartUnit(e.target.value)} />
+                <button onClick={submitQuickAddPart} disabled={!quickAddPartName.trim()} className="col-span-1 text-indigo-600 disabled:text-slate-300 font-medium text-xs">OK</button>
+              </div>
+            )}
             <div className="text-xs font-semibold text-slate-700 pt-1">Biaya Jasa Servis</div>
             <input type="number" placeholder="Biaya jasa (kosongkan jika gratis)" value={biayaJasaDraft} onChange={(e) => setBiayaJasaDraft(e.target.value)} className={inputCls} />
             {(sparepartTotal > 0 || biayaJasaDraft) && (
@@ -3091,7 +3114,7 @@ function ProgressItemPanel({ claim, settings, batches, hasInvoice, claimNeedsInv
   );
 }
 
-function ProgressModal({ claim, claims, settings, batches, role, hasInvoice, claimNeedsInvoice, canDeleteFn, onClose, onSetJenis, onMarkReadyFromStock, onMarkServicedOnSite, onMarkPickedUp, onMarkPickedUpBulk, onGoToSendSupplier, onGoToReceiveSupplier, onOpenFullEdit, onOpenInvoiceBuilder, onDeleteClaim, onPreview, onPrintPickup }) {
+function ProgressModal({ claim, claims, settings, batches, role, hasInvoice, claimNeedsInvoice, canDeleteFn, onClose, onSetJenis, onMarkReadyFromStock, onMarkServicedOnSite, onMarkPickedUp, onMarkPickedUpBulk, onGoToSendSupplier, onGoToReceiveSupplier, onOpenFullEdit, onOpenInvoiceBuilder, onDeleteClaim, onPreview, onPrintPickup, onAddSparepart }) {
   const siblings = claims.filter((c) => c.groupId === claim.groupId);
   const first = siblings[0] || claim;
   const [checked, setChecked] = useState({ [claim.id]: true });
@@ -3164,6 +3187,7 @@ function ProgressModal({ claim, claims, settings, batches, role, hasInvoice, cla
                     onGoToReceiveSupplier={() => onGoToReceiveSupplier(c.id)}
                     onOpenInvoice={(ids) => onOpenInvoiceBuilder(ids)}
                     onPrintPickup={() => onPrintPickup(c)}
+                    onAddSparepart={onAddSparepart}
                   />
                 </div>
               )}
@@ -3799,7 +3823,7 @@ function SupplierTab({ batches, claims, settings, role, isDesktopLayout, onOpenS
   );
 }
 
-function SendToSupplierModal({ claims, settings, preselectIds, onClose, onSend }) {
+function SendToSupplierModal({ claims, settings, preselectIds, onClose, onSend, onAddOption }) {
   const [supplier, setSupplier] = useState("");
   const [tanggalKirim, setTanggalKirim] = useState(todayStr());
   const [picked, setPicked] = useState(preselectIds || []);
@@ -3867,7 +3891,7 @@ function SendToSupplierModal({ claims, settings, preselectIds, onClose, onSend }
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
         <Field label="Supplier Tujuan">
           <ComboInput value={supplier} options={settings.suppliers} placeholder="Pilih supplier"
-            onChange={setSupplier} onAddOption={() => {}} />
+            onChange={setSupplier} onAddOption={(v) => onAddOption("suppliers", v)} />
         </Field>
         <Field label="Tanggal Kirim"><input type="date" className={inputCls} value={tanggalKirim} onChange={(e) => setTanggalKirim(e.target.value)} /></Field>
       </div>
