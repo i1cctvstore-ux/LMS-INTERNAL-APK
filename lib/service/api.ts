@@ -356,6 +356,19 @@ function supplierToRow(s: Partial<SupplierItem>, branchId: string) {
   return row
 }
 
+function customerFromRow(row: any): CustomerEntry {
+  return { id: row.id, name: row.name, phone: row.phone || '', alamat: row.address || '' }
+}
+
+function customerToRow(c: Partial<CustomerEntry>, branchId: string) {
+  const row: Record<string, unknown> = { branch_id: branchId }
+  if (c.id !== undefined) row.id = c.id
+  if (c.name !== undefined) row.name = c.name
+  if (c.phone !== undefined) row.phone = c.phone || null
+  if (c.alamat !== undefined) row.address = c.alamat || null
+  return row
+}
+
 function stockLogFromRow(row: any): StockLogEntry {
   return {
     id: row.id,
@@ -402,7 +415,7 @@ function deriveCustomers(claims: Claim[]): CustomerEntry[] {
 export async function loadServiceData(branchId: string): Promise<ServiceData> {
   const supabase = createClient()
 
-  const [claimsRes, batchesRes, invoicesRes, setoranRes, sparepartsRes, productsRes, suppliersRes, stockLogRes, settingsRes] =
+  const [claimsRes, batchesRes, invoicesRes, setoranRes, sparepartsRes, productsRes, suppliersRes, customersRes, stockLogRes, settingsRes] =
     await Promise.all([
       supabase.from('service_claims').select('*').eq('branch_id', branchId).order('tanggal_terima', { ascending: false }),
       supabase.from('service_batches').select('*').eq('branch_id', branchId).order('tanggal_kirim', { ascending: false }),
@@ -411,11 +424,12 @@ export async function loadServiceData(branchId: string): Promise<ServiceData> {
       supabase.from('service_spareparts').select('*').eq('branch_id', branchId).order('name'),
       supabase.from('service_products').select('*').eq('branch_id', branchId).order('name'),
       supabase.from('service_suppliers').select('*').eq('branch_id', branchId).order('name'),
+      supabase.from('service_customers').select('*').eq('branch_id', branchId).order('name'),
       supabase.from('service_sparepart_stock_log').select('*').eq('branch_id', branchId).order('created_at', { ascending: false }),
       supabase.from('service_settings').select('*').eq('branch_id', branchId).maybeSingle(),
     ])
 
-  const firstError = [claimsRes, batchesRes, invoicesRes, setoranRes, sparepartsRes, productsRes, suppliersRes, stockLogRes, settingsRes]
+  const firstError = [claimsRes, batchesRes, invoicesRes, setoranRes, sparepartsRes, productsRes, suppliersRes, customersRes, stockLogRes, settingsRes]
     .map((r) => r.error)
     .find(Boolean)
   if (firstError) throw new Error(firstError.message)
@@ -433,6 +447,7 @@ export async function loadServiceData(branchId: string): Promise<ServiceData> {
   const spareParts = (sparepartsRes.data ?? []).map(sparepartFromRow)
   const products = (productsRes.data ?? []).map(productFromRow)
   const supplierDetails = (suppliersRes.data ?? []).map(supplierFromRow)
+  const customers = (customersRes.data ?? []).map(customerFromRow)
   const sparepartStockLog = (stockLogRes.data ?? []).map(stockLogFromRow)
 
   const settingsRow = settingsRes.data as any
@@ -452,7 +467,7 @@ export async function loadServiceData(branchId: string): Promise<ServiceData> {
       supplierDetails,
       spareParts,
       products,
-      customers: deriveCustomers(claims),
+      customers,
       sparepartStockLog,
       hiddenColumns,
     },
@@ -590,6 +605,19 @@ async function syncSuppliers(branchId: string, prev: SupplierItem[], next: Suppl
   await runAndCheck(tasks)
 }
 
+async function syncCustomers(branchId: string, prev: CustomerEntry[], next: CustomerEntry[]) {
+  const supabase = createClient()
+  const { inserted, updated, deletedIds } = diffById(prev, next)
+  const tasks: Promise<{ error: any }>[] = []
+  if (inserted.length)
+    tasks.push(...chunkedInsertTasks(supabase, 'service_customers', inserted.map((c) => customerToRow(c, branchId))))
+  updated.forEach((c) =>
+    tasks.push(supabase.from('service_customers').update(customerToRow(c, branchId)).eq('id', c.id)),
+  )
+  if (deletedIds.length) tasks.push(supabase.from('service_customers').delete().in('id', deletedIds))
+  await runAndCheck(tasks)
+}
+
 // Stock log cuma pernah DITAMBAH (entry baru) atau DIHAPUS (batal satu
 // entry) di kode aslinya — gak pernah diedit di tempat. Jadi cukup 2
 // operasi, gak perlu logic update.
@@ -666,6 +694,9 @@ export async function persistServiceData(
     if (nextS.supplierDetails && nextS.supplierDetails !== prevS.supplierDetails) {
       tasks.push(syncSuppliers(branchId, prevS.supplierDetails, nextS.supplierDetails))
     }
+    if (nextS.customers && nextS.customers !== prevS.customers) {
+      tasks.push(syncCustomers(branchId, prevS.customers, nextS.customers))
+    }
     if (nextS.sparepartStockLog && nextS.sparepartStockLog !== prevS.sparepartStockLog) {
       tasks.push(syncStockLog(branchId, prevS.sparepartStockLog, nextS.sparepartStockLog, userId))
     }
@@ -677,10 +708,8 @@ export async function persistServiceData(
         }),
       )
     }
-    // customers: derived otomatis dari claims tiap kali loadServiceData()
-    // dipanggil, jadi sengaja TIDAK ditulis ke tabel apa pun di sini.
-    // suppliers (string[]): derived dari supplierDetails, juga tidak
-    // ditulis langsung — sudah ditangani lewat syncSuppliers di atas.
+    // suppliers (string[]): derived dari supplierDetails, tidak ditulis
+    // langsung — sudah ditangani lewat syncSuppliers di atas.
   }
 
   await Promise.all(tasks)
