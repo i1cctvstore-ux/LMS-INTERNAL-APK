@@ -1048,9 +1048,11 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
     setSaving(true);
     try {
       await persistServiceData(branchId, prevSnapshot, next, currentUserId);
+      setLoadError(false);
     } catch (e) {
       console.error("Gagal menyimpan data servis:", e);
       setLoadError(true);
+      throw e;
     } finally {
       setSaving(false);
     }
@@ -1100,25 +1102,22 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
       return next;
     });
   }
-  function importSuppliers(rows) {
-    setSettings((prev) => {
-      const list = prev.supplierDetails || [];
-      const existingNames = new Set(list.map((s) => s.name.trim().toLowerCase()));
-      const additions = [];
-      rows.forEach((r) => {
-        const name = (r.name || "").trim();
-        if (!name) return;
-        const key = name.toLowerCase();
-        if (existingNames.has(key)) return;
-        existingNames.add(key);
-        additions.push({ id: uid(), name, phone: (r.phone || "").trim(), address: (r.address || "").trim() });
-      });
-      if (additions.length === 0) return prev;
-      const nextDetails = [...list, ...additions];
-      const next = { ...prev, supplierDetails: nextDetails, suppliers: nextDetails.map((s) => s.name) };
-      persist({ settings: next });
-      return next;
+  async function importSuppliers(rows) {
+    const list = settings.supplierDetails || [];
+    const existingNames = new Set(list.map((s) => s.name.trim().toLowerCase()));
+    const additions = [];
+    rows.forEach((r) => {
+      const name = (r.name || "").trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (existingNames.has(key)) return;
+      existingNames.add(key);
+      additions.push({ id: uid(), name, phone: (r.phone || "").trim(), address: (r.address || "").trim() });
     });
+    if (additions.length === 0) return;
+    const nextDetails = [...list, ...additions];
+    const next = { ...settings, supplierDetails: nextDetails, suppliers: nextDetails.map((s) => s.name) };
+    await persist({ settings: next });
   }
 
   function addProduct(name, sku) {
@@ -1313,66 +1312,57 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
   // ---------- Import massal (paste dari Excel/Sheets) ----------
   // Ketiganya menghindari duplikat (dicek dari nama, atau SKU untuk
   // produk) dan cuma sekali persist() per batch import, bukan satu-satu.
-  function importProducts(rows) {
-    setSettings((prev) => {
-      const list = prev.products || [];
-      const existingNames = new Set(list.map((p) => p.name.trim().toLowerCase()));
-      const existingSkus = new Set(list.map((p) => (p.sku || "").trim().toLowerCase()));
-      const additions = [];
-      rows.forEach((r) => {
-        const name = (r.name || "").trim();
-        const sku = (r.sku || "").trim();
-        if (!name || !sku) return;
-        const nameKey = name.toLowerCase();
-        const skuKey = sku.toLowerCase();
-        if (existingNames.has(nameKey) || existingSkus.has(skuKey)) return;
-        existingNames.add(nameKey);
-        existingSkus.add(skuKey);
-        additions.push({ id: uid(), sku, name });
-      });
-      if (additions.length === 0) return prev;
-      const next = { ...prev, products: [...list, ...additions] };
-      persist({ settings: next });
-      return next;
+  async function importProducts(rows) {
+    const list = settings.products || [];
+    const existingNames = new Set(list.map((p) => p.name.trim().toLowerCase()));
+    const existingSkus = new Set(list.map((p) => (p.sku || "").trim().toLowerCase()));
+    const additions = [];
+    rows.forEach((r) => {
+      const name = (r.name || "").trim();
+      const sku = (r.sku || "").trim();
+      if (!name || !sku) return;
+      const nameKey = name.toLowerCase();
+      const skuKey = sku.toLowerCase();
+      if (existingNames.has(nameKey) || existingSkus.has(skuKey)) return;
+      existingNames.add(nameKey);
+      existingSkus.add(skuKey);
+      additions.push({ id: uid(), sku, name });
     });
+    if (additions.length === 0) return;
+    const next = { ...settings, products: [...list, ...additions] };
+    await persist({ settings: next });
   }
-  function importSpareParts(rows) {
-    setSettings((prev) => {
-      const list = prev.spareParts || [];
-      const existingNames = new Set(list.map((p) => p.name.trim().toLowerCase()));
-      const additions = [];
-      rows.forEach((r) => {
-        const name = (r.name || "").trim();
-        if (!name) return;
-        const key = name.toLowerCase();
-        if (existingNames.has(key)) return;
-        existingNames.add(key);
-        additions.push({ id: uid(), name, unit: (r.unit || "pcs").trim() || "pcs", qty: Number(r.qty) || 0 });
-      });
-      if (additions.length === 0) return prev;
-      const next = { ...prev, spareParts: [...list, ...additions] };
-      persist({ settings: next });
-      return next;
+  async function importSpareParts(rows) {
+    const list = settings.spareParts || [];
+    const existingNames = new Set(list.map((p) => p.name.trim().toLowerCase()));
+    const additions = [];
+    rows.forEach((r) => {
+      const name = (r.name || "").trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (existingNames.has(key)) return;
+      existingNames.add(key);
+      additions.push({ id: uid(), name, unit: (r.unit || "pcs").trim() || "pcs", qty: Number(r.qty) || 0 });
     });
+    if (additions.length === 0) return;
+    const next = { ...settings, spareParts: [...list, ...additions] };
+    await persist({ settings: next });
   }
-  function importCustomers(rows) {
-    setSettings((prev) => {
-      const list = prev.customers || [];
-      const existingNames = new Set(list.map((c) => c.name.trim().toLowerCase()));
-      const additions = [];
-      rows.forEach((r) => {
-        const name = (r.name || "").trim();
-        if (!name) return;
-        const key = name.toLowerCase();
-        if (existingNames.has(key)) return;
-        existingNames.add(key);
-        additions.push({ id: uid(), name, phone: (r.phone || "").trim(), alamat: (r.alamat || "").trim() });
-      });
-      if (additions.length === 0) return prev;
-      const next = { ...prev, customers: [...list, ...additions] };
-      persist({ settings: next });
-      return next;
+  async function importCustomers(rows) {
+    const list = settings.customers || [];
+    const existingNames = new Set(list.map((c) => c.name.trim().toLowerCase()));
+    const additions = [];
+    rows.forEach((r) => {
+      const name = (r.name || "").trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (existingNames.has(key)) return;
+      existingNames.add(key);
+      additions.push({ id: uid(), name, phone: (r.phone || "").trim(), alamat: (r.alamat || "").trim() });
     });
+    if (additions.length === 0) return;
+    const next = { ...settings, customers: [...list, ...additions] };
+    await persist({ settings: next });
   }
   function uploadTandaTerimaPhoto(claimIds, dataUrl) {
     persist({ claims: claims.map((c) => (claimIds.includes(c.id) ? { ...c, fotoTandaTerimaCustomer: dataUrl } : c)) });
@@ -5225,6 +5215,7 @@ function KasServiceTab({ claims, invoices, setoranList, role, isDesktopLayout, o
 function ImportPasteModal({ title, description, columns, sampleRow, onClose, onImport }) {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   function parseRows() {
     return text
@@ -5243,21 +5234,29 @@ function ImportPasteModal({ title, description, columns, sampleRow, onClose, onI
   const validRows = preview.filter((r) => columns.every((c) => !c.required || r[c.key]));
   const invalidCount = preview.length - validRows.length;
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (validRows.length === 0) { setError("Belum ada baris valid buat diimport."); return; }
-    onImport(validRows);
-    onClose();
+    setSubmitting(true);
+    setError("");
+    try {
+      await onImport(validRows);
+      onClose();
+    } catch (e) {
+      setError(`Gagal menyimpan ke server: ${e?.message || "coba lagi."} Data belum tersimpan, pop-up ini sengaja tidak ditutup — cek koneksi lalu coba lagi.`);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={submitting ? undefined : onClose}>
       <div className="bg-white rounded-3xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
           <div>
             <p className="font-semibold text-slate-800">{title}</p>
             <p className="text-xs text-slate-400 mt-0.5">{description}</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+          <button onClick={onClose} disabled={submitting} className="text-slate-400 hover:text-slate-700 disabled:opacity-30"><X size={18} /></button>
         </div>
         <div className="p-5 overflow-y-auto space-y-3">
           <div className="bg-slate-50 rounded-xl p-3 text-xs text-slate-500">
@@ -5275,22 +5274,24 @@ function ImportPasteModal({ title, description, columns, sampleRow, onClose, onI
             value={text}
             onChange={(e) => { setText(e.target.value); setError(""); }}
             rows={8}
+            disabled={submitting}
             placeholder="Paste data di sini, satu baris per data..."
-            className="w-full rounded-xl border border-slate-200 p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            className="w-full rounded-xl border border-slate-200 p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-slate-50"
           />
-          {text.trim() && (
+          {text.trim() && !error && (
             <p className="text-xs text-slate-500">
               {validRows.length} baris siap diimport
               {invalidCount > 0 ? `, ${invalidCount} baris dilewati (data belum lengkap)` : ""}.
               Data yang namanya/SKU-nya sudah ada otomatis dilewati (gak dobel).
             </p>
           )}
-          {error && <p className="text-xs text-rose-500">{error}</p>}
+          {error && <p className="text-xs text-rose-600 font-medium">{error}</p>}
         </div>
         <div className="flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
-          <button onClick={onClose} className="px-4 py-2 rounded-full text-sm font-medium text-slate-500 hover:bg-slate-100">Batal</button>
-          <button onClick={handleSubmit} className="px-4 py-2 rounded-full text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700">
-            Import{validRows.length > 0 ? ` (${validRows.length})` : ""}
+          <button onClick={onClose} disabled={submitting} className="px-4 py-2 rounded-full text-sm font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-30">Batal</button>
+          <button onClick={handleSubmit} disabled={submitting || validRows.length === 0} className="px-4 py-2 rounded-full text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1.5">
+            {submitting && <Loader2 size={14} className="animate-spin" />}
+            {submitting ? `Menyimpan ${validRows.length} data...` : `Import${validRows.length > 0 ? ` (${validRows.length})` : ""}`}
           </button>
         </div>
       </div>
