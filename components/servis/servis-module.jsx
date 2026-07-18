@@ -134,6 +134,7 @@ const DEFAULT_PRODUCTS = [
 const DEFAULT_SETTINGS = {
   brands: ["Hikvision", "Ezviz", "Hilook", "Dahua"],
   suppliers: ["Ezviz Service Center", "Hikvision SC Jakarta", "Dahua SC Jakarta"],
+  supplierDetails: [],
   spareParts: DEFAULT_SPAREPARTS,
   products: DEFAULT_PRODUCTS,
   customers: [],
@@ -773,7 +774,7 @@ export default function ServisModule({ currentUserId, currentUserRole, currentUs
     if (!isSuperAdmin) return;
     fetch("/api/branches")
       .then((res) => res.json())
-      .then((body) => setBranches(body.branches ?? []))
+      .then((body) => setBranches((body.branches ?? []).filter((b) => b.active !== false)))
       .catch(() => {});
   }, [isSuperAdmin]);
 
@@ -1056,9 +1057,65 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
   }
 
   function addSettingValue(type, value) {
+    const trimmed = (value || "").trim();
+    if (!trimmed) return;
+    if (type === "suppliers") {
+      addSupplier({ name: trimmed, phone: "", address: "" });
+      return;
+    }
     setSettings((prev) => {
-      const list = prev[type].includes(value) ? prev[type] : [...prev[type], value];
+      const list = prev[type].includes(trimmed) ? prev[type] : [...prev[type], trimmed];
       const next = { ...prev, [type]: list };
+      persist({ settings: next });
+      return next;
+    });
+  }
+
+  function addSupplier(data) {
+    const name = (data.name || "").trim();
+    if (!name) return;
+    setSettings((prev) => {
+      const list = prev.supplierDetails || [];
+      if (list.some((s) => s.name.trim().toLowerCase() === name.toLowerCase())) return prev;
+      const nextDetails = [...list, { id: uid(), name, phone: (data.phone || "").trim(), address: (data.address || "").trim() }];
+      const next = { ...prev, supplierDetails: nextDetails, suppliers: nextDetails.map((s) => s.name) };
+      persist({ settings: next });
+      return next;
+    });
+  }
+  function updateSupplier(id, patch) {
+    setSettings((prev) => {
+      const nextDetails = (prev.supplierDetails || []).map((s) => (s.id === id ? { ...s, ...patch } : s));
+      const next = { ...prev, supplierDetails: nextDetails, suppliers: nextDetails.map((s) => s.name) };
+      persist({ settings: next });
+      return next;
+    });
+  }
+  function removeSupplier(id) {
+    if (role !== "pusat") return;
+    setSettings((prev) => {
+      const nextDetails = (prev.supplierDetails || []).filter((s) => s.id !== id);
+      const next = { ...prev, supplierDetails: nextDetails, suppliers: nextDetails.map((s) => s.name) };
+      persist({ settings: next });
+      return next;
+    });
+  }
+  function importSuppliers(rows) {
+    setSettings((prev) => {
+      const list = prev.supplierDetails || [];
+      const existingNames = new Set(list.map((s) => s.name.trim().toLowerCase()));
+      const additions = [];
+      rows.forEach((r) => {
+        const name = (r.name || "").trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (existingNames.has(key)) return;
+        existingNames.add(key);
+        additions.push({ id: uid(), name, phone: (r.phone || "").trim(), address: (r.address || "").trim() });
+      });
+      if (additions.length === 0) return prev;
+      const nextDetails = [...list, ...additions];
+      const next = { ...prev, supplierDetails: nextDetails, suppliers: nextDetails.map((s) => s.name) };
       persist({ settings: next });
       return next;
     });
@@ -1790,7 +1847,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
           />
         )}
         {tab === "settings" && (
-          <DataMasterTab settings={settings} onSave={(s) => persist({ settings: s })} claims={claims} batches={batches} role={role} onAddProduct={addProduct} onUpdateProduct={updateProduct} onRemoveProduct={removeProduct} onAddCustomer={addCustomer} onUpdateCustomer={updateCustomer} onRemoveCustomer={removeCustomer} onImportProducts={importProducts} onImportCustomers={importCustomers} />
+          <DataMasterTab settings={settings} onSave={(s) => persist({ settings: s })} claims={claims} batches={batches} role={role} onAddProduct={addProduct} onUpdateProduct={updateProduct} onRemoveProduct={removeProduct} onAddCustomer={addCustomer} onUpdateCustomer={updateCustomer} onRemoveCustomer={removeCustomer} onImportProducts={importProducts} onImportCustomers={importCustomers} onAddSupplier={addSupplier} onUpdateSupplier={updateSupplier} onRemoveSupplier={removeSupplier} onImportSuppliers={importSuppliers} />
         )}
         </div>
 
@@ -5241,29 +5298,21 @@ function ImportPasteModal({ title, description, columns, sampleRow, onClose, onI
   );
 }
 
-function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, onUpdateProduct, onRemoveProduct, onAddCustomer, onUpdateCustomer, onRemoveCustomer, onImportProducts, onImportCustomers }) {
+function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, onUpdateProduct, onRemoveProduct, onAddCustomer, onUpdateCustomer, onRemoveCustomer, onImportProducts, onImportCustomers, onAddSupplier, onUpdateSupplier, onRemoveSupplier, onImportSuppliers }) {
   const [newBrand, setNewBrand] = useState("");
-  const [newSupplier, setNewSupplier] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
   const canManage = role === "pusat";
 
   const addBrand = () => { if (newBrand.trim()) { onSave({ ...settings, brands: [...settings.brands, newBrand.trim()] }); setNewBrand(""); } };
-  const addSupplier = () => { if (newSupplier.trim()) { onSave({ ...settings, suppliers: [...settings.suppliers, newSupplier.trim()] }); setNewSupplier(""); } };
 
   function requestRemoveBrand(b) {
     if (!canManage) return;
     const count = claims.filter((c) => c.brand === b).length;
     setConfirmDelete({ type: "brand", name: b, blocked: count > 0, count });
   }
-  function requestRemoveSupplier(s) {
-    if (!canManage) return;
-    const count = claims.filter((c) => c.supplier === s).length + batches.filter((bt) => bt.supplier === s).length;
-    setConfirmDelete({ type: "supplier", name: s, blocked: count > 0, count });
-  }
   function confirmRemove() {
     if (!canManage || !confirmDelete || confirmDelete.blocked) return;
-    if (confirmDelete.type === "brand") onSave({ ...settings, brands: settings.brands.filter((x) => x !== confirmDelete.name) });
-    else onSave({ ...settings, suppliers: settings.suppliers.filter((x) => x !== confirmDelete.name) });
+    onSave({ ...settings, brands: settings.brands.filter((x) => x !== confirmDelete.name) });
     setConfirmDelete(null);
   }
 
@@ -5312,46 +5361,140 @@ function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, 
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl border border-slate-200 p-5 mb-4">
-        <div className="text-sm font-semibold text-slate-700 mb-3">Supplier</div>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {settings.suppliers.map((s) => (
-            <span key={s} className="flex items-center gap-1 bg-slate-100 rounded-full pl-3 pr-1 py-1 text-sm">
-              {s}
-              {canManage && (
-                <button onClick={() => requestRemoveSupplier(s)} className="text-slate-400 hover:text-red-500"><X size={12} /></button>
-              )}
-            </span>
-          ))}
-          {settings.suppliers.length === 0 && <span className="text-sm text-slate-400">Belum ada supplier.</span>}
-        </div>
-        {confirmDelete?.type === "supplier" && (
-          <div className={`mb-3 p-3 rounded-xl border text-sm space-y-2 ${confirmDelete.blocked ? "bg-red-50 border-red-100 text-red-800" : "bg-amber-50 border-amber-100 text-amber-900"}`}>
-            {confirmDelete.blocked ? (
-              <p>"{confirmDelete.name}" masih dipakai di {confirmDelete.count} data (claim/pengiriman) — tidak bisa dihapus.</p>
-            ) : (
-              <>
-                <p>Hapus supplier "{confirmDelete.name}"?</p>
-                <div className="flex gap-2">
-                  <button onClick={() => setConfirmDelete(null)} className="flex-1 px-3 py-1.5 rounded-full border border-slate-300 text-sm text-slate-600 bg-white">Batal</button>
-                  <button onClick={confirmRemove} className="flex-1 px-3 py-1.5 rounded-full bg-red-600 text-white text-sm font-medium">Ya, Hapus</button>
-                </div>
-              </>
-            )}
-            {confirmDelete.blocked && (
-              <button onClick={() => setConfirmDelete(null)} className="text-xs text-red-700 underline">Tutup</button>
-            )}
-          </div>
-        )}
-        <div className="flex gap-2">
-          <input className={inputCls} value={newSupplier} onChange={(e) => setNewSupplier(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addSupplier()} placeholder="Tambah supplier..." />
-          <button onClick={addSupplier} className={`px-4 text-sm ${btnPrimaryCls}`}>Tambah</button>
-        </div>
-      </div>
-
+      <SupplierSettingsPanel settings={settings} claims={claims} batches={batches} role={role} onAddSupplier={onAddSupplier} onUpdateSupplier={onUpdateSupplier} onRemoveSupplier={onRemoveSupplier} onImportSuppliers={onImportSuppliers} />
       <ProdukSettingsPanel settings={settings} claims={claims} role={role} onAddProduct={onAddProduct} onUpdateProduct={onUpdateProduct} onRemoveProduct={onRemoveProduct} onImportProducts={onImportProducts} />
       <CustomerSettingsPanel settings={settings} claims={claims} role={role} onAddCustomer={onAddCustomer} onUpdateCustomer={onUpdateCustomer} onRemoveCustomer={onRemoveCustomer} onImportCustomers={onImportCustomers} />
     </div>
+  );
+}
+
+function SupplierSettingsPanel({ settings, claims, batches, role, onAddSupplier, onUpdateSupplier, onRemoveSupplier, onImportSuppliers }) {
+  const [query, setQuery] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [editSupplier, setEditSupplier] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [showImport, setShowImport] = useState(false);
+  const canManage = role === "pusat";
+  const list = settings.supplierDetails || [];
+  const filtered = sortByName(query.trim()
+    ? list.filter((s) => s.name.toLowerCase().includes(query.trim().toLowerCase()) || (s.phone || "").includes(query.trim()))
+    : list);
+
+  function requestRemove(s) {
+    if (!canManage) return;
+    const count = claims.filter((c) => c.supplier === s.name).length + batches.filter((bt) => bt.supplier === s.name).length;
+    setConfirmDelete({ id: s.id, name: s.name, blocked: count > 0, count });
+  }
+  function confirmRemove() {
+    if (!canManage || !confirmDelete || confirmDelete.blocked) return;
+    onRemoveSupplier(confirmDelete.id);
+    setConfirmDelete(null);
+  }
+
+  return (
+    <div className="bg-white rounded-3xl border border-slate-200 p-5 mb-4">
+      <div className="flex items-center justify-between mb-1 gap-2">
+        <div className="text-sm font-semibold text-slate-700">Supplier</div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-slate-400">{list.length} supplier</span>
+          <button onClick={() => setShowImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Upload size={13} /> Import
+          </button>
+          <button onClick={() => setAddOpen(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${btnPrimaryCls}`}>
+            <Plus size={13} /> Tambah Supplier
+          </button>
+        </div>
+      </div>
+      <p className="text-xs text-slate-500 mb-3">Nama, No Telepon, dan Alamat supplier — dipakai di "Proses ke Supplier" &amp; laporan Data Master.</p>
+
+      {list.length > 5 && (
+        <div className="relative mb-2">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
+          <input className={inputCls + " pl-8"} placeholder="Cari nama atau no telepon..." value={query} onChange={(e) => setQuery(e.target.value)} />
+        </div>
+      )}
+
+      <div className="space-y-2 mb-1">
+        {filtered.map((s) => (
+          <div key={s.id} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-700 truncate">{s.name}</p>
+              <p className="text-xs text-slate-400 truncate">{s.phone || "-"}{s.address ? ` · ${s.address}` : ""}</p>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button onClick={() => setEditSupplier(s)} className="text-slate-400 hover:text-indigo-600 p-1"><Pencil size={13} /></button>
+              {canManage && (
+                <button onClick={() => requestRemove(s)} className="text-slate-400 hover:text-red-500 p-1"><X size={14} /></button>
+              )}
+            </div>
+          </div>
+        ))}
+        {filtered.length === 0 && <p className="text-sm text-slate-400 py-2">Belum ada supplier.</p>}
+      </div>
+
+      {(addOpen || editSupplier) && (
+        <SupplierFormModal
+          title={editSupplier ? "Edit Supplier" : "Tambah Supplier"}
+          initial={editSupplier || {}}
+          onClose={() => { setAddOpen(false); setEditSupplier(null); }}
+          onSave={(v) => {
+            if (editSupplier) onUpdateSupplier(editSupplier.id, v);
+            else onAddSupplier(v);
+            setAddOpen(false); setEditSupplier(null);
+          }}
+        />
+      )}
+      {confirmDelete && (
+        <Modal title="Hapus Supplier Ini?" onClose={() => setConfirmDelete(null)}>
+          {confirmDelete.blocked ? (
+            <>
+              <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-800 mb-4">
+                "{confirmDelete.name}" masih dipakai di {confirmDelete.count} data (claim/pengiriman) — tidak bisa dihapus.
+              </div>
+              <button onClick={() => setConfirmDelete(null)} className={`w-full py-2.5 text-sm ${btnPrimaryCls}`}>Tutup</button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-slate-600 mb-4">Hapus supplier "{confirmDelete.name}"? Tindakan ini tidak bisa dibatalkan.</p>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmDelete(null)} className={`flex-1 px-4 py-2.5 text-sm ${btnSecondaryCls}`}>Batal</button>
+                <button onClick={confirmRemove} className="flex-1 px-4 py-2.5 rounded-full text-sm font-medium bg-red-600 text-white">Ya, Hapus</button>
+              </div>
+            </>
+          )}
+        </Modal>
+      )}
+      {showImport && (
+        <ImportPasteModal
+          title="Import Supplier"
+          description="Isi daftar supplier sekaligus banyak"
+          columns={[{ key: "name", label: "Nama", required: true }, { key: "phone", label: "No Telepon" }, { key: "address", label: "Alamat" }]}
+          sampleRow="DAHUA SERVICE CENTER, 0858-8175-7061, Jakarta"
+          onClose={() => setShowImport(false)}
+          onImport={onImportSuppliers}
+        />
+      )}
+    </div>
+  );
+}
+
+function SupplierFormModal({ title, initial, onClose, onSave }) {
+  const [name, setName] = useState(initial.name || "");
+  const [phone, setPhone] = useState(initial.phone || "");
+  const [address, setAddress] = useState(initial.address || "");
+  const canSave = name.trim();
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="space-y-3 mb-2">
+        <Field label="Nama Supplier"><input autoFocus className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="No Telepon"><input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
+        <Field label="Alamat"><input className={inputCls} value={address} onChange={(e) => setAddress(e.target.value)} /></Field>
+      </div>
+      <div className="flex gap-2 mt-3">
+        <button onClick={onClose} className={`flex-1 px-4 py-2.5 text-sm ${btnSecondaryCls}`}>Batal</button>
+        <button disabled={!canSave} onClick={() => onSave({ name: name.trim(), phone: phone.trim(), address: address.trim() })} className={`flex-1 px-4 py-2.5 text-sm ${btnPrimaryCls}`}>Simpan</button>
+      </div>
+    </Modal>
   );
 }
 
