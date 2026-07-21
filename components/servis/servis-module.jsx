@@ -435,6 +435,19 @@ function SearchableCombo({ value, onChange, options, onAddOption, placeholder, f
   );
 }
 
+function highlightMatch(text, query) {
+  if (!query) return text;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-amber-200 text-slate-900 rounded-sm px-0.5">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
 function ProductCombo({ value, skuValue, onChange, products, onAddProduct, placeholder }) {
   const [query, setQuery] = useState(value || "");
   const [open, setOpen] = useState(false);
@@ -444,10 +457,24 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const base = q
-      ? (products || []).filter((p) => p.name.toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q))
-      : (products || []);
-    return sortByName(base).slice(0, 50);
+    if (!q) return sortByName(products || []).slice(0, 50);
+    // Urutan relevansi: nama diawali ketikan > SKU diawali ketikan >
+    // nama mengandung ketikan > SKU mengandung ketikan. Jadi hasil paling
+    // mungkin dicari selalu muncul duluan, gak ketimpa produk lain yang
+    // kebetulan juga cocok tapi kurang relevan.
+    const scored = (products || [])
+      .filter((p) => p.name.toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q))
+      .map((p) => {
+        const nameL = p.name.toLowerCase();
+        const skuL = (p.sku || "").toLowerCase();
+        let score = 3;
+        if (nameL.startsWith(q)) score = 0;
+        else if (skuL.startsWith(q)) score = 1;
+        else if (nameL.includes(q)) score = 2;
+        return { p, score };
+      })
+      .sort((a, b) => a.score - b.score || a.p.name.localeCompare(b.p.name));
+    return scored.map((s) => s.p).slice(0, 50);
   }, [products, query]);
 
   const exactMatch = (products || []).some((p) => p.name.toLowerCase() === query.trim().toLowerCase());
@@ -473,8 +500,20 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
       <input
         className={inputCls}
         value={query}
-        placeholder={placeholder || "Cari nama atau SKU..."}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        placeholder={placeholder || "Ketik nama atau SKU, mis. \"hik\" untuk semua produk Hikvision..."}
+        onChange={(e) => {
+          const v = e.target.value;
+          setQuery(v);
+          setOpen(true);
+          const q = v.trim().toLowerCase();
+          if (q.length >= 3) {
+            const matches = (products || []).filter(
+              (p) => p.name.toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q)
+            );
+            // Cocok ke cuma 1 produk -> langsung auto-isi (gak perlu klik pilih lagi).
+            if (matches.length === 1) pick(matches[0]);
+          }
+        }}
         onFocus={() => setOpen(true)}
       />
       {value && skuValue && (
@@ -484,18 +523,25 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-40 max-h-72 overflow-y-auto">
+            {query.trim() && (
+              <div className="sticky top-0 px-3 py-1.5 text-[11px] text-slate-400 bg-slate-50 border-b border-slate-100">
+                {filtered.length === 0
+                  ? "Tidak ada produk yang cocok"
+                  : `${filtered.length}${filtered.length >= 50 ? "+" : ""} produk cocok — klik buat pilih`}
+              </div>
+            )}
             {filtered.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => pick(p)}
-                className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-slate-50"
+                className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-indigo-50"
               >
-                <span className="truncate">{p.name}</span>
-                <span className="shrink-0 text-[10px] font-mono text-slate-400">{p.sku}</span>
+                <span className="truncate">{highlightMatch(p.name, query.trim())}</span>
+                <span className="shrink-0 text-[10px] font-mono text-slate-400">{highlightMatch(p.sku || "", query.trim())}</span>
               </button>
             ))}
-            {filtered.length === 0 && <div className="px-3 py-2 text-sm text-slate-400">Tidak ditemukan.</div>}
+            {filtered.length === 0 && !query.trim() && <div className="px-3 py-2 text-sm text-slate-400">Belum ada produk.</div>}
             {query.trim() && !exactMatch && onAddProduct && (
               <div className="border-t border-slate-100 p-2 space-y-1.5 bg-slate-50">
                 <div className="text-xs text-slate-500 px-1">Produk baru: <span className="font-medium text-slate-700">"{query.trim()}"</span> — SKU wajib diisi</div>
