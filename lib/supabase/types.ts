@@ -15,7 +15,6 @@ export type Profile = {
   role: Role
   lms_access_level: LmsAccessLevel
   lms_job_type: LmsJobType
-  branch_id: string | null
   active: boolean
   created_at: string
   updated_at: string
@@ -31,9 +30,7 @@ export type ProfileInsert = {
   active?: boolean
 }
 
-export type ProfileUpdate = Partial<
-  Pick<Profile, 'name' | 'email' | 'role' | 'active' | 'branch_id'>
->
+export type ProfileUpdate = Partial<Pick<Profile, 'name' | 'email' | 'role' | 'active'>>
 
 export type Database = {
   public: {

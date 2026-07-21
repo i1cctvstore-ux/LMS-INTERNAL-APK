@@ -3,11 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 // Halaman yang boleh diakses TANPA login.
 // "/" boleh diakses karena app/page.tsx sendiri yang menampilkan LoginScreen
-// kalau belum ada sesi. "/track" boleh diakses publik karena itu halaman
-// tracking progres buat CUSTOMER (bukan staf) — keamanannya dari kombinasi
-// code+token acak di URL, bukan dari sesi login (lihat app/api/track/route.ts).
-// Halaman lain (mis. /stok, /servis nanti) wajib login.
-const PUBLIC_PATHS = ['/', '/track']
+// kalau belum ada sesi. Halaman lain (mis. /stok, /servis nanti) wajib login.
+const PUBLIC_PATHS = ['/']
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })

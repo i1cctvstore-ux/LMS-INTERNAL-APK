@@ -1,0 +1,17 @@
+{
+  "name": "i1 CCTV — Sistem Internal Toko",
+  "short_name": "i1 CCTV",
+  "description": "Aplikasi internal toko i1 CCTV untuk mengelola stok, servis, dan pengguna.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

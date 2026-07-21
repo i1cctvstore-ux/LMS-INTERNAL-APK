@@ -1,10 +1,9 @@
 'use client'
 
-import { useState } from 'react'
-import { ShieldCheck, LogOut, X, ChevronDown } from 'lucide-react'
+import { ShieldCheck, LogOut, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { getVisibleNavItems, NAV_GROUPS, type PageKey } from '@/lib/nav-config'
+import { getVisibleNavItems, type PageKey } from '@/lib/nav-config'
 import type { Role } from '@/lib/supabase/types'
 
 type SidebarNavProps = {
@@ -16,23 +15,6 @@ type SidebarNavProps = {
 
 function SidebarContent({ activePage, onNavigate, onLogout, userRole }: SidebarNavProps) {
   const visibleItems = getVisibleNavItems(userRole)
-  const visibleKeys = new Set(visibleItems.map((i) => i.key))
-  // Grup yang dibuka manual lewat klik. Grup yang sedang berisi activePage
-  // selalu ikut tampil terbuka juga, walau belum pernah diklik — supaya
-  // waktu pertama masuk ke salah satu sub-menunya, "folder"-nya otomatis
-  // kebuka, bukan collapsed nutupin halaman yang lagi aktif.
-  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
-
-  function toggleGroup(key: string) {
-    setOpenGroups((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  const renderedGroupKeys = new Set<string>()
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -46,74 +28,8 @@ function SidebarContent({ activePage, onNavigate, onLogout, userRole }: SidebarN
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4" aria-label="Menu utama">
+      <nav className="flex-1 space-y-1 px-3 py-4" aria-label="Menu utama">
         {visibleItems.map((item) => {
-          const group = NAV_GROUPS.find((g) => g.itemKeys.includes(item.key))
-
-          if (group) {
-            // Item ini bagian dari grup (mis. salah satu dari 5 menu
-            // Servis) — cuma dirender SEKALI di posisi anggota pertamanya,
-            // sebagai tombol folder yang bisa dibuka/tutup.
-            if (renderedGroupKeys.has(group.key)) return null
-            renderedGroupKeys.add(group.key)
-
-            const isActiveInside = group.itemKeys.includes(activePage)
-            const isOpen = isActiveInside || openGroups.has(group.key)
-            const GroupIcon = group.icon
-
-            return (
-              <div key={group.key}>
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(group.key)}
-                  aria-expanded={isOpen}
-                  className={cn(
-                    'flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition-colors',
-                    'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                  )}
-                >
-                  <GroupIcon className="size-5 shrink-0" aria-hidden="true" />
-                  <span className="flex-1">{group.label}</span>
-                  <ChevronDown
-                    className={cn('size-4 shrink-0 transition-transform', isOpen && 'rotate-180')}
-                    aria-hidden="true"
-                  />
-                </button>
-
-                {isOpen && (
-                  <div className="ml-4 mt-1 space-y-1 border-l border-sidebar-border pl-3">
-                    {group.itemKeys
-                      .filter((key) => visibleKeys.has(key))
-                      .map((key) => {
-                        const child = visibleItems.find((i) => i.key === key)
-                        if (!child) return null
-                        const ChildIcon = child.icon
-                        const isActive = child.key === activePage
-                        return (
-                          <button
-                            key={child.key}
-                            type="button"
-                            onClick={() => onNavigate(child.key)}
-                            aria-current={isActive ? 'page' : undefined}
-                            className={cn(
-                              'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors',
-                              isActive
-                                ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                                : 'text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                            )}
-                          >
-                            <ChildIcon className="size-4 shrink-0" aria-hidden="true" />
-                            <span>{child.label}</span>
-                          </button>
-                        )
-                      })}
-                  </div>
-                )}
-              </div>
-            )
-          }
-
-          // Item biasa (bukan bagian dari grup mana pun).
           const Icon = item.icon
           const isActive = item.key === activePage
           return (
