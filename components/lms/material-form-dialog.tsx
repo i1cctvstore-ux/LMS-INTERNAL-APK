@@ -139,25 +139,17 @@ export function MaterialFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          mode === 'add' ? (
-            <Button className="w-full justify-center gap-2 sm:w-auto" />
-          ) : (
-            <Button variant="outline" size="sm" className="gap-2" />
-          )
-        }
-      >
+      <DialogTrigger asChild>
         {mode === 'add' ? (
-          <>
+          <Button className="w-full justify-center gap-2 sm:w-auto">
             <Plus className="size-4" aria-hidden="true" />
             Tambah Materi Baru
-          </>
+          </Button>
         ) : (
-          <>
+          <Button variant="outline" size="sm" className="gap-2">
             <Pencil className="size-3.5" aria-hidden="true" />
             Edit
-          </>
+          </Button>
         )}
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">

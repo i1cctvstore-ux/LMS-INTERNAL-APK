@@ -10,12 +10,16 @@ import {
   Users,
   FolderKanban,
   Building2,
+  BookOpen,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/types'
 
 export type PageKey =
   | 'dashboard'
+  | 'lms-materi'
+  | 'lms-verifikasi'
   | 'proyek'
   | 'stok'
   | 'servis-claim'
@@ -47,6 +51,22 @@ export const NAV_ITEMS: NavItem[] = [
     description: 'Ringkasan operasional toko',
     icon: LayoutDashboard,
     roles: NON_GUDANG_ROLES,
+  },
+  // ---------- LMS (Materi & Verifikasi) ----------
+  {
+    key: 'lms-materi',
+    label: 'Materi',
+    description: 'Materi pelatihan karyawan & pengajuan verifikasi',
+    icon: BookOpen,
+  },
+  {
+    key: 'lms-verifikasi',
+    label: 'Verifikasi',
+    description: 'Tinjau & approve pengajuan verifikasi materi karyawan',
+    icon: ShieldCheck,
+    // Halamannya sendiri juga membatasi lewat canVerify(role), menu
+    // disembunyikan juga di sini biar gak bikin bingung role lain.
+    roles: ['super_admin'],
   },
   {
     key: 'proyek',

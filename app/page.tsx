@@ -8,6 +8,8 @@ import { ProjectsPage } from '@/components/projects/projects-page'
 import { BranchManagement } from '@/components/branches/branch-management'
 import { EmployeeManagement } from '@/components/employees/employee-management'
 import ServisModule from '@/components/servis/servis-module'
+import { LmsMaterials } from '@/components/lms/lms-materials'
+import { LmsVerifikasi } from '@/components/lms/lms-verifikasi'
 import { ModulePlaceholder } from '@/components/module-placeholder'
 import { NAV_ITEMS, getVisibleNavItems, getDefaultPage, type PageKey } from '@/lib/nav-config'
 import { createClient } from '@/lib/supabase/client'
@@ -85,6 +87,15 @@ export default function Page() {
     switch (effectivePage) {
       case 'dashboard':
         return <DashboardPage userName={profile!.name} />
+      case 'lms-materi':
+        return (
+          <LmsMaterials
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+          />
+        )
+      case 'lms-verifikasi':
+        return <LmsVerifikasi />
       case 'proyek':
         return <ProjectsPage />
       case 'cabang':

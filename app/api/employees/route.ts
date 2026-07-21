@@ -1,9 +1,12 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAdmin } from '@/lib/supabase/require-admin'
-import { ROLES } from '@/lib/employees'
+import { requireBranchManager } from '@/lib/supabase/require-admin'
+import { ROLES, STAFF_ROLES } from '@/lib/employees'
 
-// GET /api/employees — daftar semua karyawan (siapa saja yang sudah login boleh lihat).
+// GET /api/employees — daftar semua karyawan (siapa saja yang sudah login boleh
+// panggil endpoint ini; hasilnya otomatis terfilter per cabang lewat RLS
+// "profiles_select_by_branch" untuk role selain super_admin, karena query di
+// bawah ini pakai client biasa/authenticated, bukan service role).
 export async function GET() {
   const supabase = await createClient()
 
@@ -27,11 +30,15 @@ export async function GET() {
   return Response.json({ employees: data })
 }
 
-// POST /api/employees — tambah karyawan baru (khusus Admin).
-// Body: { name, email, role, password }
+// POST /api/employees — tambah karyawan baru (Super Admin ATAU Admin cabang).
+// Body: { name, email, role, password, branch_id? }
 // Membuat akun di Supabase Auth SEKALIGUS baris profil, dalam satu request.
+//
+// Admin cabang: cuma boleh bikin akun dengan role staff (kasir/gudang/teknisi),
+// dan branch_id SELALU dipaksa ke cabang Admin itu sendiri — apapun branch_id
+// yang (sengaja atau tidak) dikirim dari client, diabaikan.
 export async function POST(request: Request) {
-  const check = await requireAdmin()
+  const check = await requireBranchManager()
   if (check.error) return check.error
 
   const body = await request.json().catch(() => null)
@@ -39,6 +46,8 @@ export async function POST(request: Request) {
   const email = body?.email?.trim()
   const role = body?.role
   const password = body?.password
+
+  const branchId = check.isSuperAdmin ? body?.branch_id || null : check.branchId
 
   if (!name || !email || !role || !password) {
     return Response.json(
@@ -49,6 +58,13 @@ export async function POST(request: Request) {
 
   if (!ROLES.includes(role)) {
     return Response.json({ message: 'Role tidak valid.' }, { status: 400 })
+  }
+
+  if (!check.isSuperAdmin && !STAFF_ROLES.includes(role)) {
+    return Response.json(
+      { message: 'Admin cabang cuma boleh menambah karyawan dengan role Kasir, Gudang, atau Teknisi.' },
+      { status: 403 },
+    )
   }
 
   const admin = createAdminClient()
@@ -70,7 +86,7 @@ export async function POST(request: Request) {
 
   const { data: profile, error: profileError } = await admin
     .from('profiles')
-    .insert({ id: created.user.id, name, email, role, active: true })
+    .insert({ id: created.user.id, name, email, role, branch_id: branchId, active: true })
     .select()
     .single()
 

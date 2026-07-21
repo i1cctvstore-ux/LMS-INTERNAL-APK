@@ -180,13 +180,11 @@ export function MaterialDetailSheet({
                     onSaved={onMaterialUpdated}
                   />
                   <AlertDialog>
-                    <AlertDialogTrigger
-                      render={
-                        <Button variant="outline" size="sm" className="gap-2 text-destructive" />
-                      }
-                    >
-                      <Trash2 className="size-3.5" aria-hidden="true" />
-                      Hapus
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-2 text-destructive">
+                        <Trash2 className="size-3.5" aria-hidden="true" />
+                        Hapus
+                      </Button>
                     </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
