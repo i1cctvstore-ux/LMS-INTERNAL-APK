@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react'
 import { LoginScreen } from '@/components/login-screen'
 import { AppShell } from '@/components/app-shell'
 import { DashboardPage } from '@/components/dashboard/dashboard-page'
+import { ProjectsPage } from '@/components/projects/projects-page'
+import { BranchManagement } from '@/components/branches/branch-management'
 import { EmployeeManagement } from '@/components/employees/employee-management'
-import { LmsMaterials } from '@/components/lms/lms-materials'
-import { LmsVerifikasi } from '@/components/lms/lms-verifikasi'
+import ServisModule from '@/components/servis/servis-module'
 import { ModulePlaceholder } from '@/components/module-placeholder'
-import { NAV_ITEMS, getVisibleNavItems, type PageKey } from '@/lib/nav-config'
+import { NAV_ITEMS, getVisibleNavItems, getDefaultPage, type PageKey } from '@/lib/nav-config'
 import { createClient } from '@/lib/supabase/client'
 import type { Profile } from '@/lib/supabase/types'
 
@@ -72,25 +73,78 @@ export default function Page() {
   }
 
   // Jaga-jaga: kalau activePage somehow menunjuk ke halaman yang tidak boleh
-  // dilihat role ini (mis. 'user-role' oleh selain super_admin), render
-  // dashboard sebagai gantinya. Normalnya tidak akan kejadian karena menu
-  // yang tidak boleh dilihat memang tidak dirender di Sidebar.
+  // dilihat role ini (mis. 'dashboard'/'proyek' oleh gudang, atau 'user-role'
+  // oleh selain super_admin/admin), jatuhkan ke halaman default yang memang
+  // boleh diakses role itu. Normalnya tidak akan kejadian karena menu yang
+  // tidak boleh dilihat memang tidak dirender di Sidebar.
   const visibleKeys = new Set(getVisibleNavItems(profile.role).map((i) => i.key))
-  const effectivePage: PageKey = visibleKeys.has(activePage) ? activePage : 'dashboard'
+  const effectivePage: PageKey = visibleKeys.has(activePage) ? activePage : getDefaultPage(profile.role)
   const activeItem = NAV_ITEMS.find((i) => i.key === effectivePage)
 
   function renderPage() {
     switch (effectivePage) {
       case 'dashboard':
         return <DashboardPage userName={profile!.name} />
+      case 'proyek':
+        return <ProjectsPage />
+      case 'cabang':
+        return <BranchManagement />
       case 'user-role':
-        return <EmployeeManagement currentUserRole={profile!.role} />
-      case 'lms-materi':
         return (
-          <LmsMaterials currentUserId={profile!.id} currentUserRole={profile!.role} />
+          <EmployeeManagement
+            currentUserRole={profile!.role}
+            currentUserId={profile!.id}
+            currentUserBranchId={profile!.branch_id}
+          />
         )
-      case 'lms-verifikasi':
-        return <LmsVerifikasi />
+      // Modul Servis: 5 menu sidebar terpisah, semua manggil komponen yang
+      // sama (ServisModule) tapi dikasih tau lagi di section mana lewat
+      // prop `section` — bukan tab internal lagi.
+      case 'servis-claim':
+        return (
+          <ServisModule
+            section="claims"
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'servis-supplier':
+        return (
+          <ServisModule
+            section="supplier"
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'servis-inventaris':
+        return (
+          <ServisModule
+            section="stok"
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'servis-kas':
+        return (
+          <ServisModule
+            section="kas"
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'servis-master':
+        return (
+          <ServisModule
+            section="settings"
+            currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
       default:
         return (
           activeItem && (
