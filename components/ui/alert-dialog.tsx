@@ -4,7 +4,7 @@ import * as React from "react"
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog"
 
 import { cn } from "@/lib/utils"
-import { buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 
 function AlertDialog({ ...props }: AlertDialogPrimitive.Root.Props) {
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />
@@ -17,9 +17,7 @@ function AlertDialogTrigger({ ...props }: AlertDialogPrimitive.Trigger.Props) {
 }
 
 function AlertDialogPortal({ ...props }: AlertDialogPrimitive.Portal.Props) {
-  return (
-    <AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />
-  )
+  return <AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />
 }
 
 function AlertDialogOverlay({
@@ -72,7 +70,7 @@ function AlertDialogFooter({ className, ...props }: React.ComponentProps<"div">)
     <div
       data-slot="alert-dialog-footer"
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -106,15 +104,17 @@ function AlertDialogDescription({
   )
 }
 
+// AlertDialogAction = tombol konfirmasi. Otomatis menutup dialog setelah
+// onClick dijalankan (lewat AlertDialogPrimitive.Close render prop), sama
+// seperti perilaku tombol "Ya, Hapus" dkk yang dipakai di modul LMS.
 function AlertDialogAction({
   className,
   ...props
-}: AlertDialogPrimitive.Close.Props) {
+}: React.ComponentProps<typeof Button>) {
   return (
     <AlertDialogPrimitive.Close
       data-slot="alert-dialog-action"
-      render={<button className={cn(buttonVariants(), className)} />}
-      {...props}
+      render={<Button className={className} {...props} />}
     />
   )
 }
@@ -122,14 +122,11 @@ function AlertDialogAction({
 function AlertDialogCancel({
   className,
   ...props
-}: AlertDialogPrimitive.Close.Props) {
+}: React.ComponentProps<typeof Button>) {
   return (
     <AlertDialogPrimitive.Close
       data-slot="alert-dialog-cancel"
-      render={
-        <button className={cn(buttonVariants({ variant: "outline" }), className)} />
-      }
-      {...props}
+      render={<Button variant="outline" className={className} {...props} />}
     />
   )
 }
