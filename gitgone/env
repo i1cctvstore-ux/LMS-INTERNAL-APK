@@ -1,1 +1,14 @@
+# =====================================================
+# i1 CCTV — Sistem Internal Toko
+# Salin file ini menjadi .env.local (untuk lokal) lalu isi nilainya.
+# Untuk Vercel: masukkan nilai yang sama di Project Settings → Environment Variables.
+# =====================================================
 
+# ---------- Supabase (Database & Auth) ----------
+# Ambil dari Supabase Dashboard → Project Settings → API
+NEXT_PUBLIC_SUPABASE_URL=https://thcnsestuujsfarqaxso.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoY25zZXN0dXVqc2ZhcnFheHNvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3NjgyNDEsImV4cCI6MjA5ODM0NDI0MX0.kpjFTpzFuDanzHUjRrqnNuoisL8fcsD1WfjOX3eRwZY
+# JANGAN pernah expose key ini ke browser / commit ke git.
+# Hanya dipakai di server (API routes & script seed).
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoY25zZXN0dXVqc2ZhcnFheHNvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4Mjc2ODI0MSwiZXhwIjoyMDk4MzQ0MjQxfQ.2v6_6GaKVoru88FnM1BSpFxcswoFnoP9a9hwwQMIM84
+# Hanya dipakai di server (API routes & script seed).
