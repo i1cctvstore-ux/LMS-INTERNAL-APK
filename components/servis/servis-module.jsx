@@ -444,9 +444,11 @@ function SearchableCombo({ value, onChange, options, onAddOption, placeholder, f
 function detectBrandFromSku(sku, brands) {
   const skuL = (sku || "").normalize("NFKC").toLowerCase();
   if (!skuL) return "";
-  console.log("[DBG] sku:", JSON.stringify(skuL), "| codes:", [...skuL].map((c) => c.charCodeAt(0)).join(","), "| brands:", JSON.stringify(brands));
+  const ruijieRaw = (brands || []).find((b) => b.toLowerCase().includes("ruijie"));
+  if (ruijieRaw) {
+    console.log("[DBG-ruijie] raw:", JSON.stringify(ruijieRaw), "| length:", ruijieRaw.length, "| codes:", [...ruijieRaw].map((c) => c.charCodeAt(0)).join(","));
+  }
   const match = (brands || []).find((b) => skuL.includes(b.trim().normalize("NFKC").toLowerCase()));
-  console.log("[DBG] match:", JSON.stringify(match));
   return match || "";
 }
 
