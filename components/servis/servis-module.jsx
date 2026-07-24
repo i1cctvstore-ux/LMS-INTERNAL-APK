@@ -1362,7 +1362,11 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
   }
 
   function addSparePart(part) {
-    persist({ settings: { ...settings, spareParts: [...(settings.spareParts || []), { id: uid(), ...part }] } });
+    const name = (part.name || "").trim();
+    if (!name) return;
+    const exists = (settings.spareParts || []).some((p) => p.name.trim().toLowerCase() === name.toLowerCase());
+    if (exists) return; // sudah ada (mungkin ditambahkan cabang lain) — jangan bikin duplikat
+    persist({ settings: { ...settings, spareParts: [...(settings.spareParts || []), { id: uid(), ...part, name }] } });
   }
   function updateSparePart(id, patch) {
     if (role !== "pusat") return;
