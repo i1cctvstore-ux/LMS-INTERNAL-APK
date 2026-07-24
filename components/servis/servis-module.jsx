@@ -435,6 +435,16 @@ function SearchableCombo({ value, onChange, options, onAddOption, placeholder, f
   );
 }
 
+// Tebak Brand dari nama produk yang dipilih, dicocokkan ke daftar Brand
+// yang udah ada (dipakai buat auto-isi Brand kalau user pilih Produk
+// duluan sebelum pilih Brand-nya).
+function detectBrandFromName(productName, brands) {
+  const nameL = (productName || "").toLowerCase();
+  if (!nameL) return "";
+  const match = (brands || []).find((b) => nameL.includes(b.trim().toLowerCase()));
+  return match || "";
+}
+
 function highlightMatch(text, query) {
   if (!query) return text;
   const idx = text.toLowerCase().indexOf(query.toLowerCase());
@@ -2665,7 +2675,15 @@ function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, isDuplica
               </Field>
               <Field label="Produk / Model">
                 <ProductCombo value={r.produk} skuValue={r.produkSku} products={products} brand={r.brand} placeholder="Cari nama produk..."
-                  onChange={(name, sku) => updateRow(r.rowId, { produk: name, produkSku: sku })} onAddProduct={onAddProduct} />
+                  onChange={(name, sku) => {
+                    const patch = { produk: name, produkSku: sku };
+                    // Kalau Brand belum dipilih, coba tebak dari nama produknya.
+                    if (!r.brand) {
+                      const guessed = detectBrandFromName(name, settings.brands);
+                      if (guessed) patch.brand = guessed;
+                    }
+                    updateRow(r.rowId, patch);
+                  }} onAddProduct={onAddProduct} />
               </Field>
               <Field label="SN Diterima">
                 <input className={inputCls} value={r.snDiterima} onChange={(e) => updateRow(r.rowId, { snDiterima: e.target.value })} />
@@ -3388,7 +3406,14 @@ function EditClaimModal({ claim, settings, batches, claims, invoices, role, onCl
         </Field>
         <Field label="Produk / Model">
           <ProductCombo value={f.produk} skuValue={f.produkSku} products={settings.products || []} brand={f.brand} placeholder="Cari nama produk..."
-            onChange={(name, sku) => setF({ ...f, produk: name, produkSku: sku })} onAddProduct={onAddProduct} />
+            onChange={(name, sku) => {
+              const patch = { produk: name, produkSku: sku };
+              if (!f.brand) {
+                const guessed = detectBrandFromName(name, settings.brands);
+                if (guessed) patch.brand = guessed;
+              }
+              setF({ ...f, ...patch });
+            }} onAddProduct={onAddProduct} />
         </Field>
         <Field label="SN Diterima">
           <input className={inputCls} value={f.snDiterima} onChange={(e) => setF({ ...f, snDiterima: e.target.value })} />
