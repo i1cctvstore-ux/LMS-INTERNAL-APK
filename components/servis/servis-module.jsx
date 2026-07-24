@@ -441,6 +441,10 @@ function SearchableCombo({ value, onChange, options, onAddOption, placeholder, f
 function detectBrandFromName(productName, brands) {
   const nameL = (productName || "").toLowerCase();
   if (!nameL) return "";
+  console.log("[DEBUG-detect] nameL:", JSON.stringify(nameL), "| typeof brands:", typeof brands, "| Array.isArray:", Array.isArray(brands), "| brands:", brands);
+  (brands || []).forEach((b) => {
+    console.log("[DEBUG-detect] cek brand:", JSON.stringify(b), "| trim+lower:", JSON.stringify(b.trim().toLowerCase()), "| cocok?", nameL.includes(b.trim().toLowerCase()));
+  });
   const match = (brands || []).find((b) => nameL.includes(b.trim().toLowerCase()));
   return match || "";
 }
