@@ -444,7 +444,9 @@ function SearchableCombo({ value, onChange, options, onAddOption, placeholder, f
 function detectBrandFromSku(sku, brands) {
   const skuL = (sku || "").normalize("NFKC").toLowerCase();
   if (!skuL) return "";
+  console.log("[DBG] sku:", JSON.stringify(skuL), "| codes:", [...skuL].map((c) => c.charCodeAt(0)).join(","), "| brands:", JSON.stringify(brands));
   const match = (brands || []).find((b) => skuL.includes(b.trim().normalize("NFKC").toLowerCase()));
+  console.log("[DBG] match:", JSON.stringify(match));
   return match || "";
 }
 
