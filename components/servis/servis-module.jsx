@@ -448,51 +448,51 @@ function highlightMatch(text, query) {
   );
 }
 
-function ProductCombo({ value, skuValue, onChange, products, onAddProduct, placeholder }) {
+function ProductCombo({ value, skuValue, onChange, products, onAddProduct, placeholder, brand }) {
   const [query, setQuery] = useState(value || "");
   const [open, setOpen] = useState(false);
-  const [newSkuDraft, setNewSkuDraft] = useState("");
 
   useEffect(() => { setQuery(value || ""); }, [value]);
 
+  // Kalau Brand udah dipilih, produk yang ditawarkan cuma yang namanya
+  // mengandung nama brand itu — biar gak campur sama 1.300+ produk brand
+  // lain. Kalau Brand belum dipilih/kosong, tampilkan semua produk.
+  const brandFiltered = useMemo(() => {
+    const b = (brand || "").trim().toLowerCase();
+    if (!b) return products || [];
+    return (products || []).filter((p) => p.name.toLowerCase().includes(b));
+  }, [products, brand]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return sortByName(products || []).slice(0, 50);
-    // Urutan relevansi: nama diawali ketikan > SKU diawali ketikan >
-    // nama mengandung ketikan > SKU mengandung ketikan. Jadi hasil paling
-    // mungkin dicari selalu muncul duluan, gak ketimpa produk lain yang
-    // kebetulan juga cocok tapi kurang relevan.
-    const scored = (products || [])
-      .filter((p) => p.name.toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q))
+    if (!q) return sortByName(brandFiltered).slice(0, 50);
+    // Pencarian sekarang cuma lewat NAMA produk (bukan SKU lagi) — lebih
+    // sesuai kebiasaan cari "nama barangnya apa", bukan kode internal.
+    // Urutan relevansi: nama diawali ketikan duluan, baru yang cuma
+    // mengandung ketikan di tengah.
+    const scored = brandFiltered
+      .filter((p) => p.name.toLowerCase().includes(q))
       .map((p) => {
         const nameL = p.name.toLowerCase();
-        const skuL = (p.sku || "").toLowerCase();
-        let score = 3;
-        if (nameL.startsWith(q)) score = 0;
-        else if (skuL.startsWith(q)) score = 1;
-        else if (nameL.includes(q)) score = 2;
-        return { p, score };
+        return { p, score: nameL.startsWith(q) ? 0 : 1 };
       })
-      .sort((a, b) => a.score - b.score || a.p.name.localeCompare(b.p.name));
+      .sort((a, b2) => a.score - b2.score || a.p.name.localeCompare(b2.p.name));
     return scored.map((s) => s.p).slice(0, 50);
-  }, [products, query]);
+  }, [brandFiltered, query]);
 
   const exactMatch = (products || []).some((p) => p.name.toLowerCase() === query.trim().toLowerCase());
-  const skuTaken = newSkuDraft.trim() && (products || []).some((p) => (p.sku || "").trim().toLowerCase() === newSkuDraft.trim().toLowerCase());
 
   function pick(product) {
     onChange(product.name, product.sku || "");
     setQuery(product.name);
-    setNewSkuDraft("");
     setOpen(false);
   }
 
   function submitNewProduct() {
     const name = query.trim();
-    const sku = newSkuDraft.trim();
-    if (!name || !sku || skuTaken) return;
-    onAddProduct(name, sku);
-    pick({ name, sku });
+    if (!name) return;
+    onAddProduct(name, "");
+    pick({ name, sku: "" });
   }
 
   return (
@@ -500,16 +500,14 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
       <input
         className={inputCls}
         value={query}
-        placeholder={placeholder || "Ketik nama atau SKU, mis. \"hik\" untuk semua produk Hikvision..."}
+        placeholder={placeholder || (brand ? `Cari produk ${brand}...` : "Ketik nama produk...")}
         onChange={(e) => {
           const v = e.target.value;
           setQuery(v);
           setOpen(true);
           const q = v.trim().toLowerCase();
           if (q.length >= 3) {
-            const matches = (products || []).filter(
-              (p) => p.name.toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q)
-            );
+            const matches = brandFiltered.filter((p) => p.name.toLowerCase().includes(q));
             // Cocok ke cuma 1 produk -> langsung auto-isi (gak perlu klik pilih lagi).
             if (matches.length === 1) pick(matches[0]);
           }
@@ -538,29 +536,18 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
                 className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-indigo-50"
               >
                 <span className="truncate">{highlightMatch(p.name, query.trim())}</span>
-                <span className="shrink-0 text-[10px] font-mono text-slate-400">{highlightMatch(p.sku || "", query.trim())}</span>
+                <span className="shrink-0 text-[10px] font-mono text-slate-400">{p.sku || ""}</span>
               </button>
             ))}
             {filtered.length === 0 && !query.trim() && <div className="px-3 py-2 text-sm text-slate-400">Belum ada produk.</div>}
             {query.trim() && !exactMatch && onAddProduct && (
-              <div className="border-t border-slate-100 p-2 space-y-1.5 bg-slate-50">
-                <div className="text-xs text-slate-500 px-1">Produk baru: <span className="font-medium text-slate-700">"{query.trim()}"</span> — SKU wajib diisi</div>
-                <input
-                  autoFocus
-                  className={inputCls + " font-mono text-xs bg-white"}
-                  placeholder="SKU, mis. BRAND-TIPE-VARIASI"
-                  value={newSkuDraft}
-                  onChange={(e) => setNewSkuDraft(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && submitNewProduct()}
-                />
-                {skuTaken && <p className="text-[11px] text-red-600 px-1">SKU ini sudah dipakai produk lain.</p>}
+              <div className="border-t border-slate-100 p-2 bg-slate-50">
                 <button
                   type="button"
-                  disabled={!newSkuDraft.trim() || skuTaken}
                   onClick={submitNewProduct}
-                  className="w-full px-3 py-1.5 rounded-full bg-indigo-600 text-white text-xs font-medium"
+                  className="w-full flex items-center gap-1.5 justify-center px-3 py-2 rounded-full bg-indigo-600 text-white text-xs font-medium"
                 >
-                  + Tambah sebagai produk baru
+                  <Plus size={12} /> Tambah "{query.trim()}" sebagai produk baru
                 </button>
               </div>
             )}
@@ -1198,11 +1185,12 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
   function addProduct(name, sku) {
     const trimmedName = (name || "").trim();
     const trimmedSku = (sku || "").trim();
-    if (!trimmedName || !trimmedSku) return;
+    if (!trimmedName) return;
     setSettings((prev) => {
       const list = prev.products || [];
       const existsName = list.some((p) => p.name.trim().toLowerCase() === trimmedName.toLowerCase());
-      const existsSku = list.some((p) => (p.sku || "").trim().toLowerCase() === trimmedSku.toLowerCase());
+      // SKU sekarang opsional — kalau kosong, gak dicek duplikat SKU-nya.
+      const existsSku = trimmedSku && list.some((p) => (p.sku || "").trim().toLowerCase() === trimmedSku.toLowerCase());
       if (existsName || existsSku) return prev;
       const next = { ...prev, products: [...list, { id: uid(), sku: trimmedSku, name: trimmedName }] };
       persist({ settings: next });
@@ -1746,7 +1734,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
       }
       if (filters.q) {
         const q = filters.q.toLowerCase();
-        const hay = `${c.customerName} ${c.customerPhone} ${c.snDiterima} ${c.produk} ${c.snPenggantiSupplier} ${c.snPenggantiStock} ${c.stokReimbursedReceivedSN}`.toLowerCase();
+        const hay = `${c.customerName} ${c.customerPhone} ${c.snDiterima} ${c.brand} ${c.produk} ${c.snPenggantiSupplier} ${c.snPenggantiStock} ${c.stokReimbursedReceivedSN}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -1804,7 +1792,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
   const currentNavLabel = (NAV_ITEMS.find(([k]) => k === tab) || [, "Klaim Servis & Garansi"])[1];
 
   return (
-    <div className="text-slate-800">
+    <div className="text-slate-800 min-w-0 overflow-x-hidden">
       <style>{`
         @media print {
           body * { visibility: hidden; }
@@ -1827,7 +1815,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
         </div>
       </div>
 
-      <div>
+      <div className="min-w-0">
         {tab === "claims" && (
           <ClaimsTab
             isDesktopLayout={isDesktopLayout}
@@ -2429,7 +2417,7 @@ function ClaimsTab({ isDesktopLayout, ticketView, onSetTicketView, aktifCount, s
         <div className="relative flex-1 min-w-[180px]">
           <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
           <input value={filters.q} onChange={(e) => onSearch(e.target.value)}
-            placeholder="Cari customer, SN, produk..." className={inputCls + " pl-8"} />
+            placeholder="Cari customer, SN, brand, produk..." className={inputCls + " pl-8"} />
         </div>
         <button onClick={onOpenFilter} className={`relative flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}>
           <SlidersHorizontal size={14} /> Filter
@@ -2668,7 +2656,7 @@ function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, isDuplica
                   onChange={(v) => updateRow(r.rowId, { brand: v })} onAddOption={(v) => onAddOption("brands", v)} />
               </Field>
               <Field label="Produk / Model">
-                <ProductCombo value={r.produk} skuValue={r.produkSku} products={products} placeholder="Cari nama atau SKU..."
+                <ProductCombo value={r.produk} skuValue={r.produkSku} products={products} brand={r.brand} placeholder="Cari nama produk..."
                   onChange={(name, sku) => updateRow(r.rowId, { produk: name, produkSku: sku })} onAddProduct={onAddProduct} />
               </Field>
               <Field label="SN Diterima">
@@ -3391,7 +3379,7 @@ function EditClaimModal({ claim, settings, batches, claims, invoices, role, onCl
           <ComboInput value={f.brand} options={settings.brands} onChange={(v) => setF({ ...f, brand: v })} onAddOption={(v) => onAddOption("brands", v)} />
         </Field>
         <Field label="Produk / Model">
-          <ProductCombo value={f.produk} skuValue={f.produkSku} products={settings.products || []} placeholder="Cari nama atau SKU..."
+          <ProductCombo value={f.produk} skuValue={f.produkSku} products={settings.products || []} brand={f.brand} placeholder="Cari nama produk..."
             onChange={(name, sku) => setF({ ...f, produk: name, produkSku: sku })} onAddProduct={onAddProduct} />
         </Field>
         <Field label="SN Diterima">
