@@ -439,13 +439,15 @@ function SearchableCombo({ value, onChange, options, onAddOption, placeholder, f
 // yang udah ada (dipakai buat auto-isi Brand kalau user pilih Produk
 // duluan sebelum pilih Brand-nya).
 function detectBrandFromName(productName, brands) {
-  const nameL = (productName || "").toLowerCase();
+  // .normalize("NFKC") penting banget di sini — data produk yang diimport
+  // dari Excel (apalagi dari supplier luar) kadang ngandung karakter
+  // "lebar penuh" (fullwidth) yang KELIATAN sama persis kayak huruf biasa
+  // tapi beda kode karakternya, jadi .includes() biasa gagal cocok
+  // walau keliatan identik di layar. normalize("NFKC") nyamain itu semua
+  // ke bentuk standarnya dulu.
+  const nameL = (productName || "").normalize("NFKC").toLowerCase();
   if (!nameL) return "";
-  console.log("[DEBUG-detect] nameL:", JSON.stringify(nameL), "| typeof brands:", typeof brands, "| Array.isArray:", Array.isArray(brands), "| brands:", brands);
-  (brands || []).forEach((b) => {
-    console.log("[DEBUG-detect] cek brand:", JSON.stringify(b), "| trim+lower:", JSON.stringify(b.trim().toLowerCase()), "| cocok?", nameL.includes(b.trim().toLowerCase()));
-  });
-  const match = (brands || []).find((b) => nameL.includes(b.trim().toLowerCase()));
+  const match = (brands || []).find((b) => nameL.includes(b.trim().normalize("NFKC").toLowerCase()));
   return match || "";
 }
 
@@ -468,26 +470,32 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
 
   useEffect(() => { setQuery(value || ""); }, [value]);
 
+  // normalize("NFKC") penting — data produk hasil import Excel kadang
+  // ngandung karakter "lebar penuh" (fullwidth) yang keliatan identik
+  // di layar tapi beda kode karakternya, bikin .includes() biasa gagal
+  // cocok walau teksnya kelihatan sama. Ini nyamain dulu ke bentuk standar.
+  const norm = (s) => (s || "").normalize("NFKC").toLowerCase();
+
   // Kalau Brand udah dipilih, produk yang ditawarkan cuma yang namanya
   // mengandung nama brand itu — biar gak campur sama 1.300+ produk brand
   // lain. Kalau Brand belum dipilih/kosong, tampilkan semua produk.
   const brandFiltered = useMemo(() => {
-    const b = (brand || "").trim().toLowerCase();
+    const b = norm(brand).trim();
     if (!b) return products || [];
-    return (products || []).filter((p) => p.name.toLowerCase().includes(b));
+    return (products || []).filter((p) => norm(p.name).includes(b));
   }, [products, brand]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = norm(query).trim();
     if (!q) return sortByName(brandFiltered).slice(0, 50);
     // Pencarian sekarang lewat NAMA atau KODE BARANG (SKU) — ketik salah
     // satu udah cukup. Urutan relevansi: nama diawali ketikan duluan,
     // baru SKU diawali ketikan, baru yang cuma mengandung di tengah.
     const scored = brandFiltered
-      .filter((p) => p.name.toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q))
+      .filter((p) => norm(p.name).includes(q) || norm(p.sku).includes(q))
       .map((p) => {
-        const nameL = p.name.toLowerCase();
-        const skuL = (p.sku || "").toLowerCase();
+        const nameL = norm(p.name);
+        const skuL = norm(p.sku);
         let score = 3;
         if (nameL.startsWith(q)) score = 0;
         else if (skuL.startsWith(q)) score = 1;
@@ -498,7 +506,7 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
     return scored.map((s) => s.p).slice(0, 50);
   }, [brandFiltered, query]);
 
-  const exactMatch = (products || []).some((p) => p.name.toLowerCase() === query.trim().toLowerCase());
+  const exactMatch = (products || []).some((p) => norm(p.name) === norm(query).trim());
 
   function pick(product) {
     onChange(product.name, product.sku || "");
@@ -523,9 +531,9 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
           const v = e.target.value;
           setQuery(v);
           setOpen(true);
-          const q = v.trim().toLowerCase();
+          const q = norm(v).trim();
           if (q.length >= 3) {
-            const matches = brandFiltered.filter((p) => p.name.toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q));
+            const matches = brandFiltered.filter((p) => norm(p.name).includes(q) || norm(p.sku).includes(q));
             // Cocok ke cuma 1 produk -> langsung auto-isi (gak perlu klik pilih lagi).
             if (matches.length === 1) pick(matches[0]);
           }
@@ -2681,11 +2689,9 @@ function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, isDuplica
                 <ProductCombo value={r.produk} skuValue={r.produkSku} products={products} brand={r.brand} placeholder="Cari nama produk..."
                   onChange={(name, sku) => {
                     const patch = { produk: name, produkSku: sku };
-                    console.log("[DEBUG] product picked:", name, "| r.brand saat ini:", JSON.stringify(r.brand), "| settings.brands:", settings.brands);
                     // Kalau Brand belum dipilih, coba tebak dari nama produknya.
                     if (!r.brand) {
                       const guessed = detectBrandFromName(name, settings.brands);
-                      console.log("[DEBUG] hasil tebakan brand:", JSON.stringify(guessed));
                       if (guessed) patch.brand = guessed;
                     }
                     updateRow(r.rowId, patch);
