@@ -2677,9 +2677,11 @@ function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, isDuplica
                 <ProductCombo value={r.produk} skuValue={r.produkSku} products={products} brand={r.brand} placeholder="Cari nama produk..."
                   onChange={(name, sku) => {
                     const patch = { produk: name, produkSku: sku };
+                    console.log("[DEBUG] product picked:", name, "| r.brand saat ini:", JSON.stringify(r.brand), "| settings.brands:", settings.brands);
                     // Kalau Brand belum dipilih, coba tebak dari nama produknya.
                     if (!r.brand) {
                       const guessed = detectBrandFromName(name, settings.brands);
+                      console.log("[DEBUG] hasil tebakan brand:", JSON.stringify(guessed));
                       if (guessed) patch.brand = guessed;
                     }
                     updateRow(r.rowId, patch);
