@@ -438,16 +438,13 @@ function SearchableCombo({ value, onChange, options, onAddOption, placeholder, f
 // Tebak Brand dari nama produk yang dipilih, dicocokkan ke daftar Brand
 // yang udah ada (dipakai buat auto-isi Brand kalau user pilih Produk
 // duluan sebelum pilih Brand-nya).
-function detectBrandFromName(productName, brands) {
-  // .normalize("NFKC") penting banget di sini — data produk yang diimport
-  // dari Excel (apalagi dari supplier luar) kadang ngandung karakter
-  // "lebar penuh" (fullwidth) yang KELIATAN sama persis kayak huruf biasa
-  // tapi beda kode karakternya, jadi .includes() biasa gagal cocok
-  // walau keliatan identik di layar. normalize("NFKC") nyamain itu semua
-  // ke bentuk standarnya dulu.
-  const nameL = (productName || "").normalize("NFKC").toLowerCase();
-  if (!nameL) return "";
-  const match = (brands || []).find((b) => nameL.includes(b.trim().normalize("NFKC").toLowerCase()));
+// Tebak Brand dari KODE BARANG (SKU) produk yang dipilih — SKU biasanya
+// jauh lebih rapi/konsisten formatnya (mis. "RUIJIE-RG-RAP2200-F")
+// dibanding nama produk bebas yang formatnya macem-macem.
+function detectBrandFromSku(sku, brands) {
+  const skuL = (sku || "").normalize("NFKC").toLowerCase();
+  if (!skuL) return "";
+  const match = (brands || []).find((b) => skuL.includes(b.trim().normalize("NFKC").toLowerCase()));
   return match || "";
 }
 
@@ -2689,9 +2686,9 @@ function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, isDuplica
                 <ProductCombo value={r.produk} skuValue={r.produkSku} products={products} brand={r.brand} placeholder="Cari nama produk..."
                   onChange={(name, sku) => {
                     const patch = { produk: name, produkSku: sku };
-                    // Kalau Brand belum dipilih, coba tebak dari nama produknya.
+                    // Kalau Brand belum dipilih, coba tebak dari kode barangnya.
                     if (!r.brand) {
-                      const guessed = detectBrandFromName(name, settings.brands);
+                      const guessed = detectBrandFromSku(sku, settings.brands);
                       if (guessed) patch.brand = guessed;
                     }
                     updateRow(r.rowId, patch);
@@ -3421,7 +3418,7 @@ function EditClaimModal({ claim, settings, batches, claims, invoices, role, onCl
             onChange={(name, sku) => {
               const patch = { produk: name, produkSku: sku };
               if (!f.brand) {
-                const guessed = detectBrandFromName(name, settings.brands);
+                const guessed = detectBrandFromSku(sku, settings.brands);
                 if (guessed) patch.brand = guessed;
               }
               setF({ ...f, ...patch });
