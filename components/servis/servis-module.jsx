@@ -441,14 +441,22 @@ function SearchableCombo({ value, onChange, options, onAddOption, placeholder, f
 // Tebak Brand dari KODE BARANG (SKU) produk yang dipilih — SKU biasanya
 // jauh lebih rapi/konsisten formatnya (mis. "RUIJIE-RG-RAP2200-F")
 // dibanding nama produk bebas yang formatnya macem-macem.
+// Buang karakter "tak kasat mata" (zero-width space, word joiner, BOM,
+// dll) yang suka nyempil kalau teks di-copy-paste dari Word/PDF/Excel —
+// karakter ini gak keliatan sama sekali di layar tapi bikin perbandingan
+// teks gagal cocok walau keliatan identik (ini yang bikin brand "Ruijie"
+// gagal ke-detect sebelumnya).
+function stripInvisible(s) {
+  return (s || "").replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, "");
+}
+
+// Tebak Brand dari KODE BARANG (SKU) produk yang dipilih — SKU biasanya
+// jauh lebih rapi/konsisten formatnya (mis. "RUIJIE-RG-RAP2200-F")
+// dibanding nama produk bebas yang formatnya macem-macem.
 function detectBrandFromSku(sku, brands) {
-  const skuL = (sku || "").normalize("NFKC").toLowerCase();
+  const skuL = stripInvisible(sku).normalize("NFKC").toLowerCase();
   if (!skuL) return "";
-  const ruijieRaw = (brands || []).find((b) => b.toLowerCase().includes("ruijie"));
-  if (ruijieRaw) {
-    console.log("[DBG-ruijie] raw:", JSON.stringify(ruijieRaw), "| length:", ruijieRaw.length, "| codes:", [...ruijieRaw].map((c) => c.charCodeAt(0)).join(","));
-  }
-  const match = (brands || []).find((b) => skuL.includes(b.trim().normalize("NFKC").toLowerCase()));
+  const match = (brands || []).find((b) => skuL.includes(stripInvisible(b).trim().normalize("NFKC").toLowerCase()));
   return match || "";
 }
 
@@ -471,11 +479,10 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
 
   useEffect(() => { setQuery(value || ""); }, [value]);
 
-  // normalize("NFKC") penting — data produk hasil import Excel kadang
-  // ngandung karakter "lebar penuh" (fullwidth) yang keliatan identik
-  // di layar tapi beda kode karakternya, bikin .includes() biasa gagal
-  // cocok walau teksnya kelihatan sama. Ini nyamain dulu ke bentuk standar.
-  const norm = (s) => (s || "").normalize("NFKC").toLowerCase();
+  // normalize("NFKC") + stripInvisible — nyamain karakter "lebar penuh"
+  // (fullwidth) ke bentuk standar DAN buang karakter tak kasat mata yang
+  // suka nyempil dari copy-paste, sebelum dibandingin.
+  const norm = (s) => stripInvisible(s || "").normalize("NFKC").toLowerCase();
 
   // Kalau Brand udah dipilih, produk yang ditawarkan cuma yang namanya
   // mengandung nama brand itu — biar gak campur sama 1.300+ produk brand
