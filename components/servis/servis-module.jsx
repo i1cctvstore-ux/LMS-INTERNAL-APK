@@ -466,15 +466,19 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sortByName(brandFiltered).slice(0, 50);
-    // Pencarian sekarang cuma lewat NAMA produk (bukan SKU lagi) — lebih
-    // sesuai kebiasaan cari "nama barangnya apa", bukan kode internal.
-    // Urutan relevansi: nama diawali ketikan duluan, baru yang cuma
-    // mengandung ketikan di tengah.
+    // Pencarian sekarang lewat NAMA atau KODE BARANG (SKU) — ketik salah
+    // satu udah cukup. Urutan relevansi: nama diawali ketikan duluan,
+    // baru SKU diawali ketikan, baru yang cuma mengandung di tengah.
     const scored = brandFiltered
-      .filter((p) => p.name.toLowerCase().includes(q))
+      .filter((p) => p.name.toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q))
       .map((p) => {
         const nameL = p.name.toLowerCase();
-        return { p, score: nameL.startsWith(q) ? 0 : 1 };
+        const skuL = (p.sku || "").toLowerCase();
+        let score = 3;
+        if (nameL.startsWith(q)) score = 0;
+        else if (skuL.startsWith(q)) score = 1;
+        else if (nameL.includes(q)) score = 2;
+        return { p, score };
       })
       .sort((a, b2) => a.score - b2.score || a.p.name.localeCompare(b2.p.name));
     return scored.map((s) => s.p).slice(0, 50);
@@ -500,14 +504,14 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
       <input
         className={inputCls}
         value={query}
-        placeholder={placeholder || (brand ? `Cari produk ${brand}...` : "Ketik nama produk...")}
+        placeholder={placeholder || (brand ? `Cari nama atau kode ${brand}...` : "Ketik nama atau kode barang...")}
         onChange={(e) => {
           const v = e.target.value;
           setQuery(v);
           setOpen(true);
           const q = v.trim().toLowerCase();
           if (q.length >= 3) {
-            const matches = brandFiltered.filter((p) => p.name.toLowerCase().includes(q));
+            const matches = brandFiltered.filter((p) => p.name.toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q));
             // Cocok ke cuma 1 produk -> langsung auto-isi (gak perlu klik pilih lagi).
             if (matches.length === 1) pick(matches[0]);
           }
@@ -536,7 +540,7 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
                 className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-indigo-50"
               >
                 <span className="truncate">{highlightMatch(p.name, query.trim())}</span>
-                <span className="shrink-0 text-[10px] font-mono text-slate-400">{p.sku || ""}</span>
+                <span className="shrink-0 text-[10px] font-mono text-slate-400">{highlightMatch(p.sku || "", query.trim())}</span>
               </button>
             ))}
             {filtered.length === 0 && !query.trim() && <div className="px-3 py-2 text-sm text-slate-400">Belum ada produk.</div>}
