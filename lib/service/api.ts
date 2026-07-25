@@ -428,10 +428,31 @@ function deriveCustomers(claims: Claim[]): CustomerEntry[] {
 // super_admin ganti cabang yang lagi dilihat).
 // =====================================================
 
+// Query .select() Supabase/PostgREST cuma balikin maksimal 1000 baris
+// per panggilan kalau gak di-paging manual. Dipakai buat tabel-tabel
+// yang jumlah barisnya bisa lebih dari 1000 (Produk sudah kejadian —
+// tampil "1000 produk" padahal di database lebih banyak; Customer/Claim
+// berpotensi kena hal sama seiring data bertambah).
+async function fetchAllRows<T = any>(
+  queryBuilder: () => any,
+): Promise<T[]> {
+  const PAGE_SIZE = 1000
+  const rows: T[] = []
+  let from = 0
+  while (true) {
+    const { data, error } = await queryBuilder().range(from, from + PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    rows.push(...(data || []))
+    if (!data || data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return rows
+}
+
 export async function loadServiceData(branchId: string): Promise<ServiceData> {
   const supabase = createClient()
 
-  const [claimsRes, batchesRes, invoicesRes, setoranRes, sparepartsRes, sparepartStockRes, productsRes, suppliersRes, customersRes, stockLogRes, settingsRes, brandsRes] =
+  const [claimsRes, batchesRes, invoicesRes, setoranRes, sparepartsRes, sparepartStockRes, customersRes, stockLogRes, settingsRes, brandsRes] =
     await Promise.all([
       supabase.from('service_claims').select('*').eq('branch_id', branchId).order('tanggal_terima', { ascending: false }),
       supabase.from('service_batches').select('*').eq('branch_id', branchId).order('tanggal_kirim', { ascending: false }),
@@ -441,17 +462,23 @@ export async function loadServiceData(branchId: string): Promise<ServiceData> {
       // qty-nya dari tabel terpisah sparepart_stock, per cabang.
       supabase.from('service_spareparts').select('*').order('name'),
       supabase.from('sparepart_stock').select('sparepart_id, qty').eq('branch_id', branchId),
-      // Produk & Supplier sekarang katalog BERSAMA (semua cabang) — jadi
-      // TIDAK difilter branch_id lagi, beda dari query lain di atas.
-      supabase.from('service_products').select('*').order('name'),
-      supabase.from('service_suppliers').select('*').order('name'),
       supabase.from('service_customers').select('*').eq('branch_id', branchId).order('name'),
       supabase.from('service_sparepart_stock_log').select('*').eq('branch_id', branchId).order('created_at', { ascending: false }),
       supabase.from('service_settings').select('*').eq('branch_id', branchId).maybeSingle(),
       supabase.from('service_brands').select('name').order('name'),
     ])
 
-  const firstError = [claimsRes, batchesRes, invoicesRes, setoranRes, sparepartsRes, sparepartStockRes, productsRes, suppliersRes, customersRes, stockLogRes, settingsRes, brandsRes]
+  // Produk & Supplier sekarang katalog BERSAMA (semua cabang, TIDAK
+  // difilter branch_id) dan jumlahnya bisa lebih dari 1000 baris — jadi
+  // diambil lewat paging (fetchAllRows), TERPISAH dari Promise.all di
+  // atas supaya gampang di-paging tanpa ganggu query lain yang masih
+  // aman di bawah 1000 baris.
+  const [productRows, supplierRows] = await Promise.all([
+    fetchAllRows(() => supabase.from('service_products').select('*').order('name')),
+    fetchAllRows(() => supabase.from('service_suppliers').select('*').order('name')),
+  ])
+
+  const firstError = [claimsRes, batchesRes, invoicesRes, setoranRes, sparepartsRes, sparepartStockRes, customersRes, stockLogRes, settingsRes, brandsRes]
     .map((r) => r.error)
     .find(Boolean)
   if (firstError) throw new Error(firstError.message)
@@ -469,8 +496,8 @@ export async function loadServiceData(branchId: string): Promise<ServiceData> {
   const sparepartQtyById = new Map<string, number>()
   for (const r of sparepartStockRes.data ?? []) sparepartQtyById.set(r.sparepart_id, r.qty)
   const spareParts = (sparepartsRes.data ?? []).map((row: any) => sparepartFromRow(row, sparepartQtyById.get(row.id) ?? 0))
-  const products = (productsRes.data ?? []).map(productFromRow)
-  const supplierDetails = (suppliersRes.data ?? []).map(supplierFromRow)
+  const products = productRows.map(productFromRow)
+  const supplierDetails = supplierRows.map(supplierFromRow)
   const customers = (customersRes.data ?? []).map(customerFromRow)
   const sparepartStockLog = (stockLogRes.data ?? []).map(stockLogFromRow)
 
