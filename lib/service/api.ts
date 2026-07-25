@@ -546,6 +546,22 @@ function chunkedInsertTasks(
   return chunkArray(rows, INSERT_CHUNK_SIZE).map((chunk) => supabase.from(table).insert(chunk))
 }
 
+// Sama seperti chunkedInsertTasks, tapi pakai upsert dengan
+// ignoreDuplicates — dipakai untuk tabel yang punya unique constraint
+// (SKU produk, dll) supaya baris yang bentrok otomatis DI-SKIP,
+// bukannya bikin seluruh chunk gagal dan nge-block chunk lain yang
+// harusnya sukses.
+function chunkedUpsertIgnoreTasks(
+  supabase: ReturnType<typeof createClient>,
+  table: string,
+  rows: Record<string, unknown>[],
+  conflictTarget: string,
+): Promise<{ error: any }>[] {
+  return chunkArray(rows, INSERT_CHUNK_SIZE).map((chunk) =>
+    supabase.from(table).upsert(chunk, { onConflict: conflictTarget, ignoreDuplicates: true }),
+  )
+}
+
 async function syncClaims(branchId: string, prev: Claim[], next: Claim[], userId?: string) {
   const supabase = createClient()
   const { inserted, updated, deletedIds } = diffById(prev, next)
@@ -623,7 +639,7 @@ async function syncProducts(prev: ProductItem[], next: ProductItem[]) {
   const { inserted, updated, deletedIds } = diffById(prev, next)
   const tasks: Promise<{ error: any }>[] = []
   if (inserted.length)
-    tasks.push(...chunkedInsertTasks(supabase, 'service_products', inserted.map((p) => productToRow(p))))
+    tasks.push(...chunkedUpsertIgnoreTasks(supabase, 'service_products', inserted.map((p) => productToRow(p)), 'sku'))
   updated.forEach((p) =>
     tasks.push(supabase.from('service_products').update(productToRow(p)).eq('id', p.id)),
   )
