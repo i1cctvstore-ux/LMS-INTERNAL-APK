@@ -546,22 +546,6 @@ function chunkedInsertTasks(
   return chunkArray(rows, INSERT_CHUNK_SIZE).map((chunk) => supabase.from(table).insert(chunk))
 }
 
-// Sama seperti chunkedInsertTasks, tapi pakai upsert dengan
-// ignoreDuplicates — dipakai untuk tabel yang punya unique constraint
-// (SKU produk, dll) supaya baris yang bentrok otomatis DI-SKIP,
-// bukannya bikin seluruh chunk gagal dan nge-block chunk lain yang
-// harusnya sukses.
-function chunkedUpsertIgnoreTasks(
-  supabase: ReturnType<typeof createClient>,
-  table: string,
-  rows: Record<string, unknown>[],
-  conflictTarget: string,
-): Promise<{ error: any }>[] {
-  return chunkArray(rows, INSERT_CHUNK_SIZE).map((chunk) =>
-    supabase.from(table).upsert(chunk, { onConflict: conflictTarget, ignoreDuplicates: true }),
-  )
-}
-
 async function syncClaims(branchId: string, prev: Claim[], next: Claim[], userId?: string) {
   const supabase = createClient()
   const { inserted, updated, deletedIds } = diffById(prev, next)
@@ -638,8 +622,30 @@ async function syncProducts(prev: ProductItem[], next: ProductItem[]) {
   const supabase = createClient()
   const { inserted, updated, deletedIds } = diffById(prev, next)
   const tasks: Promise<{ error: any }>[] = []
-  if (inserted.length)
-    tasks.push(...chunkedUpsertIgnoreTasks(supabase, 'service_products', inserted.map((p) => productToRow(p)), 'sku'))
+  if (inserted.length) {
+    // Cross-check SKU terhadap yang BENERAN ada di database (bukan cuma
+    // state lokal di browser) sebelum insert. Ini gantiin cara lama
+    // (ON CONFLICT / upsert) karena unique index di kolom sku ternyata
+    // gak bisa langsung dipakai lewat onConflict biasa (kemungkinan
+    // index-nya pakai normalisasi teks, bukan kolom polos) — jadi
+    // dicek manual di sini, pakai normalisasi yang sama dengan yang
+    // dipakai di seluruh aplikasi (buang karakter tak kasat mata,
+    // NFKC, lowercase) biar konsisten sama fitur auto-deteksi brand.
+    const { data: existingRows, error: fetchErr } = await supabase
+      .from('service_products')
+      .select('sku')
+    if (fetchErr) throw new Error(fetchErr.message)
+    const normalizeSku = (s: string) =>
+      (s || '')
+        .replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '')
+        .normalize('NFKC')
+        .trim()
+        .toLowerCase()
+    const existingSkuSet = new Set((existingRows || []).map((r: any) => normalizeSku(r.sku)))
+    const toInsert = inserted.filter((p) => !existingSkuSet.has(normalizeSku(p.sku)))
+    if (toInsert.length)
+      tasks.push(...chunkedInsertTasks(supabase, 'service_products', toInsert.map((p) => productToRow(p))))
+  }
   updated.forEach((p) =>
     tasks.push(supabase.from('service_products').update(productToRow(p)).eq('id', p.id)),
   )
