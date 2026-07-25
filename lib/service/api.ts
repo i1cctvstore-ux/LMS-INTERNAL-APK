@@ -618,31 +618,54 @@ async function syncSpareparts(branchId: string, prev: Sparepart[], next: Sparepa
   await Promise.all([runAndCheck(dbTasks), ...qtyTasks])
 }
 
+// Supabase/PostgREST cuma balikin maksimal 1000 baris per query kalau
+// gak di-paging manual. Kalau produk yang sudah ada di database lebih
+// dari 1000, select biasa bakal kelewatan sisanya — jadi SKU yang
+// sebenarnya sudah ada gak ke-deteksi, dan tetap dikirim ulang (bikin
+// error duplicate key lagi). Fungsi ini ambil SEMUA baris lewat paging
+// (per 1000), diulang terus sampai halaman terakhir habis.
+async function fetchAllExistingSkus(supabase: ReturnType<typeof createClient>): Promise<Set<string>> {
+  const normalizeSku = (s: string) =>
+    (s || '')
+      .replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '')
+      .normalize('NFKC')
+      .trim()
+      .toLowerCase()
+  const PAGE_SIZE = 1000
+  const skuSet = new Set<string>()
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('service_products')
+      .select('sku')
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    ;(data || []).forEach((r: any) => skuSet.add(normalizeSku(r.sku)))
+    if (!data || data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return skuSet
+}
+
 async function syncProducts(prev: ProductItem[], next: ProductItem[]) {
   const supabase = createClient()
   const { inserted, updated, deletedIds } = diffById(prev, next)
   const tasks: Promise<{ error: any }>[] = []
   if (inserted.length) {
-    // Cross-check SKU terhadap yang BENERAN ada di database (bukan cuma
-    // state lokal di browser) sebelum insert. Ini gantiin cara lama
-    // (ON CONFLICT / upsert) karena unique index di kolom sku ternyata
-    // gak bisa langsung dipakai lewat onConflict biasa (kemungkinan
-    // index-nya pakai normalisasi teks, bukan kolom polos) — jadi
-    // dicek manual di sini, pakai normalisasi yang sama dengan yang
-    // dipakai di seluruh aplikasi (buang karakter tak kasat mata,
-    // NFKC, lowercase) biar konsisten sama fitur auto-deteksi brand.
-    const { data: existingRows, error: fetchErr } = await supabase
-      .from('service_products')
-      .select('sku')
-    if (fetchErr) throw new Error(fetchErr.message)
     const normalizeSku = (s: string) =>
       (s || '')
         .replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '')
         .normalize('NFKC')
         .trim()
         .toLowerCase()
-    const existingSkuSet = new Set((existingRows || []).map((r: any) => normalizeSku(r.sku)))
-    const toInsert = inserted.filter((p) => !existingSkuSet.has(normalizeSku(p.sku)))
+    const existingSkuSet = await fetchAllExistingSkus(supabase)
+    const seenInBatch = new Set<string>()
+    const toInsert = inserted.filter((p) => {
+      const key = normalizeSku(p.sku)
+      if (existingSkuSet.has(key) || seenInBatch.has(key)) return false
+      seenInBatch.add(key)
+      return true
+    })
     if (toInsert.length)
       tasks.push(...chunkedInsertTasks(supabase, 'service_products', toInsert.map((p) => productToRow(p))))
   }
