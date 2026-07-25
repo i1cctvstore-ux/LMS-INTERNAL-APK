@@ -850,12 +850,11 @@ export default function ServisModule({ currentUserId, currentUserRole, currentUs
   const [activeBranchName, setActiveBranchName] = useState(null);
 
   useEffect(() => {
-    if (!isSuperAdmin) return;
     fetch("/api/branches")
       .then((res) => res.json())
       .then((body) => setBranches((body.branches ?? []).filter((b) => b.active !== false)))
       .catch(() => {});
-  }, [isSuperAdmin]);
+  }, []);
 
   // Super Admin wajib pilih dulu "lagi lihat cabang mana" sebelum masuk —
   // modul ini didesain buat satu cabang per layar (sama seperti staf biasa
@@ -897,6 +896,7 @@ export default function ServisModule({ currentUserId, currentUserRole, currentUs
     <ErrorBoundary>
       <App
         branchId={activeBranchId}
+        branchInfo={branches.find((b) => b.id === activeBranchId) || null}
         currentUserId={currentUserId}
         isSuperAdmin={isSuperAdmin}
         section={section}
@@ -982,7 +982,7 @@ function Sidebar({ tab, setTab, open, onClose, roleLabel, branchSwitcher, isDesk
 }
 
 // ---------- main app ----------
-function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section }) {
+function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher, section }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [claims, setClaims] = useState([]);
@@ -2107,7 +2107,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
       )}
 
       {suratJalanBatch && (
-        <PrintSuratJalanReceipt batch={suratJalanBatch.batch} items={suratJalanBatch.items} onClose={() => setSuratJalanBatch(null)} />
+        <PrintSuratJalanReceipt batch={suratJalanBatch.batch} items={suratJalanBatch.items} branchInfo={branchInfo} onClose={() => setSuratJalanBatch(null)} />
       )}
       {docViewTarget && (
         <ViewBatchDocModal target={docViewTarget} onClose={() => setDocViewTarget(null)} />
@@ -2135,7 +2135,7 @@ function App({ branchId, currentUserId, isSuperAdmin, branchSwitcher, section })
         />
       )}
 
-      {printGroup && <PrintReceipt items={printGroup.map((p) => claims.find((c) => c.id === p.id) || p)} onClose={() => setPrintGroup(null)} />}
+      {printGroup && <PrintReceipt items={printGroup.map((p) => claims.find((c) => c.id === p.id) || p)} branchInfo={branchInfo} onClose={() => setPrintGroup(null)} />}
       {uploadGroup && (
         <UploadTandaTerimaModal
           items={uploadGroup.map((p) => claims.find((c) => c.id === p.id) || p)}
@@ -6027,6 +6027,17 @@ function PrintModalShell({ onClose, children }) {
   );
 }
 
+function CompanyHeader({ branchInfo }) {
+  if (!branchInfo || (!branchInfo.address && !branchInfo.phone)) return null;
+  return (
+    <div className="mb-4 pb-4 border-b border-slate-200 text-center">
+      <div className="font-bold text-slate-800">{branchInfo.name}</div>
+      {branchInfo.address && <div className="text-xs text-slate-500 mt-0.5">{branchInfo.address}</div>}
+      {branchInfo.phone && <div className="text-xs text-slate-500">No. HP: {branchInfo.phone}</div>}
+    </div>
+  );
+}
+
 function SignatureFooter({ leftLabel, rightLabel }) {
   return (
     <div className="flex justify-between text-sm mt-10">
@@ -6040,13 +6051,14 @@ function SignatureFooter({ leftLabel, rightLabel }) {
   );
 }
 
-function PrintReceipt({ items, onClose }) {
+function PrintReceipt({ items, branchInfo, onClose }) {
   const customerName = items[0]?.customerName;
   const customerPhone = items[0]?.customerPhone;
   const date = items[0]?.tanggalTerima;
 
   return (
     <PrintModalShell onClose={onClose}>
+      <CompanyHeader branchInfo={branchInfo} />
       <h2 className="text-lg font-bold text-center mb-1">TANDA TERIMA BARANG SERVIS</h2>
       <p className="text-center text-xs text-slate-500 mb-6">Tanggal: {fmtDate(date)}</p>
       <div className="text-sm mb-4">
@@ -6079,9 +6091,10 @@ function PrintReceipt({ items, onClose }) {
   );
 }
 
-function PrintSuratJalanReceipt({ batch, items, onClose }) {
+function PrintSuratJalanReceipt({ batch, items, branchInfo, onClose }) {
   return (
     <PrintModalShell onClose={onClose}>
+      <CompanyHeader branchInfo={branchInfo} />
       <h2 className="text-lg font-bold text-center mb-1">SURAT JALAN KE SUPPLIER</h2>
       <p className="text-center text-xs text-slate-500 mb-6">{batch.kodeBatch}</p>
       <div className="text-sm mb-4">
@@ -6093,7 +6106,7 @@ function PrintSuratJalanReceipt({ batch, items, onClose }) {
           <tr className="border-b border-slate-300 text-left">
             <th className="py-1 pr-2">Brand / Produk</th>
             <th className="py-1 pr-2">SN</th>
-            <th className="py-1 pr-2">Customer</th>
+            <th className="py-1 pr-2">Kerusakan</th>
             <th className="py-1">Jenis</th>
           </tr>
         </thead>
@@ -6102,7 +6115,7 @@ function PrintSuratJalanReceipt({ batch, items, onClose }) {
             <tr key={c.id} className="border-b border-slate-100">
               <td className="py-1 pr-2">{c.brand} {c.produk}</td>
               <td className="py-1 pr-2 font-mono text-xs">{c.snDiterima}</td>
-              <td className="py-1 pr-2">{c.customerName}</td>
+              <td className="py-1 pr-2">{c.catatan || "-"}</td>
               <td className="py-1">{c.jenis === "Ganti Baru" ? "Klaim Balik" : "Servis"}</td>
             </tr>
           ))}
