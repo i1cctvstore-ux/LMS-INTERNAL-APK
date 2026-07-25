@@ -40,16 +40,16 @@ export function AppShell({
         onCloseMobile={() => setMobileOpen(false)}
       />
 
-      <div className="flex min-h-dvh flex-1 flex-col">
-        <Navbar
-          title={title}
-          userName={userName}
-          userEmail={userEmail}
-          onOpenMenu={() => setMobileOpen(true)}
-        />
-        <main className="flex-1 px-4 py-6 sm:px-6">{children}</main>
-        <Footer />
-      </div>
+<div className="flex min-h-dvh flex-1 min-w-0 flex-col">
+  <Navbar
+    title={title}
+    userName={userName}
+    userEmail={userEmail}
+    onOpenMenu={() => setMobileOpen(true)}
+  />
+  <main className="flex-1 px-4 py-6 sm:px-6">{children}</main>
+  <Footer />
+     </div>
     </div>
   )
 }
