@@ -77,25 +77,27 @@ export async function fetchBranchName(branchId: string): Promise<string> {
 }
 
 // Cabang mana yang sudah tersambung ke sistem stok eksternal apa —
-// dipakai buat nentuin tombol sync mana yang ditampilkan/di-nonaktifkan.
+// dicocokkan lewat ID cabang (bukan nama, karena nama cabang di tabel
+// branches ternyata gak konsisten/rapi — ada yang isinya "solo cctv
+// cabang bali" misalnya, jadi rawan salah kalau dicocokin dari nama).
+// Dipakai buat nentuin tombol sync mana yang ditampilkan/di-nonaktifkan.
 // Kalau nanti Accurate Online sudah jalan (Jakarta/Purwokerto), tinggal
-// tambah entri di sini.
+// tambah entri id cabangnya di sini.
 export const BRANCH_STOCK_SOURCE: Record<string, 'zoho' | 'accurate' | null> = {
-  solo: 'zoho',
-  bali: 'zoho',
-  jakarta: 'accurate',
-  purwokerto: 'accurate',
+  'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3': 'zoho', // Solo
+  '9b4c7834-2e20-4416-8163-2faff97294c0': 'zoho', // Bali
 }
 
-export function stockSourceForBranch(branchName: string): 'zoho' | 'accurate' | null {
-  return BRANCH_STOCK_SOURCE[branchName.trim().toLowerCase()] ?? null
+export function stockSourceForBranch(branchId: string | null): 'zoho' | 'accurate' | null {
+  if (!branchId) return null
+  return BRANCH_STOCK_SOURCE[branchId] ?? null
 }
 
-export async function triggerZohoSync(branchName: string): Promise<{ results: any[]; message?: string }> {
+export async function triggerZohoSync(branchId: string): Promise<{ results: any[]; message?: string }> {
   const res = await fetch('/api/stok/sync-zoho', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ branchName }),
+    body: JSON.stringify({ branchId }),
   })
   const body = await res.json()
   if (!res.ok) throw new Error(body?.message || 'Gagal menjalankan sinkronisasi.')
