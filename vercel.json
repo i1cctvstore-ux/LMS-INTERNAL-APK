@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/stok/sync-zoho",
+      "schedule": "0 */4 * * *"
+    }
+  ]
+}
