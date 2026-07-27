@@ -19,6 +19,7 @@ import {
 } from '@/lib/stok/api'
 
 type StokModuleProps = {
+  currentUserRole: string
   currentUserBranchId: string | null
 }
 
@@ -391,7 +392,7 @@ function StokSupplierTab() {
   )
 }
 
-export default function StokModule({ currentUserBranchId }: StokModuleProps) {
+function StokModuleInner({ currentUserBranchId }: { currentUserBranchId: string | null }) {
   const [activeTab, setActiveTab] = useState<'cabang' | 'supplier'>('cabang')
   const [branchName, setBranchName] = useState('')
   const [stock, setStock] = useState<StockRow[]>([])
@@ -529,6 +530,79 @@ export default function StokModule({ currentUserBranchId }: StokModuleProps) {
           onUploadSupplier={handleUploadSupplier}
         />
       )}
+    </div>
+  )
+}
+
+type BranchOption = { id: string; name: string; active?: boolean }
+
+// Super Admin gak terikat 1 cabang (branch_id-nya kosong di profil) —
+// jadi dia wajib pilih dulu "lagi lihat stok cabang mana", sama seperti
+// pola yang sama di ServisModule. Staf biasa (branch_id sudah pasti
+// terisi) langsung masuk ke StokModuleInner tanpa layar pilih ini.
+export default function StokModule({ currentUserRole, currentUserBranchId }: StokModuleProps) {
+  const isSuperAdmin = currentUserRole === 'super_admin'
+  const [branches, setBranches] = useState<BranchOption[]>([])
+  const [activeBranchId, setActiveBranchId] = useState<string | null>(isSuperAdmin ? null : currentUserBranchId)
+  const [activeBranchName, setActiveBranchName] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isSuperAdmin) return
+    fetch('/api/branches')
+      .then((res) => res.json())
+      .then((body) => setBranches((body.branches ?? []).filter((b: BranchOption) => b.active !== false)))
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuperAdmin])
+
+  if (isSuperAdmin && !activeBranchId) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center bg-slate-50 p-6">
+        <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-sm w-full">
+          <p className="font-medium text-slate-800 mb-1">Pilih Cabang</p>
+          <p className="text-sm text-slate-500 mb-4">Pilih cabang yang mau dilihat/dikelola stoknya.</p>
+          <div className="flex flex-col gap-2">
+            {branches.map((b) => (
+              <button
+                key={b.id}
+                onClick={() => {
+                  setActiveBranchId(b.id)
+                  setActiveBranchName(b.name)
+                }}
+                className="w-full px-4 py-2.5 text-sm rounded-2xl border border-slate-200 hover:bg-slate-50 text-left text-slate-700"
+              >
+                {b.name}
+              </button>
+            ))}
+            {branches.length === 0 && <p className="text-xs text-slate-400">Memuat daftar cabang…</p>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!activeBranchId) {
+    return (
+      <div className="min-h-[40vh] flex items-center justify-center text-sm text-slate-500 text-center px-6">
+        Akun Anda belum di-assign ke cabang mana pun. Hubungi Super Admin dulu sebelum bisa memakai modul Stok.
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {isSuperAdmin && (
+        <button
+          onClick={() => {
+            setActiveBranchId(null)
+            setActiveBranchName(null)
+          }}
+          className="mb-3 text-xs text-slate-400 hover:text-indigo-600 underline underline-offset-2"
+        >
+          Ganti cabang{activeBranchName ? ` (sekarang: ${activeBranchName})` : ''}
+        </button>
+      )}
+      <StokModuleInner currentUserBranchId={activeBranchId} />
     </div>
   )
 }
