@@ -13,17 +13,15 @@ import { getZohoOrgConfigs, syncZohoForBranch } from '@/lib/stok/zoho-sync'
 // dipanggil orang luar tanpa tau CRON_SECRET itu.
 // =====================================================
 
-async function runSync(branchNameFilter?: string, createdBy?: string) {
-  const configs = getZohoOrgConfigs().filter(
-    (c) => !branchNameFilter || c.branchName.toLowerCase() === branchNameFilter.toLowerCase(),
-  )
+async function runSync(branchIdFilter?: string, createdBy?: string) {
+  const configs = getZohoOrgConfigs().filter((c) => !branchIdFilter || c.branchId === branchIdFilter)
   if (configs.length === 0) {
-    return { message: `Tidak ada konfigurasi Zoho yang cocok untuk cabang "${branchNameFilter}".`, results: [] }
+    return { message: `Tidak ada konfigurasi Zoho yang cocok untuk cabang ini.`, results: [] }
   }
   const results = []
   for (const config of configs) {
     try {
-      const r = await syncZohoForBranch(config, branchNameFilter ? 'manual' : 'cron', createdBy)
+      const r = await syncZohoForBranch(config, branchIdFilter ? 'manual' : 'cron', createdBy)
       results.push({ ...r, status: 'success' as const })
     } catch (err: any) {
       results.push({ branchName: config.branchName, status: 'error' as const, message: String(err?.message || err) })
@@ -54,7 +52,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => ({}))
-  const branchName = typeof body?.branchName === 'string' ? body.branchName : undefined
-  const result = await runSync(branchName, user.id)
+  const branchId = typeof body?.branchId === 'string' ? body.branchId : undefined
+  const result = await runSync(branchId, user.id)
   return Response.json(result)
 }
