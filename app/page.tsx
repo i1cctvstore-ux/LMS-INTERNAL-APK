@@ -8,6 +8,7 @@ import { ProjectsPage } from '@/components/projects/projects-page'
 import { BranchManagement } from '@/components/branches/branch-management'
 import { EmployeeManagement } from '@/components/employees/employee-management'
 import ServisModule from '@/components/servis/servis-module'
+import StokModule from '@/components/stok/stok-module'
 import { LmsMaterials } from '@/components/lms/lms-materials'
 import { LmsVerifikasi } from '@/components/lms/lms-verifikasi'
 import { ModulePlaceholder } from '@/components/module-placeholder'
@@ -98,6 +99,8 @@ export default function Page() {
         return <LmsVerifikasi />
       case 'proyek':
         return <ProjectsPage />
+      case 'stok':
+        return <StokModule currentUserBranchId={profile!.branch_id} />
       case 'cabang':
         return <BranchManagement />
       case 'user-role':
