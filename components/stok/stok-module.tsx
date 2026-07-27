@@ -281,13 +281,12 @@ function StokCabangTab({
               <th className="p-3">Produk</th>
               <th className="p-3">SKU</th>
               <th className="p-3">Stok</th>
-              <th className="p-3">Terakhir Update</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={4} className="p-8 text-center text-slate-400">
+                <td colSpan={3} className="p-8 text-center text-slate-400">
                   <Loader2 className="inline animate-spin mr-2" size={14} /> Memuat...
                 </td>
               </tr>
@@ -300,12 +299,11 @@ function StokCabangTab({
                   <td className="p-3">
                     <span className={row.qty <= 0 ? 'text-red-600 font-medium' : 'text-slate-700 font-medium'}>{row.qty}</span>
                   </td>
-                  <td className="p-3 whitespace-nowrap text-xs text-slate-400">{fmtDateTime(row.updatedAt)}</td>
                 </tr>
               ))}
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={4} className="p-8 text-center text-slate-400">
+                <td colSpan={3} className="p-8 text-center text-slate-400">
                   {stock.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
                 </td>
               </tr>
