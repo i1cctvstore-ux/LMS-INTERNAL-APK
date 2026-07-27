@@ -429,14 +429,14 @@ function StokModuleInner({ currentUserBranchId }: { currentUserBranchId: string 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserBranchId])
 
-  const source = stockSourceForBranch(branchName)
+  const source = stockSourceForBranch(currentUserBranchId)
 
   async function handleSync() {
-    if (!branchName) return
+    if (!currentUserBranchId) return
     setSyncing(true)
     setMessage(null)
     try {
-      const result = await triggerZohoSync(branchName)
+      const result = await triggerZohoSync(currentUserBranchId)
       const r = result.results?.[0]
       if (r?.status === 'error') setMessage(`Sync gagal: ${r.message}`)
       else if (r) setMessage(`Sync selesai — ${r.itemsUpdated} produk diperbarui${r.itemsSkipped ? `, ${r.itemsSkipped} SKU dilewati` : ''}.`)
