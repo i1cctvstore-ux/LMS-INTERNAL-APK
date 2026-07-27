@@ -16,22 +16,26 @@ const ZOHO_API_BASE_URL = process.env.ZOHO_API_BASE_URL || 'https://www.zohoapis
 
 export type ZohoOrgConfig = {
   envPrefix: string
-  branchName: string
+  branchId: string
+  branchName: string // buat log/pesan aja, BUKAN buat pencocokan
   clientId: string
   clientSecret: string
   refreshToken: string
   organizationId: string
 }
 
-// Pemetaan organisasi Zoho -> cabang. Cuma di sini tempat nambah kalau
-// nanti ada cabang/organisasi Zoho baru — gak perlu ubah logic lainnya.
-const ZOHO_ORG_BRANCH_MAP: { envPrefix: string; branchName: string }[] = [
-  { envPrefix: 'ZOHO_1', branchName: 'Solo' },
-  { envPrefix: 'ZOHO_2', branchName: 'Bali' },
+// Pemetaan organisasi Zoho -> cabang, LEWAT ID (bukan nama) — nama
+// cabang di tabel branches ternyata gak konsisten/rapi (ada yang isinya
+// "solo cctv cabang bali", dll), jadi dicocokkan pakai id cabang yang
+// pasti unik. Cuma di sini tempat nambah kalau nanti ada cabang/
+// organisasi Zoho baru — gak perlu ubah logic lainnya.
+const ZOHO_ORG_BRANCH_MAP: { envPrefix: string; branchId: string; branchName: string }[] = [
+  { envPrefix: 'ZOHO_1', branchId: 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3', branchName: 'Solo' },
+  { envPrefix: 'ZOHO_2', branchId: '9b4c7834-2e20-4416-8163-2faff97294c0', branchName: 'Bali' },
 ]
 
 export function getZohoOrgConfigs(): ZohoOrgConfig[] {
-  return ZOHO_ORG_BRANCH_MAP.map(({ envPrefix, branchName }) => {
+  return ZOHO_ORG_BRANCH_MAP.map(({ envPrefix, branchId, branchName }) => {
     const clientId = process.env[`${envPrefix}_CLIENT_ID`]
     const clientSecret = process.env[`${envPrefix}_CLIENT_SECRET`]
     const refreshToken = process.env[`${envPrefix}_REFRESH_TOKEN`]
@@ -41,7 +45,7 @@ export function getZohoOrgConfigs(): ZohoOrgConfig[] {
         `Env var ${envPrefix}_CLIENT_ID / _CLIENT_SECRET / _REFRESH_TOKEN / _ORGANIZATION_ID belum lengkap di Vercel untuk cabang ${branchName}.`,
       )
     }
-    return { envPrefix, branchName, clientId, clientSecret, refreshToken, organizationId }
+    return { envPrefix, branchId, branchName, clientId, clientSecret, refreshToken, organizationId }
   })
 }
 
@@ -132,15 +136,7 @@ export async function syncZohoForBranch(
   createdBy?: string,
 ): Promise<SyncResult> {
   const supabase = createAdminClient()
-
-  const { data: branchRow, error: branchErr } = await supabase
-    .from('branches')
-    .select('id')
-    .ilike('name', config.branchName)
-    .maybeSingle()
-  if (branchErr) throw new Error(branchErr.message)
-  if (!branchRow) throw new Error(`Cabang "${config.branchName}" tidak ditemukan di tabel branches.`)
-  const branchId = branchRow.id as string
+  const branchId = config.branchId
 
   const { data: logRow, error: logInsertErr } = await supabase
     .from('stock_sync_log')
