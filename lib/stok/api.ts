@@ -5,7 +5,6 @@ export type StockRow = {
   sku: string
   name: string
   qty: number
-  updatedAt: string | null
 }
 
 export type SyncLogRow = {
@@ -30,7 +29,7 @@ export async function loadStockForBranch(branchId: string): Promise<StockRow[]> 
   while (true) {
     const { data, error } = await supabase
       .from('product_stock')
-      .select('product_id, qty, updated_at, service_products(sku, name)')
+      .select('product_id, qty_on_hand, service_products(sku, name)')
       .eq('branch_id', branchId)
       .range(from, from + PAGE - 1)
     if (error) throw new Error(error.message)
@@ -39,8 +38,7 @@ export async function loadStockForBranch(branchId: string): Promise<StockRow[]> 
         productId: r.product_id,
         sku: r.service_products?.sku || '',
         name: r.service_products?.name || '(produk terhapus)',
-        qty: Number(r.qty) || 0,
-        updatedAt: r.updated_at,
+        qty: Number(r.qty_on_hand) || 0,
       })
     })
     if (!data || data.length < PAGE) break
@@ -237,8 +235,7 @@ export async function uploadBranchStockCorrection(
 
   let itemsUpdated = 0
   let itemsSkipped = 0
-  const now = new Date().toISOString()
-  const upsertRows: { branch_id: string; product_id: string; qty: number; updated_at: string }[] = []
+  const upsertRows: { branch_id: string; product_id: string; qty_on_hand: number }[] = []
 
   rows.forEach((r) => {
     const productId = productIdBySku.get(normalizeSku(r.sku))
@@ -246,7 +243,7 @@ export async function uploadBranchStockCorrection(
       itemsSkipped += 1
       return
     }
-    upsertRows.push({ branch_id: branchId, product_id: productId, qty: r.qty, updated_at: now })
+    upsertRows.push({ branch_id: branchId, product_id: productId, qty_on_hand: Math.round(r.qty) })
     itemsUpdated += 1
   })
 
