@@ -172,8 +172,7 @@ export async function syncZohoForBranch(
 
     let itemsUpdated = 0
     let itemsSkipped = 0
-    const upsertRows: { branch_id: string; product_id: string; qty: number; updated_at: string }[] = []
-    const now = new Date().toISOString()
+    const upsertRows: { branch_id: string; product_id: string; qty_on_hand: number }[] = []
 
     zohoItems.forEach((item) => {
       const productId = productIdBySku.get(normalizeSku(item.sku))
@@ -181,7 +180,7 @@ export async function syncZohoForBranch(
         itemsSkipped += 1 // SKU dari Zoho ini belum ada di katalog produk internal
         return
       }
-      upsertRows.push({ branch_id: branchId, product_id: productId, qty: item.available_stock, updated_at: now })
+      upsertRows.push({ branch_id: branchId, product_id: productId, qty_on_hand: Math.round(item.available_stock) })
       itemsUpdated += 1
     })
 
