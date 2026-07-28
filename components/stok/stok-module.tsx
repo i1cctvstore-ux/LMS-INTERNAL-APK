@@ -26,7 +26,7 @@ import {
   type SupplierStockResult,
   type SupplierOption,
 } from '@/lib/stok/api'
-import { parseSupplierStockExcel, type ParsedSupplierFile } from '@/lib/stok/parse-supplier-file'
+import { scanSupplierStockExcel, extractSupplierStockRows, type ScanResult, type QtyColumnCandidate, type ParsedSupplierRow } from '@/lib/stok/parse-supplier-file'
 
 type StokModuleProps = {
   currentUserRole: string
@@ -169,26 +169,58 @@ function UploadSupplierModal({
   const [addingSupplier, setAddingSupplier] = useState(false)
   const [newSupplierName, setNewSupplierName] = useState('')
   const [file, setFile] = useState<File | null>(null)
-  const [parsed, setParsed] = useState<ParsedSupplierFile | null>(null)
-  const [parsing, setParsing] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [scan, setScan] = useState<ScanResult | null>(null)
+  const [chosenQtyCol, setChosenQtyCol] = useState<number | null>(null)
+  const [rows, setRows] = useState<ParsedSupplierRow[] | null>(null)
+  const [extracting, setExtracting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  async function runExtract(f: File, s: ScanResult, qtyIdx: number) {
+    setExtracting(true)
+    setError(null)
+    try {
+      const r = await extractSupplierStockRows(f, s, qtyIdx)
+      setRows(r)
+    } catch (e: any) {
+      setError(`Gagal baca isi file: ${e?.message || e}`)
+    } finally {
+      setExtracting(false)
+    }
+  }
 
   async function handleFilePick(f: File | undefined) {
     if (!f) return
     setFile(f)
-    setParsed(null)
+    setScan(null)
+    setChosenQtyCol(null)
+    setRows(null)
     setError(null)
-    setParsing(true)
+    setScanning(true)
     try {
-      const result = await parseSupplierStockExcel(f)
-      setParsed(result)
-      if (result.error) setError(result.error)
+      const result = await scanSupplierStockExcel(f)
+      setScan(result)
+      if (!result.ok) {
+        setError(result.error || 'Format file tidak dikenali.')
+      } else if (result.qtyCandidates && result.qtyCandidates.length === 1) {
+        // cuma 1 kolom kandidat qty, langsung jalan otomatis
+        const idx = result.qtyCandidates[0].index
+        setChosenQtyCol(idx)
+        await runExtract(f, result, idx)
+      }
+      // kalau kandidatnya > 1, nunggu user pilih dulu lewat UI di bawah
     } catch (e: any) {
       setError(`Gagal baca file: ${e?.message || e}`)
     } finally {
-      setParsing(false)
+      setScanning(false)
     }
+  }
+
+  async function handlePickQtyColumn(idx: number) {
+    if (!file || !scan) return
+    setChosenQtyCol(idx)
+    await runExtract(file, scan, idx)
   }
 
   async function handleAddSupplier() {
@@ -205,11 +237,11 @@ function UploadSupplierModal({
   }
 
   async function handleSubmit() {
-    if (!supplierId || !parsed || parsed.rows.length === 0) return
+    if (!supplierId || !rows || rows.length === 0) return
     setSubmitting(true)
     setError(null)
     try {
-      await onUpload(supplierId, parsed.rows.map((r) => ({ sku: r.sku, qty: r.qty })))
+      await onUpload(supplierId, rows.map((r) => ({ sku: r.sku, qty: r.qty })))
       onClose()
     } catch (e: any) {
       setError(String(e?.message || e))
@@ -218,7 +250,8 @@ function UploadSupplierModal({
     }
   }
 
-  const canSubmit = !!supplierId && !!parsed && parsed.rows.length > 0 && !parsed.error
+  const needsColumnChoice = !!scan?.ok && (scan.qtyCandidates?.length || 0) > 1 && chosenQtyCol === null
+  const canSubmit = !!supplierId && !!rows && rows.length > 0 && !needsColumnChoice
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={submitting ? undefined : onClose}>
@@ -282,25 +315,39 @@ function UploadSupplierModal({
                     <div className="text-sm text-slate-700 truncate">{file.name}</div>
                     <div className="text-[11px] text-slate-400">
                       {(file.size / 1024 / 1024).toFixed(1)} MB
-                      {parsed && !parsed.error && (
-                        <>
-                          {' · '}
-                          {[
-                            parsed.detected.namaGudang ? 'kolom Nama Gudang terdeteksi' : null,
-                            parsed.detected.namaBarang ? 'kolom Nama Barang terdeteksi' : null,
-                          ].filter(Boolean).join(', ') || `${parsed.rows.length} SKU terbaca`}
-                        </>
-                      )}
+                      {scan?.ok && rows && ` · ${rows.length} SKU terbaca (sheet "${scan.sheetName}")`}
                     </div>
                   </div>
                 </div>
-                {parsing ? (
+                {scanning || extracting ? (
                   <Loader2 size={14} className="animate-spin text-slate-400 shrink-0" />
-                ) : parsed && !parsed.error ? (
+                ) : rows && rows.length > 0 ? (
                   <span className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">Siap</span>
+                ) : needsColumnChoice ? (
+                  <span className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-700">Pilih kolom</span>
                 ) : (
                   <span className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-full bg-red-100 text-red-700">Error</span>
                 )}
+              </div>
+            )}
+
+            {needsColumnChoice && scan?.qtyCandidates && (
+              <div className="mt-2 p-3 rounded-xl border border-amber-200 bg-amber-50">
+                <p className="text-xs font-semibold text-amber-800 mb-2">
+                  Ada {scan.qtyCandidates.length} kolom yang mirip stok — pilih yang mana:
+                </p>
+                <div className="space-y-1.5">
+                  {scan.qtyCandidates.map((c: QtyColumnCandidate) => (
+                    <button
+                      key={c.index}
+                      onClick={() => handlePickQtyColumn(c.index)}
+                      className="w-full text-left px-3 py-2 rounded-lg bg-white border border-amber-200 hover:border-indigo-400 hover:bg-indigo-50 text-xs"
+                    >
+                      <span className="font-medium text-slate-700">Kolom {c.index + 1}{c.header ? ` ("${c.header}")` : ''}</span>
+                      <span className="text-slate-400"> — contoh: {c.sample.join(', ')}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
