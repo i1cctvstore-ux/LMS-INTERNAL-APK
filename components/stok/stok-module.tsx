@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Search, RefreshCw, Clock, CheckCircle2, XCircle, Loader2, Upload, X, PackageSearch,
-  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor,
+  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap,
 } from 'lucide-react'
 import {
   loadAllBranches,
@@ -15,14 +15,18 @@ import {
   triggerZohoSync,
   triggerZohoSyncAll,
   searchSupplierStock,
-  uploadSupplierStockPaste,
+  loadAllSuppliers,
+  addSupplierQuick,
+  uploadSupplierStockFile,
   normalizeSku,
   type BranchOption,
   type StockMatrixData,
   type SyncLogRow,
   type UploadLogRow,
   type SupplierStockResult,
+  type SupplierOption,
 } from '@/lib/stok/api'
+import { parseSupplierStockExcel, type ParsedSupplierFile } from '@/lib/stok/parse-supplier-file'
 
 type StokModuleProps = {
   currentUserRole: string
@@ -151,29 +155,61 @@ function RiwayatModal({
 
 // ---------- Upload Stok Supplier (paste massal — versi file Excel menyusul) ----------
 function UploadSupplierModal({
+  suppliers,
   onClose,
   onUpload,
+  onSupplierAdded,
 }: {
+  suppliers: SupplierOption[]
   onClose: () => void
-  onUpload: (rows: { sku: string; supplierName: string; qty: number }[]) => Promise<void>
+  onUpload: (supplierId: string, rows: { sku: string; qty: number }[]) => Promise<void>
+  onSupplierAdded: (s: SupplierOption) => void
 }) {
-  const [text, setText] = useState('')
+  const [supplierId, setSupplierId] = useState('')
+  const [addingSupplier, setAddingSupplier] = useState(false)
+  const [newSupplierName, setNewSupplierName] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [parsed, setParsed] = useState<ParsedSupplierFile | null>(null)
+  const [parsing, setParsing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  async function handleFilePick(f: File | undefined) {
+    if (!f) return
+    setFile(f)
+    setParsed(null)
+    setError(null)
+    setParsing(true)
+    try {
+      const result = await parseSupplierStockExcel(f)
+      setParsed(result)
+      if (result.error) setError(result.error)
+    } catch (e: any) {
+      setError(`Gagal baca file: ${e?.message || e}`)
+    } finally {
+      setParsing(false)
+    }
+  }
+
+  async function handleAddSupplier() {
+    if (!newSupplierName.trim()) return
+    try {
+      const s = await addSupplierQuick(newSupplierName.trim())
+      onSupplierAdded(s)
+      setSupplierId(s.id)
+      setAddingSupplier(false)
+      setNewSupplierName('')
+    } catch (e: any) {
+      setError(String(e?.message || e))
+    }
+  }
+
   async function handleSubmit() {
+    if (!supplierId || !parsed || parsed.rows.length === 0) return
     setSubmitting(true)
     setError(null)
     try {
-      const rows = text
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .map((line) => (line.includes('\t') ? line.split('\t') : line.split(',')).map((c) => c.trim()))
-        .filter((c) => c.length >= 3 && c[0] && c[1])
-        .map((c) => ({ sku: c[0], supplierName: c[1], qty: Number(c[2]) || 0 }))
-      if (rows.length === 0) throw new Error('Tidak ada baris valid. Format: SKU, Nama Supplier, Qty')
-      await onUpload(rows)
+      await onUpload(supplierId, parsed.rows.map((r) => ({ sku: r.sku, qty: r.qty })))
       onClose()
     } catch (e: any) {
       setError(String(e?.message || e))
@@ -182,47 +218,108 @@ function UploadSupplierModal({
     }
   }
 
+  const canSubmit = !!supplierId && !!parsed && parsed.rows.length > 0 && !parsed.error
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={submitting ? undefined : onClose}>
       <div className="bg-white rounded-3xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
           <div>
             <p className="font-semibold text-slate-800">Upload Stok Supplier</p>
-            <p className="text-xs text-slate-400 mt-0.5">Bisa banyak supplier sekaligus dalam satu paste</p>
           </div>
           <button onClick={onClose} disabled={submitting} className="text-slate-400 hover:text-slate-700 disabled:opacity-30">
             <X size={18} />
           </button>
         </div>
-        <div className="p-5 overflow-y-auto space-y-3">
-          <div className="bg-slate-50 rounded-xl p-3 text-xs text-slate-500">
-            <p className="font-medium text-slate-600 mb-1">
-              Paste dari Excel/Sheets langsung bisa (kolom terbaca dari Tab), atau ketik manual pisah pakai koma.
-            </p>
-            <p className="font-mono text-[11px]">SKU, Nama Supplier, Qty</p>
-            <p className="font-mono text-[11px] text-slate-400 mt-1">Contoh: HIK-DVR-4CH, Hikvision SC Jakarta, 12</p>
+        <div className="p-5 overflow-y-auto space-y-4">
+          <div>
+            <div className="text-[11px] font-semibold text-slate-400 uppercase mb-1.5">Pilih Supplier</div>
+            <div className="bg-slate-50 rounded-2xl p-3">
+              <div className="text-[11px] font-semibold text-indigo-600 mb-1.5">File ini dari supplier mana? (dari Master Data)</div>
+              <select className={inputCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                <option value="">— Pilih supplier —</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              {!addingSupplier ? (
+                <button onClick={() => setAddingSupplier(true)} className="mt-2 text-xs text-indigo-600 font-medium hover:underline">
+                  + Supplier belum ada? Tambahkan di Master Data
+                </button>
+              ) : (
+                <div className="mt-2 flex gap-1.5">
+                  <input
+                    autoFocus
+                    value={newSupplierName}
+                    onChange={(e) => setNewSupplierName(e.target.value)}
+                    placeholder="Nama supplier baru..."
+                    className={inputCls}
+                  />
+                  <button onClick={handleAddSupplier} className="px-3 rounded-lg bg-indigo-600 text-white text-xs font-medium shrink-0">
+                    Tambah
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={8}
-            disabled={submitting}
-            placeholder="Paste data di sini, satu baris per data..."
-            className="w-full rounded-xl border border-slate-200 p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-slate-50"
-          />
+
+          <div>
+            <div className="text-[11px] font-semibold text-slate-400 uppercase mb-1.5">Upload File Stok</div>
+            <label className="flex flex-col items-center justify-center gap-1.5 border-2 border-dashed border-slate-200 rounded-2xl py-8 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30">
+              <Upload size={22} className="text-slate-300" />
+              <span className="text-sm text-slate-500">Tap untuk pilih file</span>
+              <span className="text-[11px] text-slate-400">Excel (.xlsx, .xls) — 1 supplier per upload</span>
+              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFilePick(e.target.files?.[0])} />
+            </label>
+
+            {file && (
+              <div className="mt-2 flex items-center justify-between gap-2 p-3 rounded-xl border border-slate-200">
+                <div className="min-w-0 flex items-center gap-2">
+                  <div className="size-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                    <FileSpreadsheet size={16} className="text-slate-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm text-slate-700 truncate">{file.name}</div>
+                    <div className="text-[11px] text-slate-400">
+                      {(file.size / 1024 / 1024).toFixed(1)} MB
+                      {parsed && !parsed.error && (
+                        <>
+                          {' · '}
+                          {[
+                            parsed.detected.namaGudang ? 'kolom Nama Gudang terdeteksi' : null,
+                            parsed.detected.namaBarang ? 'kolom Nama Barang terdeteksi' : null,
+                          ].filter(Boolean).join(', ') || `${parsed.rows.length} SKU terbaca`}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {parsing ? (
+                  <Loader2 size={14} className="animate-spin text-slate-400 shrink-0" />
+                ) : parsed && !parsed.error ? (
+                  <span className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">Siap</span>
+                ) : (
+                  <span className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-full bg-red-100 text-red-700">Error</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 rounded-2xl bg-indigo-50 border border-indigo-100 text-xs text-indigo-800">
+            <p className="font-semibold mb-0.5">Cara kerja</p>
+            <p>1 supplier diproses per upload. Sebelum data lama ditimpa, sistem otomatis simpan snapshot-nya dulu ke Riwayat.</p>
+          </div>
+
           {error && <p className="text-xs text-rose-600 font-medium">{error}</p>}
         </div>
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
-          <button onClick={onClose} disabled={submitting} className="px-4 py-2 rounded-full text-sm font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-30">
-            Batal
-          </button>
+        <div className="px-5 py-4 border-t border-slate-100">
           <button
             onClick={handleSubmit}
-            disabled={submitting || !text.trim()}
-            className="px-4 py-2 rounded-full text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1.5"
+            disabled={!canSubmit || submitting}
+            className="w-full flex items-center justify-center gap-1.5 px-4 py-3 rounded-full text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
           >
-            {submitting && <Loader2 size={14} className="animate-spin" />}
-            {submitting ? 'Menyimpan...' : 'Upload'}
+            {submitting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+            {submitting ? 'Memproses...' : 'Proses & Update Stok'}
           </button>
         </div>
       </div>
@@ -514,6 +611,11 @@ function StokSupplierTab() {
   const [searched, setSearched] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
+
+  useEffect(() => {
+    loadAllSuppliers().then(setSuppliers).catch(() => {})
+  }, [])
 
   async function handleSearch() {
     if (!query.trim()) return
@@ -527,9 +629,9 @@ function StokSupplierTab() {
     }
   }
 
-  async function handleUpload(rows: { sku: string; supplierName: string; qty: number }[]) {
-    const r = await uploadSupplierStockPaste(rows)
-    setMessage(`Upload tersimpan — ${r.itemsUpdated} baris diperbarui${r.itemsSkipped ? `, ${r.itemsSkipped} baris dilewati` : ''}.`)
+  async function handleUpload(supplierId: string, rows: { sku: string; qty: number }[]) {
+    const r = await uploadSupplierStockFile(supplierId, rows)
+    setMessage(`Upload tersimpan — ${r.itemsUpdated} SKU diperbarui${r.itemsSkipped ? `, ${r.itemsSkipped} SKU dilewati (tidak ketemu di katalog produk)` : ''}.`)
   }
 
   return (
@@ -589,7 +691,14 @@ function StokSupplierTab() {
         )}
       </div>
 
-      {showUpload && <UploadSupplierModal onClose={() => setShowUpload(false)} onUpload={handleUpload} />}
+      {showUpload && (
+        <UploadSupplierModal
+          suppliers={suppliers}
+          onClose={() => setShowUpload(false)}
+          onUpload={handleUpload}
+          onSupplierAdded={(s) => setSuppliers((prev) => [...prev, s].sort((a, b) => a.name.localeCompare(b.name)))}
+        />
+      )}
     </div>
   )
 }
