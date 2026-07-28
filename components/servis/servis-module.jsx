@@ -1885,6 +1885,8 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
             onViewInvoice={viewInvoiceForClaim}
             role={role}
             hasInvoice={hasInvoice}
+            canDeleteFn={canDeleteClaim}
+            onDelete={(c) => setDeleteConfirmClaim(c)}
           />
         )}
         {tab === "supplier" && (
@@ -2311,10 +2313,11 @@ function ColumnMenu({ hiddenColumns, onToggleColumn }) {
   );
 }
 
-function RowActions({ c, onPreview, onOpenInvoice, onViewInvoice, onOpenProgress, role, hasInvoice }) {
+function RowActions({ c, onPreview, onOpenInvoice, onViewInvoice, onOpenProgress, role, hasInvoice, canDeleteFn, onDelete }) {
   const eligible = c.status === "Siap Diambil" || c.status === "Selesai";
   const invoiced = hasInvoice(c.id);
   const canEditInvoice = eligible && (role === "pusat" || !invoiced);
+  const canDelete = canDeleteFn ? canDeleteFn(c) : false;
   return (
     <div className="flex items-center gap-2 justify-end">
       {c.status !== "Selesai" && (
@@ -2334,11 +2337,14 @@ function RowActions({ c, onPreview, onOpenInvoice, onViewInvoice, onOpenProgress
       )}
       <button onClick={() => onPreview(c.customerPhone)} className="text-slate-400 hover:text-slate-700" title="Lihat tampilan customer"><Eye size={15} /></button>
       <button onClick={() => sendTrackingLinkWA(c.customerName, c.customerPhone)} className="text-slate-400 hover:text-emerald-600" title="Kirim link cek status via WhatsApp"><MessageCircle size={15} /></button>
+      {canDelete && (
+        <button onClick={() => onDelete(c)} className="text-slate-400 hover:text-red-500" title="Hapus tiket ini (Admin Pusat, sebelum diproses)"><X size={15} /></button>
+      )}
     </div>
   );
 }
 
-function ClaimsTab({ isDesktopLayout, ticketView, onSetTicketView, aktifCount, selesaiCount, filtered, filters, activeFilterCount, onOpenFilter, onSearch, onQuickFilterStatus, settings, summary, batches, selected, setSelected, onAdd, onOpenDetail, onOpenProgress, onPreview, onExport, onToggleColumn, onPrintSelected, onOpenInvoiceBuilder, onOpenInvoiceFromSelection, onOpenInvoiceSingle, onViewInvoice, role, hasInvoice }) {
+function ClaimsTab({ isDesktopLayout, ticketView, onSetTicketView, aktifCount, selesaiCount, filtered, filters, activeFilterCount, onOpenFilter, onSearch, onQuickFilterStatus, settings, summary, batches, selected, setSelected, onAdd, onOpenDetail, onOpenProgress, onPreview, onExport, onToggleColumn, onPrintSelected, onOpenInvoiceBuilder, onOpenInvoiceFromSelection, onOpenInvoiceSingle, onViewInvoice, role, hasInvoice, canDeleteFn, onDelete }) {
   const toggleAll = () => setSelected(selected.length === filtered.length ? [] : filtered.map((c) => c.id));
   const toggle = (id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   const hiddenColumns = settings.hiddenColumns || [];
@@ -2640,7 +2646,7 @@ function ClaimsTab({ isDesktopLayout, ticketView, onSetTicketView, aktifCount, s
                   {show("tglKembaliSupplier") && <td className="p-3 whitespace-nowrap">{fmtDate(c.tanggalKembaliSupplier)}</td>}
                   {show("tglAmbilCustomer") && <td className="p-3 whitespace-nowrap">{fmtDate(c.tanggalAmbilCustomer)}</td>}
                   {show("catatan") && <td className="p-3 max-w-[140px] truncate" title={c.catatan}>{c.catatan || "-"}</td>}
-                  <td className="p-3" onClick={(e) => e.stopPropagation()}><RowActions c={c} onPreview={onPreview} onOpenInvoice={onOpenInvoiceSingle} onViewInvoice={onViewInvoice} onOpenProgress={onOpenProgress} role={role} hasInvoice={hasInvoice} /></td>
+                  <td className="p-3" onClick={(e) => e.stopPropagation()}><RowActions c={c} onPreview={onPreview} onOpenInvoice={onOpenInvoiceSingle} onViewInvoice={onViewInvoice} onOpenProgress={onOpenProgress} role={role} hasInvoice={hasInvoice} canDeleteFn={canDeleteFn} onDelete={onDelete} /></td>
                 </tr>
               );
             })}
@@ -5436,12 +5442,6 @@ function DataMasterTab({ settings, onSave, claims, batches, role, onAddProduct, 
 
   return (
     <div className="max-w-2xl">
-      {!canManage && (
-        <div className="mb-4 p-3 rounded-2xl bg-slate-100 text-xs text-slate-500">
-          Anda masuk sebagai Admin Cabang — hapus Brand/Supplier/Produk cuma bisa dilakukan Super Admin. Data Customer boleh ditambah & diedit, hapus tetap khusus Super Admin.
-        </div>
-      )}
-
       <div className="bg-white rounded-3xl border border-slate-200 p-5 mb-4">
         <div className="flex items-center justify-between mb-3 gap-2">
           <div className="text-sm font-semibold text-slate-700">Brand</div>
