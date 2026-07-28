@@ -18,6 +18,9 @@ import {
   loadAllSuppliers,
   addSupplierQuick,
   uploadSupplierStockFile,
+  resolveSupplierRows,
+  searchProductsForMapping,
+  saveSupplierSkuMapping,
   normalizeSku,
   type BranchOption,
   type StockMatrixData,
@@ -25,6 +28,10 @@ import {
   type UploadLogRow,
   type SupplierStockResult,
   type SupplierOption,
+  type ResolveResult,
+  type ResolvedSupplierRow,
+  type UnmappedSupplierRow,
+  type ProductSearchResult,
 } from '@/lib/stok/api'
 import { scanSupplierStockExcel, extractSupplierStockRows, type ScanResult, type QtyColumnCandidate, type ParsedSupplierRow } from '@/lib/stok/parse-supplier-file'
 
@@ -154,6 +161,74 @@ function RiwayatModal({
 }
 
 // ---------- Upload Stok Supplier (paste massal — versi file Excel menyusul) ----------
+function UnmappedRowMatcher({
+  row,
+  onMapped,
+}: {
+  row: UnmappedSupplierRow
+  onMapped: (productId: string) => void
+}) {
+  const [query, setQuery] = useState(row.namaBarang || '')
+  const [results, setResults] = useState<ProductSearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [open, setOpen] = useState(false)
+
+  async function runSearch(q: string) {
+    setQuery(q)
+    if (q.trim().length < 2) { setResults([]); return }
+    setSearching(true)
+    try {
+      const r = await searchProductsForMapping(q)
+      setResults(r)
+      setOpen(true)
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  return (
+    <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div className="min-w-0">
+          <span className="font-mono text-[11px] text-slate-500">{row.sku}</span>
+          {row.namaBarang && <span className="text-xs text-slate-400"> · {row.namaBarang}</span>}
+        </div>
+        <span className="shrink-0 text-xs font-medium text-slate-600">Qty {row.qty}</span>
+      </div>
+      <div className="relative">
+        <input
+          value={query}
+          onChange={(e) => runSearch(e.target.value)}
+          onFocus={() => results.length > 0 && setOpen(true)}
+          placeholder="Cari produk yang cocok..."
+          className={inputCls + ' text-xs py-1.5'}
+        />
+        {open && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+            <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-40 max-h-40 overflow-y-auto">
+              {searching && <div className="px-2 py-1.5 text-xs text-slate-400">Mencari...</div>}
+              {!searching && results.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => { onMapped(p.id); setOpen(false) }}
+                  className="w-full text-left px-2 py-1.5 text-xs hover:bg-indigo-50 flex items-center justify-between gap-2"
+                >
+                  <span className="truncate">{p.name}</span>
+                  <span className="shrink-0 font-mono text-[10px] text-slate-400">{p.sku}</span>
+                </button>
+              ))}
+              {!searching && results.length === 0 && query.trim().length >= 2 && (
+                <div className="px-2 py-1.5 text-xs text-slate-400">Tidak ketemu.</div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function UploadSupplierModal({
   suppliers,
   onClose,
@@ -162,7 +237,7 @@ function UploadSupplierModal({
 }: {
   suppliers: SupplierOption[]
   onClose: () => void
-  onUpload: (supplierId: string, rows: { sku: string; qty: number }[]) => Promise<void>
+  onUpload: (supplierId: string, resolvedRows: ResolvedSupplierRow[], skippedCount: number) => Promise<void>
   onSupplierAdded: (s: SupplierOption) => void
 }) {
   const [supplierId, setSupplierId] = useState('')
@@ -174,8 +249,27 @@ function UploadSupplierModal({
   const [chosenQtyCol, setChosenQtyCol] = useState<number | null>(null)
   const [rows, setRows] = useState<ParsedSupplierRow[] | null>(null)
   const [extracting, setExtracting] = useState(false)
+  const [resolving, setResolving] = useState(false)
+  const [resolved, setResolved] = useState<ResolveResult | null>(null)
+  const [manualMap, setManualMap] = useState<Map<string, string>>(new Map())
+  const [visibleUnmapped, setVisibleUnmapped] = useState(10)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  async function runResolve(sId: string, extractedRows: ParsedSupplierRow[]) {
+    setResolving(true)
+    setResolved(null)
+    setManualMap(new Map())
+    setVisibleUnmapped(10)
+    try {
+      const r = await resolveSupplierRows(sId, extractedRows)
+      setResolved(r)
+    } catch (e: any) {
+      setError(`Gagal cocokkan SKU: ${e?.message || e}`)
+    } finally {
+      setResolving(false)
+    }
+  }
 
   async function runExtract(f: File, s: ScanResult, qtyIdx: number) {
     setExtracting(true)
@@ -189,6 +283,13 @@ function UploadSupplierModal({
       setExtracting(false)
     }
   }
+
+  useEffect(() => {
+    if (supplierId && rows && rows.length > 0) {
+      runResolve(supplierId, rows)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierId, rows])
 
   async function handleFilePick(f: File | undefined) {
     if (!f) return
@@ -223,6 +324,15 @@ function UploadSupplierModal({
     await runExtract(file, scan, idx)
   }
 
+  async function handleMapRow(row: UnmappedSupplierRow, productId: string) {
+    try {
+      await saveSupplierSkuMapping(supplierId, row.sku, productId)
+      setManualMap((prev) => new Map(prev).set(row.sku, productId))
+    } catch (e: any) {
+      setError(String(e?.message || e))
+    }
+  }
+
   async function handleAddSupplier() {
     if (!newSupplierName.trim()) return
     try {
@@ -237,11 +347,16 @@ function UploadSupplierModal({
   }
 
   async function handleSubmit() {
-    if (!supplierId || !rows || rows.length === 0) return
+    if (!supplierId || !resolved) return
     setSubmitting(true)
     setError(null)
     try {
-      await onUpload(supplierId, rows.map((r) => ({ sku: r.sku, qty: r.qty })))
+      const manualResolved: ResolvedSupplierRow[] = resolved.unmapped
+        .filter((r) => manualMap.has(r.sku))
+        .map((r) => ({ productId: manualMap.get(r.sku)!, qty: r.qty }))
+      const allResolved = [...resolved.mapped, ...manualResolved]
+      const stillSkipped = resolved.unmapped.length - manualResolved.length
+      await onUpload(supplierId, allResolved, stillSkipped)
       onClose()
     } catch (e: any) {
       setError(String(e?.message || e))
@@ -251,7 +366,8 @@ function UploadSupplierModal({
   }
 
   const needsColumnChoice = !!scan?.ok && (scan.qtyCandidates?.length || 0) > 1 && chosenQtyCol === null
-  const canSubmit = !!supplierId && !!rows && rows.length > 0 && !needsColumnChoice
+  const totalResolvedCount = (resolved?.mapped.length || 0) + manualMap.size
+  const canSubmit = !!supplierId && !!resolved && totalResolvedCount > 0 && !needsColumnChoice
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={submitting ? undefined : onClose}>
@@ -348,6 +464,44 @@ function UploadSupplierModal({
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {resolving && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                <Loader2 size={12} className="animate-spin" /> Mencocokkan kode barang STAR ke katalog produk kita...
+              </div>
+            )}
+
+            {resolved && !resolving && (
+              <div className="mt-2 space-y-2">
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
+                  <span className="font-medium text-emerald-700">{resolved.mapped.length + manualMap.size}</span> dari{' '}
+                  <span className="font-medium">{resolved.mapped.length + resolved.unmapped.length}</span> SKU otomatis cocok.
+                  {resolved.unmapped.length - manualMap.size > 0 && (
+                    <> {resolved.unmapped.length - manualMap.size} belum dikenali — cocokkan manual di bawah (opsional, sisanya tetap bisa di-upload sekarang).</>
+                  )}
+                </div>
+
+                {resolved.unmapped.filter((r) => !manualMap.has(r.sku)).length > 0 && (
+                  <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 space-y-2 max-h-72 overflow-y-auto">
+                    <p className="text-xs font-semibold text-amber-800">Cocokkan kode STAR ke produk kita:</p>
+                    {resolved.unmapped
+                      .filter((r) => !manualMap.has(r.sku))
+                      .slice(0, visibleUnmapped)
+                      .map((r) => (
+                        <UnmappedRowMatcher key={r.sku} row={r} onMapped={(productId) => handleMapRow(r, productId)} />
+                      ))}
+                    {resolved.unmapped.filter((r) => !manualMap.has(r.sku)).length > visibleUnmapped && (
+                      <button
+                        onClick={() => setVisibleUnmapped((v) => v + 10)}
+                        className="w-full text-center text-xs text-indigo-600 font-medium py-1"
+                      >
+                        Tampilkan 10 lagi ({resolved.unmapped.filter((r) => !manualMap.has(r.sku)).length - visibleUnmapped} sisanya)
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -676,9 +830,9 @@ function StokSupplierTab() {
     }
   }
 
-  async function handleUpload(supplierId: string, rows: { sku: string; qty: number }[]) {
-    const r = await uploadSupplierStockFile(supplierId, rows)
-    setMessage(`Upload tersimpan — ${r.itemsUpdated} SKU diperbarui${r.itemsSkipped ? `, ${r.itemsSkipped} SKU dilewati (tidak ketemu di katalog produk)` : ''}.`)
+  async function handleUpload(supplierId: string, resolvedRows: ResolvedSupplierRow[], skippedCount: number) {
+    const r = await uploadSupplierStockFile(supplierId, resolvedRows, skippedCount)
+    setMessage(`Upload tersimpan — ${r.itemsUpdated} SKU diperbarui${r.itemsSkipped ? `, ${r.itemsSkipped} SKU dilewati (belum dikenali)` : ''}.`)
   }
 
   return (
