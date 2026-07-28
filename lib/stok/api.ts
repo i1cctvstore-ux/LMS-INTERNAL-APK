@@ -120,25 +120,31 @@ function normalizeName(s: string): string {
   return (s || '').trim().toLowerCase()
 }
 
-export type SupplierStockResult = {
+export type SupplierStockGudangEntry = { gudang: string; qty: number; updatedAt: string | null }
+export type SupplierStockSupplierGroup = { supplierName: string; totalQty: number; gudangEntries: SupplierStockGudangEntry[] }
+export type SupplierStockProductResult = {
+  productId: string
   productName: string
   productSku: string
-  supplierName: string
-  qty: number
-  updatedAt: string | null
+  kategori: string
+  subjenis: string
+  totalQty: number
+  suppliers: SupplierStockSupplierGroup[]
 }
 
-// Cari 1 produk (lewat nama atau SKU) lalu tampilkan ketersediaannya di
-// semua supplier yang pernah di-upload datanya — sesuai alur "Cari 1
-// tipe untuk lihat ketersediaan di tiap supplier" di halaman Cek Stok.
-export async function searchSupplierStock(query: string): Promise<SupplierStockResult[]> {
+// Cari produk (lewat nama atau SKU) lalu tampilkan ketersediaannya di
+// semua supplier yang pernah di-upload datanya, DIKELOMPOKKAN per
+// produk -> per supplier -> per gudang (kalau supplier itu ngasih
+// breakdown gudang; kalau cuma 1 angka flat, gudang-nya bakal string
+// kosong '' dan cuma tampil 1 baris).
+export async function searchSupplierStock(query: string): Promise<SupplierStockProductResult[]> {
   const q = query.trim()
   if (!q) return []
   const supabase = createClient()
 
   const { data: products, error: productErr } = await supabase
     .from('service_products')
-    .select('id, sku, name')
+    .select('id, sku, name, kategori, subjenis')
     .or(`name.ilike.%${q}%,sku.ilike.%${q}%`)
     .limit(20)
   if (productErr) throw new Error(productErr.message)
@@ -147,19 +153,34 @@ export async function searchSupplierStock(query: string): Promise<SupplierStockR
   const productIds = products.map((p: any) => p.id)
   const { data: stockRows, error: stockErr } = await supabase
     .from('supplier_stock')
-    .select('product_id, qty, updated_at, service_suppliers(name), service_products(sku, name)')
+    .select('product_id, gudang, qty, updated_at, service_suppliers(name)')
     .in('product_id', productIds)
   if (stockErr) throw new Error(stockErr.message)
 
-  return (stockRows || [])
-    .map((r: any) => ({
-      productName: r.service_products?.name || '',
-      productSku: r.service_products?.sku || '',
-      supplierName: r.service_suppliers?.name || '',
-      qty: Number(r.qty) || 0,
-      updatedAt: r.updated_at,
-    }))
-    .sort((a, b) => b.qty - a.qty)
+  const results: SupplierStockProductResult[] = products.map((p: any) => {
+    const rowsForProduct = (stockRows || []).filter((r: any) => r.product_id === p.id)
+    const bySupplier = new Map<string, SupplierStockSupplierGroup>()
+    rowsForProduct.forEach((r: any) => {
+      const supplierName = r.service_suppliers?.name || '(supplier tidak diketahui)'
+      const group = bySupplier.get(supplierName) || { supplierName, totalQty: 0, gudangEntries: [] }
+      group.gudangEntries.push({ gudang: r.gudang || '', qty: Number(r.qty) || 0, updatedAt: r.updated_at })
+      group.totalQty += Number(r.qty) || 0
+      bySupplier.set(supplierName, group)
+    })
+    const suppliers = Array.from(bySupplier.values()).sort((a, b) => b.totalQty - a.totalQty)
+    const totalQty = suppliers.reduce((sum, s) => sum + s.totalQty, 0)
+    return {
+      productId: p.id,
+      productName: p.name,
+      productSku: p.sku || '',
+      kategori: p.kategori || '',
+      subjenis: p.subjenis || '',
+      totalQty,
+      suppliers,
+    }
+  })
+
+  return results.filter((r) => r.suppliers.length > 0).sort((a, b) => b.totalQty - a.totalQty)
 }
 
 export type PasteResult = { itemsUpdated: number; itemsSkipped: number }
@@ -247,18 +268,19 @@ export async function addSupplierQuick(name: string): Promise<SupplierOption> {
 // kolom Nama Supplier per baris). Sebelum angka lama ditimpa, snapshot
 // nilai lamanya disimpan ke stok_upload_log dulu supaya kelihatan di
 // Riwayat.
-export type ResolvedSupplierRow = { productId: string; qty: number }
-export type UnmappedSupplierRow = { sku: string; qty: number; namaBarang?: string }
+export type ResolvedSupplierRow = { sku: string; productId: string }
+export type UnmappedSupplierRow = { sku: string; namaBarang?: string }
 export type ResolveResult = { mapped: ResolvedSupplierRow[]; unmapped: UnmappedSupplierRow[] }
 
-// Cek tiap baris hasil parsing file terhadap pemetaan kode supplier
+// Cek tiap SKU (SUDAH DI-DEDUPE, satu per SKU — qty & gudang gak
+// relevan buat langkah pencocokan ini) terhadap pemetaan kode supplier
 // yang SUDAH ADA (supplier_sku_mapping) — kalau belum ada pemetaannya,
-// dicoba juga cocok langsung ke SKU internal (siapa tau kebetulan sama)
-// sebagai fallback, baru kalau tetap gak ketemu masuk ke daftar
+// dicoba juga cocok langsung ke SKU internal, lalu cocok lewat nama
+// produk (kalau unik), baru kalau tetap gak ketemu masuk ke daftar
 // "unmapped" yang perlu dicocokkan manual di UI.
 export async function resolveSupplierRows(
   supplierId: string,
-  rows: { sku: string; qty: number; namaBarang?: string }[],
+  rows: { sku: string; namaBarang?: string }[],
 ): Promise<ResolveResult> {
   const supabase = createClient()
 
@@ -302,7 +324,7 @@ export async function resolveSupplierRows(
         autoNameMatches.push({ supplierSku: r.sku, productId: byName })
       }
     }
-    if (productId) mapped.push({ productId, qty: r.qty })
+    if (productId) mapped.push({ sku: r.sku, productId })
     else unmapped.push(r)
   })
 
@@ -326,6 +348,30 @@ export async function resolveSupplierRows(
   return { mapped, unmapped }
 }
 
+export type FinalSupplierStockRow = { productId: string; gudang: string; qty: number }
+
+// Dipanggil di client SETELAH resolveSupplierRows (+ pencocokan manual
+// kalau ada) selesai — "kembangkan" balik baris-baris asli dari file
+// (yang masih per-gudang, belum di-dedupe) jadi baris final siap upload,
+// pakai peta SKU -> productId yang udah pasti. Ini murni logic lokal,
+// gak ada panggilan ke server.
+export function buildSupplierStockRows(
+  fileRows: { sku: string; gudang: string; qty: number }[],
+  skuToProductId: Map<string, string>,
+): { rows: FinalSupplierStockRow[]; skippedCount: number } {
+  const rows: FinalSupplierStockRow[] = []
+  let skippedCount = 0
+  fileRows.forEach((r) => {
+    const productId = skuToProductId.get(normalizeSku(r.sku))
+    if (!productId) {
+      skippedCount += 1
+      return
+    }
+    rows.push({ productId, gudang: r.gudang, qty: r.qty })
+  })
+  return { rows, skippedCount }
+}
+
 export type BulkCreateResult = { created: number; skipped: number; mappingBySku: Record<string, string> }
 
 // Buat SKU supplier yang gak ketemu produk-nya sama sekali (belum pernah
@@ -334,7 +380,7 @@ export type BulkCreateResult = { created: number; skipped: number; mappingBySku:
 // langsung disimpen pemetaannya juga.
 export async function bulkCreateProductsAndMap(
   supplierId: string,
-  rows: { sku: string; qty: number; namaBarang?: string }[],
+  rows: { sku: string; namaBarang?: string }[],
 ): Promise<BulkCreateResult> {
   const supabase = createClient()
 
@@ -430,7 +476,7 @@ export async function saveSupplierSkuMapping(supplierId: string, supplierSku: st
 // nebak SKU lagi di sini, tinggal tulis product_id+qty yang udah pasti.
 export async function uploadSupplierStockFile(
   supplierId: string,
-  resolvedRows: ResolvedSupplierRow[],
+  resolvedRows: FinalSupplierStockRow[],
   skippedCount = 0,
 ): Promise<PasteResult> {
   const supabase = createClient()
@@ -438,18 +484,24 @@ export async function uploadSupplierStockFile(
   // Snapshot angka LAMA punya supplier ini, sebelum ditimpa.
   const { data: oldRows, error: oldErr } = await supabase
     .from('supplier_stock')
-    .select('product_id, qty')
+    .select('product_id, gudang, qty')
     .eq('supplier_id', supplierId)
   if (oldErr) throw new Error(oldErr.message)
 
   const now = new Date().toISOString()
-  const upsertRows = resolvedRows.map((r) => ({ supplier_id: supplierId, product_id: r.productId, qty: r.qty, updated_at: now }))
+  const upsertRows = resolvedRows.map((r) => ({
+    supplier_id: supplierId,
+    product_id: r.productId,
+    gudang: r.gudang,
+    qty: r.qty,
+    updated_at: now,
+  }))
 
   if (upsertRows.length) {
     const CHUNK = 300
     for (let i = 0; i < upsertRows.length; i += CHUNK) {
       const chunk = upsertRows.slice(i, i + CHUNK)
-      const { error } = await supabase.from('supplier_stock').upsert(chunk, { onConflict: 'supplier_id,product_id' })
+      const { error } = await supabase.from('supplier_stock').upsert(chunk, { onConflict: 'supplier_id,product_id,gudang' })
       if (error) throw new Error(error.message)
     }
   }
