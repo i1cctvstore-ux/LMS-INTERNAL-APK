@@ -173,18 +173,26 @@ function UnmappedRowMatcher({
   const [searching, setSearching] = useState(false)
   const [open, setOpen] = useState(false)
 
-  async function runSearch(q: string) {
+  async function runSearch(q: string, autoOpen = true) {
     setQuery(q)
     if (q.trim().length < 2) { setResults([]); return }
     setSearching(true)
     try {
       const r = await searchProductsForMapping(q)
       setResults(r)
-      setOpen(true)
+      if (autoOpen) setOpen(true)
     } finally {
       setSearching(false)
     }
   }
+
+  useEffect(() => {
+    // Pre-isi hasil pencarian dari nama barang di file, TAPI dropdown-nya
+    // gak langsung dibuka otomatis (biar gak numpuk kalau banyak baris
+    // kebuka bareng) — baru muncul begitu baris ini di-klik/fokus.
+    if (row.namaBarang) runSearch(row.namaBarang, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
@@ -522,6 +530,11 @@ function UploadSupplierModal({
             {submitting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
             {submitting ? 'Memproses...' : 'Proses & Update Stok'}
           </button>
+          {!canSubmit && !submitting && resolved && totalResolvedCount === 0 && (
+            <p className="text-[11px] text-slate-400 text-center mt-1.5">
+              Cocokkan minimal 1 SKU dulu (klik kotak pencarian di salah satu baris di atas, lalu pilih produknya).
+            </p>
+          )}
         </div>
       </div>
     </div>
