@@ -294,3 +294,158 @@ export async function loadUploadLog(branchId: string, limit = 20): Promise<Uploa
     itemsSkipped: r.items_skipped,
   }))
 }
+
+// =====================================================
+// Tabel matriks Stok Cabang — semua cabang ditampilkan sekaligus jadi
+// kolom, per produk. Angka yang ditampilkan = stok fisik (dari sync
+// Zoho/Accurate) DIKURANGI barang yang lagi "ditahan" buat Claim Barang
+// yang masih aktif (belum status Selesai) di cabang itu.
+//
+// Catatan RLS: Admin Cabang biasa (bukan super_admin) cuma bisa baca
+// baris product_stock/service_claims di cabangnya sendiri — jadi kalau
+// dia buka tabel ini, kolom cabang LAIN otomatis kosong (0), bukan
+// error. Super Admin lihat semua kolom terisi penuh.
+// =====================================================
+
+export type BranchOption = { id: string; name: string }
+
+export async function loadAllBranches(): Promise<BranchOption[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.from('branches').select('id, name').eq('active', true).order('name')
+  if (error) throw new Error(error.message)
+  return (data || []).map((b: any) => ({ id: b.id, name: b.name }))
+}
+
+export type MatrixProduct = {
+  productId: string
+  sku: string
+  name: string
+  kategori: string
+  subjenis: string
+}
+
+export type StockMatrixData = {
+  products: MatrixProduct[]
+  // key: `${branchId}|${productId}` -> qty fisik dari product_stock
+  physical: Record<string, number>
+  // key: `${branchId}|${normalizedSku}` -> jumlah unit yang lagi ditahan servis
+  held: Record<string, number>
+}
+
+export async function loadStockMatrix(): Promise<StockMatrixData> {
+  const supabase = createClient()
+  const PAGE = 1000
+
+  async function fetchAllPaged(table: string, select: string, extra?: (q: any) => any) {
+    const rows: any[] = []
+    let from = 0
+    while (true) {
+      let q = supabase.from(table).select(select).range(from, from + PAGE - 1)
+      if (extra) q = extra(q)
+      const { data, error } = await q
+      if (error) throw new Error(error.message)
+      rows.push(...(data || []))
+      if (!data || data.length < PAGE) break
+      from += PAGE
+    }
+    return rows
+  }
+
+  const [productRows, stockRows, claimRows] = await Promise.all([
+    fetchAllPaged('service_products', 'id, sku, name, kategori, subjenis'),
+    fetchAllPaged('product_stock', 'branch_id, product_id, qty_on_hand'),
+    fetchAllPaged('service_claims', 'branch_id, produk_sku, status', (q) => q.neq('status', 'Selesai')),
+  ])
+
+  const physical: Record<string, number> = {}
+  stockRows.forEach((r) => {
+    physical[`${r.branch_id}|${r.product_id}`] = Number(r.qty_on_hand) || 0
+  })
+
+  const held: Record<string, number> = {}
+  claimRows.forEach((c) => {
+    if (!c.produk_sku || !c.branch_id) return
+    const key = `${c.branch_id}|${normalizeSku(c.produk_sku)}`
+    held[key] = (held[key] || 0) + 1
+  })
+
+  const products: MatrixProduct[] = productRows.map((p: any) => ({
+    productId: p.id,
+    sku: p.sku || '',
+    name: p.name,
+    kategori: p.kategori || '',
+    subjenis: p.subjenis || '',
+  }))
+
+  return { products, physical, held }
+}
+
+// Dipakai UI buat nyocokin kunci `held` dengan cara normalisasi yang
+// sama persis dengan yang dipakai pas nyusun map-nya di atas.
+export { normalizeSku }
+
+export async function loadLastSyncFreshness(): Promise<string | null> {
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('stock_sync_log')
+    .select('finished_at')
+    .eq('status', 'success')
+    .order('finished_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return data?.finished_at || null
+}
+
+export async function triggerZohoSyncAll(): Promise<{ results: any[]; message?: string }> {
+  const res = await fetch('/api/stok/sync-zoho', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body?.message || 'Gagal menjalankan sinkronisasi.')
+  return body
+}
+
+// Riwayat sekarang ditampilkan lintas cabang (gak terikat 1 cabang aktif
+// lagi) — RLS tetap otomatis batasin Admin Cabang biasa cuma lihat
+// baris cabangnya sendiri, Super Admin lihat semua.
+export async function loadSyncLogAll(limit = 30): Promise<SyncLogRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('stock_sync_log')
+    .select('*')
+    .order('started_at', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(error.message)
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    source: r.source,
+    triggeredBy: r.triggered_by,
+    startedAt: r.started_at,
+    finishedAt: r.finished_at,
+    status: r.status,
+    itemsUpdated: r.items_updated,
+    itemsSkipped: r.items_skipped,
+    errorMessage: r.error_message,
+  }))
+}
+
+export async function loadSupplierUploadLog(limit = 30): Promise<UploadLogRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('stok_upload_log')
+    .select('*')
+    .eq('kind', 'stok_supplier')
+    .order('uploaded_at', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(error.message)
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    kind: r.kind,
+    uploadedAt: r.uploaded_at,
+    itemsUpdated: r.items_updated,
+    itemsSkipped: r.items_skipped,
+  }))
+}
