@@ -1216,7 +1216,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
     await persist({ settings: next });
   }
 
-  function addProduct(name, sku) {
+  function addProduct(name, sku, kategori, subjenis) {
     const trimmedName = (name || "").trim();
     const trimmedSku = (sku || "").trim();
     if (!trimmedName) return;
@@ -1226,7 +1226,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
       // SKU sekarang opsional — kalau kosong, gak dicek duplikat SKU-nya.
       const existsSku = trimmedSku && list.some((p) => (p.sku || "").trim().toLowerCase() === trimmedSku.toLowerCase());
       if (existsName || existsSku) return prev;
-      const next = { ...prev, products: [...list, { id: uid(), sku: trimmedSku, name: trimmedName }] };
+      const next = { ...prev, products: [...list, { id: uid(), sku: trimmedSku, name: trimmedName, kategori: (kategori || "").trim(), subjenis: (subjenis || "").trim() }] };
       persist({ settings: next });
       return next;
     });
@@ -5687,6 +5687,9 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
           <div key={p.id} className="px-3 py-2 text-sm flex items-center justify-between gap-2">
             <div className="flex-1 min-w-0 flex items-center gap-2">
               <span className="truncate">{p.name}</span>
+              {p.kategori && (
+                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{p.kategori}</span>
+              )}
               <span className={`shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded ${p.sku ? "bg-slate-100 text-slate-500" : "bg-red-100 text-red-600"}`}>
                 {p.sku || "SKU KOSONG"}
               </span>
@@ -5706,19 +5709,21 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
       {addOpen && (
         <ProductFormModal
           title="Tambah Produk"
-          initial={{ name: "", sku: "" }}
+          initial={{ name: "", sku: "", kategori: "", subjenis: "" }}
+          kategoriOptions={[...new Set(list.map((p) => p.kategori).filter(Boolean))]}
           isTaken={(name, sku) => skuOrNameTaken(name, sku, null)}
           onClose={() => setAddOpen(false)}
-          onSave={(v) => { onAddProduct(v.name, v.sku); setAddOpen(false); }}
+          onSave={(v) => { onAddProduct(v.name, v.sku, v.kategori, v.subjenis); setAddOpen(false); }}
         />
       )}
       {editProduct && (
         <ProductFormModal
           title="Edit Produk"
-          initial={{ name: editProduct.name, sku: editProduct.sku || "" }}
+          initial={{ name: editProduct.name, sku: editProduct.sku || "", kategori: editProduct.kategori || "", subjenis: editProduct.subjenis || "" }}
+          kategoriOptions={[...new Set(list.map((p) => p.kategori).filter(Boolean))]}
           isTaken={(name, sku) => skuOrNameTaken(name, sku, editProduct.id)}
           onClose={() => setEditProduct(null)}
-          onSave={(v) => { onUpdateProduct(editProduct.id, { name: v.name, sku: v.sku }); setEditProduct(null); }}
+          onSave={(v) => { onUpdateProduct(editProduct.id, { name: v.name, sku: v.sku, kategori: v.kategori, subjenis: v.subjenis }); setEditProduct(null); }}
         />
       )}
       {confirmDelete && (
@@ -5755,9 +5760,11 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
   );
 }
 
-function ProductFormModal({ title, initial, isTaken, onClose, onSave }) {
+function ProductFormModal({ title, initial, isTaken, kategoriOptions, onClose, onSave }) {
   const [name, setName] = useState(initial.name || "");
   const [sku, setSku] = useState(initial.sku || "");
+  const [kategori, setKategori] = useState(initial.kategori || "");
+  const [subjenis, setSubjenis] = useState(initial.subjenis || "");
   const taken = (name.trim() || sku.trim()) && isTaken(name, sku);
   const canSave = name.trim() && sku.trim() && !taken;
   return (
@@ -5765,11 +5772,18 @@ function ProductFormModal({ title, initial, isTaken, onClose, onSave }) {
       <div className="space-y-3 mb-2">
         <Field label="Nama Produk"><input autoFocus className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <Field label="SKU (wajib)"><input className={inputCls + " font-mono"} placeholder="BRAND-TIPE-VARIASI" value={sku} onChange={(e) => setSku(e.target.value)} /></Field>
+        <Field label="Kategori (opsional, mis. IP Camera)">
+          <input list="kategori-produk-options" className={inputCls} value={kategori} onChange={(e) => setKategori(e.target.value)} />
+          <datalist id="kategori-produk-options">
+            {(kategoriOptions || []).map((k) => <option key={k} value={k} />)}
+          </datalist>
+        </Field>
+        <Field label="Subjenis (opsional, mis. Regular - Dome)"><input className={inputCls} value={subjenis} onChange={(e) => setSubjenis(e.target.value)} /></Field>
       </div>
       {taken && <p className="text-[11px] text-red-600 mb-3">Nama atau SKU ini sudah dipakai produk lain.</p>}
       <div className="flex gap-2 mt-3">
         <button onClick={onClose} className={`flex-1 px-4 py-2.5 text-sm ${btnSecondaryCls}`}>Batal</button>
-        <button disabled={!canSave} onClick={() => onSave({ name: name.trim(), sku: sku.trim() })} className={`flex-1 px-4 py-2.5 text-sm ${btnPrimaryCls}`}>Simpan</button>
+        <button disabled={!canSave} onClick={() => onSave({ name: name.trim(), sku: sku.trim(), kategori: kategori.trim(), subjenis: subjenis.trim() })} className={`flex-1 px-4 py-2.5 text-sm ${btnPrimaryCls}`}>Simpan</button>
       </div>
     </Modal>
   );
