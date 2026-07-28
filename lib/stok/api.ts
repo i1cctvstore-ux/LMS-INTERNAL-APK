@@ -221,8 +221,86 @@ export async function uploadSupplierStockPaste(
   return { itemsUpdated, itemsSkipped }
 }
 
-// Koreksi manual Stok Cabang: kolom SKU, Qty — dipakai kalau angka dari
-// Zoho/Accurate perlu ditimpa manual (misal ada selisih hasil stock
+export type SupplierOption = { id: string; name: string }
+
+export async function loadAllSuppliers(): Promise<SupplierOption[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.from('service_suppliers').select('id, name').order('name')
+  if (error) throw new Error(error.message)
+  return (data || []).map((s: any) => ({ id: s.id, name: s.name }))
+}
+
+// Tambah supplier cepat dari dalam modal Upload Stok Supplier (link
+// "+ Supplier belum ada? Tambahkan di Master Data") — tetap nulis ke
+// katalog supplier BERSAMA yang sama dipakai modul Servis.
+export async function addSupplierQuick(name: string): Promise<SupplierOption> {
+  const supabase = createClient()
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error('Nama supplier tidak boleh kosong.')
+  const { data, error } = await supabase.from('service_suppliers').insert({ name: trimmed }).select('id, name').single()
+  if (error) throw new Error(error.message)
+  return { id: data.id, name: data.name }
+}
+
+// Upload Stok Supplier lewat FILE (satu supplier per upload, dipilih
+// dari dropdown — beda dari uploadSupplierStockPaste yang masih pakai
+// kolom Nama Supplier per baris). Sebelum angka lama ditimpa, snapshot
+// nilai lamanya disimpan ke stok_upload_log dulu supaya kelihatan di
+// Riwayat.
+export async function uploadSupplierStockFile(
+  supplierId: string,
+  rows: { sku: string; qty: number }[],
+): Promise<PasteResult> {
+  const supabase = createClient()
+
+  const { data: products, error: pErr } = await supabase.from('service_products').select('id, sku')
+  if (pErr) throw new Error(pErr.message)
+  const productIdBySku = new Map<string, string>()
+  ;(products || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
+
+  // Snapshot angka LAMA punya supplier ini, sebelum ditimpa.
+  const { data: oldRows, error: oldErr } = await supabase
+    .from('supplier_stock')
+    .select('product_id, qty')
+    .eq('supplier_id', supplierId)
+  if (oldErr) throw new Error(oldErr.message)
+
+  let itemsUpdated = 0
+  let itemsSkipped = 0
+  const now = new Date().toISOString()
+  const upsertRows: { supplier_id: string; product_id: string; qty: number; updated_at: string }[] = []
+
+  rows.forEach((r) => {
+    const productId = productIdBySku.get(normalizeSku(r.sku))
+    if (!productId) {
+      itemsSkipped += 1
+      return
+    }
+    upsertRows.push({ supplier_id: supplierId, product_id: productId, qty: r.qty, updated_at: now })
+    itemsUpdated += 1
+  })
+
+  if (upsertRows.length) {
+    const CHUNK = 300
+    for (let i = 0; i < upsertRows.length; i += CHUNK) {
+      const chunk = upsertRows.slice(i, i + CHUNK)
+      const { error } = await supabase.from('supplier_stock').upsert(chunk, { onConflict: 'supplier_id,product_id' })
+      if (error) throw new Error(error.message)
+    }
+  }
+
+  const { error: logErr } = await supabase.from('stok_upload_log').insert({
+    kind: 'stok_supplier',
+    branch_id: null,
+    supplier_id: supplierId,
+    items_updated: itemsUpdated,
+    items_skipped: itemsSkipped,
+    snapshot: oldRows || [],
+  })
+  if (logErr) throw new Error(logErr.message)
+
+  return { itemsUpdated, itemsSkipped }
+}
 // opname fisik). Cuma nulis ke product_stock cabang yang aktif.
 export async function uploadBranchStockCorrection(
   branchId: string,
