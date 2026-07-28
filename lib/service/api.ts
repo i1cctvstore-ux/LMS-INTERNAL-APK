@@ -100,6 +100,8 @@ export type ProductItem = {
   id: string
   sku: string
   name: string
+  kategori: string
+  subjenis: string
 }
 
 export type SupplierItem = {
@@ -345,7 +347,7 @@ async function setBranchSparepartQty(branchId: string, sparepartId: string, qty:
 }
 
 function productFromRow(row: any): ProductItem {
-  return { id: row.id, sku: row.sku || '', name: row.name }
+  return { id: row.id, sku: row.sku || '', name: row.name, kategori: row.kategori || '', subjenis: row.subjenis || '' }
 }
 
 // Produk sekarang katalog GLOBAL (bukan per-cabang lagi) — gak ada
@@ -355,6 +357,8 @@ function productToRow(p: Partial<ProductItem>) {
   if (p.id !== undefined) row.id = p.id
   if (p.sku !== undefined) row.sku = p.sku || ''
   if (p.name !== undefined) row.name = p.name
+  if (p.kategori !== undefined) row.kategori = p.kategori || null
+  if (p.subjenis !== undefined) row.subjenis = p.subjenis || null
   return row
 }
 
