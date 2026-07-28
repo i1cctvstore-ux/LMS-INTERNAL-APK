@@ -19,6 +19,7 @@ import {
   addSupplierQuick,
   uploadSupplierStockFile,
   resolveSupplierRows,
+  buildSupplierStockRows,
   searchProductsForMapping,
   saveSupplierSkuMapping,
   bulkCreateProductsAndMap,
@@ -27,14 +28,22 @@ import {
   type StockMatrixData,
   type SyncLogRow,
   type UploadLogRow,
-  type SupplierStockResult,
+  type SupplierStockProductResult,
   type SupplierOption,
   type ResolveResult,
   type ResolvedSupplierRow,
   type UnmappedSupplierRow,
   type ProductSearchResult,
+  type FinalSupplierStockRow,
 } from '@/lib/stok/api'
-import { scanSupplierStockExcel, extractSupplierStockRows, type ScanResult, type QtyColumnCandidate, type ParsedSupplierRow } from '@/lib/stok/parse-supplier-file'
+import {
+  scanSupplierStockExcel,
+  extractSupplierStockRows,
+  type ScanResult,
+  type QtyColumnCandidate,
+  type ParsedSupplierRow,
+  type GudangColumnChoice,
+} from '@/lib/stok/parse-supplier-file'
 
 type StokModuleProps = {
   currentUserRole: string
@@ -197,12 +206,9 @@ function UnmappedRowMatcher({
 
   return (
     <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
-      <div className="flex items-center justify-between gap-2 mb-1.5">
-        <div className="min-w-0">
-          <span className="font-mono text-[11px] text-slate-500">{row.sku}</span>
-          {row.namaBarang && <span className="text-xs text-slate-400"> · {row.namaBarang}</span>}
-        </div>
-        <span className="shrink-0 text-xs font-medium text-slate-600">Qty {row.qty}</span>
+      <div className="mb-1.5 min-w-0">
+        <span className="font-mono text-[11px] text-slate-500">{row.sku}</span>
+        {row.namaBarang && <span className="text-xs text-slate-400"> · {row.namaBarang}</span>}
       </div>
       <div className="relative">
         <input
@@ -246,7 +252,7 @@ function UploadSupplierModal({
 }: {
   suppliers: SupplierOption[]
   onClose: () => void
-  onUpload: (supplierId: string, resolvedRows: ResolvedSupplierRow[], skippedCount: number) => Promise<void>
+  onUpload: (supplierId: string, resolvedRows: FinalSupplierStockRow[], skippedCount: number) => Promise<void>
   onSupplierAdded: (s: SupplierOption) => void
 }) {
   const [supplierId, setSupplierId] = useState('')
@@ -255,8 +261,8 @@ function UploadSupplierModal({
   const [file, setFile] = useState<File | null>(null)
   const [scanning, setScanning] = useState(false)
   const [scan, setScan] = useState<ScanResult | null>(null)
-  const [chosenQtyCol, setChosenQtyCol] = useState<number | null>(null)
-  const [rows, setRows] = useState<ParsedSupplierRow[] | null>(null)
+  const [columnDraft, setColumnDraft] = useState<{ colIndex: number; selected: boolean; gudangName: string }[] | null>(null)
+  const [fileRows, setFileRows] = useState<ParsedSupplierRow[] | null>(null)
   const [extracting, setExtracting] = useState(false)
   const [resolving, setResolving] = useState(false)
   const [resolved, setResolved] = useState<ResolveResult | null>(null)
@@ -267,27 +273,12 @@ function UploadSupplierModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function runResolve(sId: string, extractedRows: ParsedSupplierRow[]) {
-    setResolving(true)
-    setResolved(null)
-    setManualMap(new Map())
-    setVisibleUnmapped(10)
-    try {
-      const r = await resolveSupplierRows(sId, extractedRows)
-      setResolved(r)
-    } catch (e: any) {
-      setError(`Gagal cocokkan SKU: ${e?.message || e}`)
-    } finally {
-      setResolving(false)
-    }
-  }
-
-  async function runExtract(f: File, s: ScanResult, qtyIdx: number) {
+  async function runExtract(f: File, s: ScanResult, columns: GudangColumnChoice[]) {
     setExtracting(true)
     setError(null)
     try {
-      const r = await extractSupplierStockRows(f, s, qtyIdx)
-      setRows(r)
+      const r = await extractSupplierStockRows(f, s, columns)
+      setFileRows(r)
     } catch (e: any) {
       setError(`Gagal baca isi file: ${e?.message || e}`)
     } finally {
@@ -295,19 +286,12 @@ function UploadSupplierModal({
     }
   }
 
-  useEffect(() => {
-    if (supplierId && rows && rows.length > 0) {
-      runResolve(supplierId, rows)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplierId, rows])
-
   async function handleFilePick(f: File | undefined) {
     if (!f) return
     setFile(f)
     setScan(null)
-    setChosenQtyCol(null)
-    setRows(null)
+    setColumnDraft(null)
+    setFileRows(null)
     setError(null)
     setScanning(true)
     try {
@@ -316,12 +300,22 @@ function UploadSupplierModal({
       if (!result.ok) {
         setError(result.error || 'Format file tidak dikenali.')
       } else if (result.qtyCandidates && result.qtyCandidates.length === 1) {
-        // cuma 1 kolom kandidat qty, langsung jalan otomatis
-        const idx = result.qtyCandidates[0].index
-        setChosenQtyCol(idx)
-        await runExtract(f, result, idx)
+        // Cuma 1 kolom kandidat — anggap flat (gak ada breakdown gudang
+        // yang berarti), langsung jalan otomatis.
+        const c = result.qtyCandidates[0]
+        await runExtract(f, result, [{ colIndex: c.index, gudangName: '' }])
+      } else if (result.qtyCandidates && result.qtyCandidates.length > 1) {
+        // Lebih dari 1 — siapin draft pemilihan (semua ke-cek default,
+        // nama gudang dari header, didisambiguasi kalau ada yang sama).
+        const seen = new Map<string, number>()
+        const draft = result.qtyCandidates.map((c) => {
+          const count = (seen.get(c.header) || 0) + 1
+          seen.set(c.header, count)
+          const name = count > 1 ? `${c.header} (${count})` : c.header
+          return { colIndex: c.index, selected: true, gudangName: name }
+        })
+        setColumnDraft(draft)
       }
-      // kalau kandidatnya > 1, nunggu user pilih dulu lewat UI di bawah
     } catch (e: any) {
       setError(`Gagal baca file: ${e?.message || e}`)
     } finally {
@@ -329,11 +323,34 @@ function UploadSupplierModal({
     }
   }
 
-  async function handlePickQtyColumn(idx: number) {
-    if (!file || !scan) return
-    setChosenQtyCol(idx)
-    await runExtract(file, scan, idx)
+  async function handleConfirmColumns() {
+    if (!file || !scan || !columnDraft) return
+    const chosen = columnDraft.filter((c) => c.selected).map((c) => ({ colIndex: c.colIndex, gudangName: c.gudangName.trim() || `Gudang ${c.colIndex + 1}` }))
+    if (chosen.length === 0) {
+      setError('Pilih minimal 1 kolom gudang.')
+      return
+    }
+    await runExtract(file, scan, chosen)
   }
+
+  useEffect(() => {
+    if (!supplierId || !fileRows || fileRows.length === 0) return
+    const uniqueBySkuMap = new Map<string, { sku: string; namaBarang?: string }>()
+    fileRows.forEach((r) => {
+      const key = normalizeSku(r.sku)
+      if (!uniqueBySkuMap.has(key)) uniqueBySkuMap.set(key, { sku: r.sku, namaBarang: r.namaBarang })
+    })
+    const uniqueRows = Array.from(uniqueBySkuMap.values())
+    setResolving(true)
+    setResolved(null)
+    setManualMap(new Map())
+    setVisibleUnmapped(10)
+    resolveSupplierRows(supplierId, uniqueRows)
+      .then(setResolved)
+      .catch((e: any) => setError(`Gagal cocokkan SKU: ${e?.message || e}`))
+      .finally(() => setResolving(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierId, fileRows])
 
   async function handleMapRow(row: UnmappedSupplierRow, productId: string) {
     try {
@@ -379,16 +396,15 @@ function UploadSupplierModal({
   }
 
   async function handleSubmit() {
-    if (!supplierId || !resolved) return
+    if (!supplierId || !resolved || !fileRows) return
     setSubmitting(true)
     setError(null)
     try {
-      const manualResolved: ResolvedSupplierRow[] = resolved.unmapped
-        .filter((r) => manualMap.has(r.sku))
-        .map((r) => ({ productId: manualMap.get(r.sku)!, qty: r.qty }))
-      const allResolved = [...resolved.mapped, ...manualResolved]
-      const stillSkipped = resolved.unmapped.length - manualResolved.length
-      await onUpload(supplierId, allResolved, stillSkipped)
+      const skuToProductId = new Map<string, string>()
+      resolved.mapped.forEach((r) => skuToProductId.set(normalizeSku(r.sku), r.productId))
+      manualMap.forEach((productId, sku) => skuToProductId.set(normalizeSku(sku), productId))
+      const { rows: finalRows, skippedCount } = buildSupplierStockRows(fileRows, skuToProductId)
+      await onUpload(supplierId, finalRows, skippedCount)
       onClose()
     } catch (e: any) {
       setError(String(e?.message || e))
@@ -397,7 +413,7 @@ function UploadSupplierModal({
     }
   }
 
-  const needsColumnChoice = !!scan?.ok && (scan.qtyCandidates?.length || 0) > 1 && chosenQtyCol === null
+  const needsColumnChoice = !!columnDraft && !fileRows
   const totalResolvedCount = (resolved?.mapped.length || 0) + manualMap.size
   const canSubmit = !!supplierId && !!resolved && totalResolvedCount > 0 && !needsColumnChoice
 
@@ -463,45 +479,66 @@ function UploadSupplierModal({
                     <div className="text-sm text-slate-700 truncate">{file.name}</div>
                     <div className="text-[11px] text-slate-400">
                       {(file.size / 1024 / 1024).toFixed(1)} MB
-                      {scan?.ok && rows && ` · ${rows.length} SKU terbaca (sheet "${scan.sheetName}")`}
+                      {scan?.ok && fileRows && ` · ${fileRows.length} baris terbaca (sheet "${scan.sheetName}")`}
                     </div>
                   </div>
                 </div>
                 {scanning || extracting ? (
                   <Loader2 size={14} className="animate-spin text-slate-400 shrink-0" />
-                ) : rows && rows.length > 0 ? (
+                ) : fileRows && fileRows.length > 0 ? (
                   <span className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">Siap</span>
                 ) : needsColumnChoice ? (
-                  <span className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-700">Pilih kolom</span>
+                  <span className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-700">Pilih gudang</span>
                 ) : (
                   <span className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-full bg-red-100 text-red-700">Error</span>
                 )}
               </div>
             )}
 
-            {needsColumnChoice && scan?.qtyCandidates && (
-              <div className="mt-2 p-3 rounded-xl border border-amber-200 bg-amber-50">
-                <p className="text-xs font-semibold text-amber-800 mb-2">
-                  Ada {scan.qtyCandidates.length} kolom yang mirip stok — pilih yang mana:
+            {needsColumnChoice && columnDraft && (
+              <div className="mt-2 p-3 rounded-xl border border-amber-200 bg-amber-50 space-y-2">
+                <p className="text-xs font-semibold text-amber-800">
+                  Ada {columnDraft.length} kolom yang mirip stok — centang yang mau dipakai, kasih nama gudangnya:
                 </p>
                 <div className="space-y-1.5">
-                  {scan.qtyCandidates.map((c: QtyColumnCandidate) => (
-                    <button
-                      key={c.index}
-                      onClick={() => handlePickQtyColumn(c.index)}
-                      className="w-full text-left px-3 py-2 rounded-lg bg-white border border-amber-200 hover:border-indigo-400 hover:bg-indigo-50 text-xs"
-                    >
-                      <span className="font-medium text-slate-700">Kolom {c.index + 1}{c.header ? ` ("${c.header}")` : ''}</span>
-                      <span className="text-slate-400"> — contoh: {c.sample.join(', ')}</span>
-                    </button>
+                  {columnDraft.map((c, i) => (
+                    <div key={c.colIndex} className="flex items-center gap-2 bg-white border border-amber-200 rounded-lg p-2">
+                      <input
+                        type="checkbox"
+                        checked={c.selected}
+                        onChange={(e) => {
+                          const next = [...columnDraft]
+                          next[i] = { ...next[i], selected: e.target.checked }
+                          setColumnDraft(next)
+                        }}
+                      />
+                      <input
+                        value={c.gudangName}
+                        onChange={(e) => {
+                          const next = [...columnDraft]
+                          next[i] = { ...next[i], gudangName: e.target.value }
+                          setColumnDraft(next)
+                        }}
+                        placeholder="Nama gudang..."
+                        className={inputCls + ' text-xs py-1'}
+                      />
+                    </div>
                   ))}
                 </div>
+                <button
+                  onClick={handleConfirmColumns}
+                  disabled={extracting}
+                  className="w-full px-3 py-2 rounded-full bg-indigo-600 text-white text-xs font-medium disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  {extracting && <Loader2 size={12} className="animate-spin" />}
+                  {extracting ? 'Memproses...' : 'Lanjut'}
+                </button>
               </div>
             )}
 
             {resolving && (
               <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
-                <Loader2 size={12} className="animate-spin" /> Mencocokkan kode barang STAR ke katalog produk kita...
+                <Loader2 size={12} className="animate-spin" /> Mencocokkan kode barang ke katalog produk kita...
               </div>
             )}
 
@@ -529,7 +566,7 @@ function UploadSupplierModal({
                       <div className="p-3 rounded-xl border border-indigo-300 bg-indigo-50 text-xs text-indigo-800 space-y-2">
                         <p>
                           Ini akan menambahkan {resolved.unmapped.filter((r) => !manualMap.has(r.sku)).length} produk baru ke katalog
-                          (SKU dari kode STAR, nama dari deskripsi barang). Yakin?
+                          (SKU dari kode supplier, nama dari deskripsi barang). Yakin?
                         </p>
                         <div className="flex gap-2">
                           <button onClick={() => setBulkConfirming(false)} disabled={bulkCreating} className="flex-1 px-3 py-1.5 rounded-full bg-white border border-slate-300 text-slate-600 disabled:opacity-50">
@@ -769,9 +806,11 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                     const source = stockSourceForBranch(b.id)
                     const isMine = myBranchId === b.id
                     return (
-                      <th key={b.id} className={`p-3 ${isMine ? 'bg-indigo-50/60' : ''}`}>
-                        <div className="flex items-center gap-1">
-                          <SortHeader label={b.name.length > 10 ? b.name.slice(0, 3).toUpperCase() : b.name.toUpperCase()} sortKeyName={b.id} />
+                      <th key={b.id} className={`p-3 max-w-[110px] ${isMine ? 'bg-indigo-50/60' : ''}`}>
+                        <div className="flex items-start gap-1">
+                          <span className="normal-case leading-tight">
+                            <SortHeader label={b.name} sortKeyName={b.id} />
+                          </span>
                           {source === 'zoho' && (
                             <button
                               onClick={() => handleSyncBranch(b.id)}
@@ -872,9 +911,65 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
 }
 
 // ---------- Tab: Stok Supplier ----------
+const LOW_STOCK_THRESHOLD = 5
+
+function SupplierProductCard({ result }: { result: SupplierStockProductResult }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-4">
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="min-w-0">
+          <div className="font-medium text-slate-800 truncate">{result.productName}</div>
+          {result.subjenis ? (
+            <div className="text-xs text-slate-400 truncate">{result.subjenis}</div>
+          ) : result.kategori ? (
+            <div className="text-xs text-slate-400 truncate">{result.kategori}</div>
+          ) : null}
+        </div>
+        <span className={`shrink-0 font-semibold ${result.totalQty <= 0 ? 'text-red-600' : 'text-slate-800'}`}>
+          {result.totalQty <= LOW_STOCK_THRESHOLD ? '~' : ''}{result.totalQty}
+        </span>
+      </div>
+      <div className="mt-2 space-y-2">
+        {result.suppliers.map((s) => {
+          const flat = s.gudangEntries.length === 1 && !s.gudangEntries[0].gudang
+          return (
+            <div key={s.supplierName}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-slate-700">{s.supplierName}</span>
+                <div className="flex items-center gap-2">
+                  {flat && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1 ${
+                        s.totalQty <= LOW_STOCK_THRESHOLD ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                      }`}
+                    >
+                      {s.totalQty <= LOW_STOCK_THRESHOLD ? '⚠ LOW · cek dulu' : '✓ READY'}
+                    </span>
+                  )}
+                  {flat && <span className="text-sm font-semibold text-slate-700">{s.totalQty}</span>}
+                </div>
+              </div>
+              {!flat && (
+                <div className="mt-0.5 space-y-0.5">
+                  {s.gudangEntries.map((g, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs text-slate-400 pl-3">
+                      <span>{g.gudang || '(tanpa nama gudang)'}</span>
+                      <span className="text-slate-600 font-medium">{g.qty}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function StokSupplierTab() {
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<SupplierStockResult[]>([])
+  const [results, setResults] = useState<SupplierStockProductResult[]>([])
   const [searching, setSearching] = useState(false)
   const [searched, setSearched] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
@@ -897,9 +992,9 @@ function StokSupplierTab() {
     }
   }
 
-  async function handleUpload(supplierId: string, resolvedRows: ResolvedSupplierRow[], skippedCount: number) {
+  async function handleUpload(supplierId: string, resolvedRows: FinalSupplierStockRow[], skippedCount: number) {
     const r = await uploadSupplierStockFile(supplierId, resolvedRows, skippedCount)
-    setMessage(`Upload tersimpan — ${r.itemsUpdated} SKU diperbarui${r.itemsSkipped ? `, ${r.itemsSkipped} SKU dilewati (belum dikenali)` : ''}.`)
+    setMessage(`Upload tersimpan — ${r.itemsUpdated} baris diperbarui${r.itemsSkipped ? `, ${r.itemsSkipped} baris dilewati (belum dikenali)` : ''}.`)
   }
 
   return (
@@ -925,39 +1020,34 @@ function StokSupplierTab() {
 
       {message && <div className="mb-4 p-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600">{message}</div>}
 
-      <div className="bg-white rounded-3xl border border-slate-200 p-5">
-        <div className="flex items-center gap-2.5 mb-1">
-          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
-            <PackageSearch size={18} />
-          </span>
-          <div>
-            <div className="text-sm font-semibold text-slate-800">Stok Supplier</div>
-            <div className="text-xs text-slate-400">Cari 1 tipe untuk lihat ketersediaan di tiap supplier</div>
+      {!searched && (
+        <div className="bg-white rounded-3xl border border-slate-200 p-5">
+          <div className="flex items-center gap-2.5 mb-1">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+              <PackageSearch size={18} />
+            </span>
+            <div>
+              <div className="text-sm font-semibold text-slate-800">Stok Supplier</div>
+              <div className="text-xs text-slate-400">Cari 1 tipe untuk lihat ketersediaan di tiap supplier</div>
+            </div>
           </div>
-        </div>
-
-        {!searched && (
           <p className="text-center text-sm text-indigo-600 py-10">Ketik nama produk atau SKU dulu untuk mulai cari stok supplier</p>
-        )}
-        {searched && !searching && results.length === 0 && (
-          <p className="text-center text-sm text-slate-400 py-10">Tidak ada data stok supplier untuk produk ini.</p>
-        )}
-        {searched && !searching && results.length > 0 && (
-          <div className="mt-4 divide-y divide-slate-100">
-            {results.map((r, i) => (
-              <div key={i} className="py-3 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-slate-700 truncate">{r.supplierName}</div>
-                  <div className="text-xs text-slate-400 truncate">
-                    {r.productName} · <span className="font-mono">{r.productSku}</span> · update {fmtDateTime(r.updatedAt)}
-                  </div>
-                </div>
-                <span className={`shrink-0 font-semibold ${r.qty <= 0 ? 'text-red-600' : 'text-slate-800'}`}>{r.qty}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {searched && !searching && results.length === 0 && (
+        <div className="bg-white rounded-3xl border border-slate-200 p-8">
+          <p className="text-center text-sm text-slate-400">Tidak ada data stok supplier untuk produk ini.</p>
+        </div>
+      )}
+
+      {searched && !searching && results.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {results.map((r) => (
+            <SupplierProductCard key={r.productId} result={r} />
+          ))}
+        </div>
+      )}
 
       {showUpload && (
         <UploadSupplierModal
