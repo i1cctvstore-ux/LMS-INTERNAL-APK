@@ -326,6 +326,80 @@ export async function resolveSupplierRows(
   return { mapped, unmapped }
 }
 
+export type BulkCreateResult = { created: number; skipped: number; mappingBySku: Record<string, string> }
+
+// Buat SKU supplier yang gak ketemu produk-nya sama sekali (belum pernah
+// didaftarin ke katalog) — bikin produk BARU sekaligus banyak, pakai
+// kode supplier sebagai SKU dan deskripsi barang sebagai nama, terus
+// langsung disimpen pemetaannya juga.
+export async function bulkCreateProductsAndMap(
+  supplierId: string,
+  rows: { sku: string; qty: number; namaBarang?: string }[],
+): Promise<BulkCreateResult> {
+  const supabase = createClient()
+
+  // Cek dulu SKU mana yang udah ada di katalog (biar gak duplikat/kena
+  // unique constraint) — pola yang sama kayak pengecekan import produk
+  // massal di lib/service/api.ts.
+  const existingSkuSet = new Set<string>()
+  {
+    const PAGE = 1000
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase.from('service_products').select('sku').range(from, from + PAGE - 1)
+      if (error) throw new Error(error.message)
+      ;(data || []).forEach((p: any) => existingSkuSet.add(normalizeSku(p.sku)))
+      if (!data || data.length < PAGE) break
+      from += PAGE
+    }
+  }
+
+  const seenInBatch = new Set<string>()
+  const toInsert: { id: string; sku: string; name: string }[] = []
+  const skuToNewId = new Map<string, string>()
+  let skipped = 0
+
+  rows.forEach((r) => {
+    const key = normalizeSku(r.sku)
+    if (!r.sku.trim() || !key || existingSkuSet.has(key) || seenInBatch.has(key)) {
+      skipped += 1
+      return
+    }
+    seenInBatch.add(key)
+    const id = crypto.randomUUID()
+    toInsert.push({ id, sku: r.sku.trim(), name: (r.namaBarang || r.sku).trim() })
+    skuToNewId.set(r.sku, id)
+  })
+
+  if (toInsert.length) {
+    const CHUNK = 300
+    for (let i = 0; i < toInsert.length; i += CHUNK) {
+      const chunk = toInsert.slice(i, i + CHUNK)
+      const { error } = await supabase.from('service_products').insert(chunk)
+      if (error) throw new Error(error.message)
+    }
+  }
+
+  if (skuToNewId.size) {
+    const mappingRows = Array.from(skuToNewId.entries()).map(([sku, productId]) => ({
+      supplier_id: supplierId,
+      supplier_sku: sku,
+      product_id: productId,
+    }))
+    const CHUNK = 300
+    for (let i = 0; i < mappingRows.length; i += CHUNK) {
+      const chunk = mappingRows.slice(i, i + CHUNK)
+      const { error } = await supabase.from('supplier_sku_mapping').upsert(chunk, { onConflict: 'supplier_id,supplier_sku' })
+      if (error) throw new Error(error.message)
+    }
+  }
+
+  const mappingBySku: Record<string, string> = {}
+  skuToNewId.forEach((id, sku) => { mappingBySku[sku] = id })
+
+  return { created: toInsert.length, skipped, mappingBySku }
+}
+
 export type ProductSearchResult = { id: string; sku: string; name: string }
 
 export async function searchProductsForMapping(query: string): Promise<ProductSearchResult[]> {
