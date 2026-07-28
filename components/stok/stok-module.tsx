@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Search, RefreshCw, Clock, CheckCircle2, XCircle, Loader2, Upload, X, PackageSearch,
-  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap,
+  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap, Plus,
 } from 'lucide-react'
 import {
   loadAllBranches,
@@ -21,6 +21,7 @@ import {
   resolveSupplierRows,
   searchProductsForMapping,
   saveSupplierSkuMapping,
+  bulkCreateProductsAndMap,
   normalizeSku,
   type BranchOption,
   type StockMatrixData,
@@ -261,6 +262,8 @@ function UploadSupplierModal({
   const [resolved, setResolved] = useState<ResolveResult | null>(null)
   const [manualMap, setManualMap] = useState<Map<string, string>>(new Map())
   const [visibleUnmapped, setVisibleUnmapped] = useState(10)
+  const [bulkCreating, setBulkCreating] = useState(false)
+  const [bulkConfirming, setBulkConfirming] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -338,6 +341,27 @@ function UploadSupplierModal({
       setManualMap((prev) => new Map(prev).set(row.sku, productId))
     } catch (e: any) {
       setError(String(e?.message || e))
+    }
+  }
+
+  async function handleBulkCreate() {
+    if (!resolved) return
+    const remaining = resolved.unmapped.filter((r) => !manualMap.has(r.sku))
+    if (remaining.length === 0) return
+    setBulkCreating(true)
+    setError(null)
+    try {
+      const result = await bulkCreateProductsAndMap(supplierId, remaining)
+      setManualMap((prev) => {
+        const next = new Map(prev)
+        Object.entries(result.mappingBySku).forEach(([sku, productId]) => next.set(sku, productId))
+        return next
+      })
+      setBulkConfirming(false)
+    } catch (e: any) {
+      setError(String(e?.message || e))
+    } finally {
+      setBulkCreating(false)
     }
   }
 
@@ -492,8 +516,38 @@ function UploadSupplierModal({
                 </div>
 
                 {resolved.unmapped.filter((r) => !manualMap.has(r.sku)).length > 0 && (
+                  <>
+                    {!bulkConfirming ? (
+                      <button
+                        onClick={() => setBulkConfirming(true)}
+                        disabled={bulkCreating}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50"
+                      >
+                        <Plus size={12} /> Tambah semua {resolved.unmapped.filter((r) => !manualMap.has(r.sku)).length} sebagai produk baru & mapping
+                      </button>
+                    ) : (
+                      <div className="p-3 rounded-xl border border-indigo-300 bg-indigo-50 text-xs text-indigo-800 space-y-2">
+                        <p>
+                          Ini akan menambahkan {resolved.unmapped.filter((r) => !manualMap.has(r.sku)).length} produk baru ke katalog
+                          (SKU dari kode STAR, nama dari deskripsi barang). Yakin?
+                        </p>
+                        <div className="flex gap-2">
+                          <button onClick={() => setBulkConfirming(false)} disabled={bulkCreating} className="flex-1 px-3 py-1.5 rounded-full bg-white border border-slate-300 text-slate-600 disabled:opacity-50">
+                            Batal
+                          </button>
+                          <button onClick={handleBulkCreate} disabled={bulkCreating} className="flex-1 px-3 py-1.5 rounded-full bg-indigo-600 text-white font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
+                            {bulkCreating && <Loader2 size={12} className="animate-spin" />}
+                            {bulkCreating ? 'Memproses...' : 'Ya, Tambahkan'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {resolved.unmapped.filter((r) => !manualMap.has(r.sku)).length > 0 && (
                   <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 space-y-2 max-h-72 overflow-y-auto">
-                    <p className="text-xs font-semibold text-amber-800">Cocokkan kode STAR ke produk kita:</p>
+                    <p className="text-xs font-semibold text-amber-800">Atau cocokkan satu-satu ke produk yang sudah ada:</p>
                     {resolved.unmapped
                       .filter((r) => !manualMap.has(r.sku))
                       .slice(0, visibleUnmapped)
