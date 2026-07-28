@@ -264,7 +264,7 @@ export async function resolveSupplierRows(
 
   const [{ data: mappings, error: mErr }, { data: products, error: pErr }] = await Promise.all([
     supabase.from('supplier_sku_mapping').select('supplier_sku, product_id').eq('supplier_id', supplierId),
-    supabase.from('service_products').select('id, sku'),
+    supabase.from('service_products').select('id, sku, name'),
   ])
   if (mErr) throw new Error(mErr.message)
   if (pErr) throw new Error(pErr.message)
@@ -274,15 +274,54 @@ export async function resolveSupplierRows(
   const productIdBySku = new Map<string, string>()
   ;(products || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
 
+  // Fallback tambahan: cocokkan lewat NAMA produk (dari kolom Deskripsi
+  // Barang di file) — TAPI cuma kalau namanya persis sama dan cuma
+  // nunjuk ke SATU produk (kalau ada 2+ produk dengan nama yang sama
+  // persis, itu ambigu, dilewatin — biar dicocokkan manual aja daripada
+  // salah tebak).
+  const normalizeName = (s: string) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ')
+  const productIdByName = new Map<string, string | null>() // null = ambigu (nama dobel)
+  ;(products || []).forEach((p: any) => {
+    const key = normalizeName(p.name)
+    if (!key) return
+    if (productIdByName.has(key)) productIdByName.set(key, null)
+    else productIdByName.set(key, p.id)
+  })
+
   const mapped: ResolvedSupplierRow[] = []
   const unmapped: UnmappedSupplierRow[] = []
+  const autoNameMatches: { supplierSku: string; productId: string }[] = []
 
   rows.forEach((r) => {
     const key = normalizeSku(r.sku)
-    const productId = productIdByMapping.get(key) || productIdBySku.get(key)
+    let productId = productIdByMapping.get(key) || productIdBySku.get(key)
+    if (!productId && r.namaBarang) {
+      const byName = productIdByName.get(normalizeName(r.namaBarang))
+      if (byName) {
+        productId = byName
+        autoNameMatches.push({ supplierSku: r.sku, productId: byName })
+      }
+    }
     if (productId) mapped.push({ productId, qty: r.qty })
     else unmapped.push(r)
   })
+
+  // Simpen hasil cocok-otomatis-by-nama itu jadi pemetaan permanen juga,
+  // biar upload berikutnya dari supplier ini gak perlu nyocokin nama
+  // lagi — langsung lewat jalur SKU mapping yang lebih cepat & pasti.
+  if (autoNameMatches.length) {
+    const CHUNK = 300
+    for (let i = 0; i < autoNameMatches.length; i += CHUNK) {
+      const chunk = autoNameMatches.slice(i, i + CHUNK).map((m) => ({
+        supplier_id: supplierId,
+        supplier_sku: m.supplierSku,
+        product_id: m.productId,
+      }))
+      await supabase.from('supplier_sku_mapping').upsert(chunk, { onConflict: 'supplier_id,supplier_sku' })
+      // Kalau upsert ini gagal, gak masalah besar — mapping-nya cuma
+      // gak kesimpen buat next time, hasil resolve kali ini tetap valid.
+    }
+  }
 
   return { mapped, unmapped }
 }
