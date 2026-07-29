@@ -577,8 +577,10 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, onGoT
                 onClick={() => pick(p)}
                 className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-indigo-50"
               >
-                <span className="truncate">{highlightMatch(p.name, query.trim())}</span>
-                <span className="shrink-0 text-[10px] font-mono text-slate-400">{highlightMatch(p.sku || "", query.trim())}</span>
+                {/* Cuma nampilin SKU -- nama produk sering kepanjangan & ke-truncate
+                    jadi nggak kebaca, sementara SKU lebih ringkas & unik. Kalau
+                    produknya kebetulan nggak punya SKU, fallback ke nama. */}
+                <span className="truncate font-mono text-xs">{highlightMatch(p.sku || p.name || "(tanpa SKU)", query.trim())}</span>
               </button>
             ))}
             {filtered.length === 0 && !query.trim() && <div className="px-3 py-2 text-sm text-slate-400">Belum ada produk.</div>}
