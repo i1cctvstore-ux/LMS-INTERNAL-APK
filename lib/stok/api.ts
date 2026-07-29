@@ -146,7 +146,11 @@ export async function searchSupplierStock(query: string): Promise<SupplierStockP
     .from('service_products')
     .select('id, sku, name, kategori, subjenis')
     .or(`name.ilike.%${q}%,sku.ilike.%${q}%`)
-    .limit(20)
+    // Sebelumnya limit 20 -- kalau kata kuncinya umum (misal cuma
+    // "hik" atau "ds-"), banyak produk yang cocok tapi ke-cut jadi
+    // cuma keliatan 20 pertama. Dinaikin ke 100 biar hasil yang mirip
+    // semua ikut muncul, nggak ada yang "hilang" diam-diam.
+    .limit(100)
   if (productErr) throw new Error(productErr.message)
   if (!products || products.length === 0) return []
 
@@ -432,7 +436,7 @@ export async function bulkCreateProductsAndMap(
     }
     seenInBatch.add(key)
     const id = crypto.randomUUID()
-    toInsert.push({ id, sku: r.sku.trim(), name: (r.namaBarang || r.sku).trim() })
+    toInsert.push({ id, sku: r.sku.trim(), name: (r.namaBarang || r.sku).trim(), source: 'supplier' })
     skuToNewId.set(r.sku, id)
   })
 
