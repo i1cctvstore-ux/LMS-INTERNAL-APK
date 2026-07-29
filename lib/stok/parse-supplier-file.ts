@@ -125,14 +125,18 @@ export async function scanSupplierStockExcel(file: File): Promise<ScanResult> {
   return best
 }
 
-export type ParsedSupplierRow = { sku: string; qty: number; namaBarang?: string }
+export type ParsedSupplierRow = { sku: string; gudang: string; qty: number; namaBarang?: string }
 
-// Setelah scan (dan user milih kolom qty kalau kandidatnya lebih dari
-// satu), tarik semua barisnya beneran pakai kolom yang sudah dipastikan.
+export type GudangColumnChoice = { colIndex: number; gudangName: string }
+
+// Setelah scan (dan user milih 1 ATAU LEBIH kolom qty buat dipakai
+// sebagai "gudang" masing-masing), tarik semua barisnya beneran. Beda
+// dari versi lama: SEKARANG GAK DIJUMLAHKAN — tiap kombinasi
+// (SKU, gudang) jadi baris sendiri, biar breakdown per-gudang kepakai.
 export async function extractSupplierStockRows(
   file: File,
   scan: ScanResult,
-  qtyColIndex: number,
+  gudangColumns: GudangColumnChoice[],
 ): Promise<ParsedSupplierRow[]> {
   const buf = await file.arrayBuffer()
   const wb = XLSX.read(buf, { type: 'array' })
@@ -140,17 +144,26 @@ export async function extractSupplierStockRows(
   const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
   const bodyRows = data.slice((scan.headerRowIndex ?? 0) + 1)
 
-  const aggregated = new Map<string, { qty: number; namaBarang?: string }>()
-  bodyRows.forEach((r) => {
-    const sku = String(r[scan.skuColIndex!] ?? '').trim()
-    if (!sku) return
-    const qty = Number(r[qtyColIndex]) || 0
-    const key = sku.toLowerCase()
-    const existing = aggregated.get(key) || { qty: 0 }
-    existing.qty += qty
-    if (scan.descColIndex !== undefined && r[scan.descColIndex]) existing.namaBarang = String(r[scan.descColIndex])
-    aggregated.set(key, existing)
+  const rows: ParsedSupplierRow[] = []
+  // Dalam 1 kolom gudang yang sama, kalau ada SKU yang kebetulan
+  // muncul lebih dari sekali (duplikat baris), qty-nya tetap dijumlah —
+  // tapi ANTAR kolom gudang yang beda TIDAK dijumlah.
+  gudangColumns.forEach(({ colIndex, gudangName }) => {
+    const aggregated = new Map<string, { qty: number; namaBarang?: string }>()
+    bodyRows.forEach((r) => {
+      const sku = String(r[scan.skuColIndex!] ?? '').trim()
+      if (!sku) return
+      const qty = Number(r[colIndex]) || 0
+      const key = sku.toLowerCase()
+      const existing = aggregated.get(key) || { qty: 0 }
+      existing.qty += qty
+      if (scan.descColIndex !== undefined && r[scan.descColIndex]) existing.namaBarang = String(r[scan.descColIndex])
+      aggregated.set(key, existing)
+    })
+    aggregated.forEach((v, sku) => {
+      rows.push({ sku, gudang: gudangName, qty: v.qty, namaBarang: v.namaBarang })
+    })
   })
 
-  return Array.from(aggregated.entries()).map(([sku, v]) => ({ sku, qty: v.qty, namaBarang: v.namaBarang }))
+  return rows
 }
