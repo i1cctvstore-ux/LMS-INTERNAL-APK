@@ -367,7 +367,7 @@ export function buildSupplierStockRows(
       skippedCount += 1
       return
     }
-    rows.push({ productId, gudang: r.gudang, qty: r.qty })
+    rows.push({ productId, gudang: r.gudang || '', qty: r.qty })
   })
   return { rows, skippedCount }
 }
@@ -492,7 +492,7 @@ export async function uploadSupplierStockFile(
   const upsertRows = resolvedRows.map((r) => ({
     supplier_id: supplierId,
     product_id: r.productId,
-    gudang: r.gudang,
+    gudang: r.gudang || '',
     qty: r.qty,
     updated_at: now,
   }))
