@@ -284,12 +284,31 @@ export async function resolveSupplierRows(
 ): Promise<ResolveResult> {
   const supabase = createClient()
 
-  const [{ data: mappings, error: mErr }, { data: products, error: pErr }] = await Promise.all([
-    supabase.from('supplier_sku_mapping').select('supplier_sku, product_id').eq('supplier_id', supplierId),
-    supabase.from('service_products').select('id, sku, name'),
-  ])
+  const { data: mappings, error: mErr } = await supabase
+    .from('supplier_sku_mapping')
+    .select('supplier_sku, product_id')
+    .eq('supplier_id', supplierId)
   if (mErr) throw new Error(mErr.message)
-  if (pErr) throw new Error(pErr.message)
+
+  // PENTING: service_products bisa lebih dari 1000 baris — PostgREST
+  // cuma balikin maksimal 1000/query kalau nggak di-paging. Tanpa loop
+  // .range() ini, produk yang urutannya di luar 1000 pertama bakal
+  // dianggap "belum dikenal" padahal sebenarnya sudah ada di katalog.
+  const products: { id: string; sku: string; name: string }[] = []
+  {
+    const PAGE = 1000
+    let from = 0
+    while (true) {
+      const { data, error: pErr } = await supabase
+        .from('service_products')
+        .select('id, sku, name')
+        .range(from, from + PAGE - 1)
+      if (pErr) throw new Error(pErr.message)
+      products.push(...(data || []))
+      if (!data || data.length < PAGE) break
+      from += PAGE
+    }
+  }
 
   const productIdByMapping = new Map<string, string>()
   ;(mappings || []).forEach((m: any) => productIdByMapping.set(normalizeSku(m.supplier_sku), m.product_id))
