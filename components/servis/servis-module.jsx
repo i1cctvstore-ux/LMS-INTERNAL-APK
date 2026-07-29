@@ -8,7 +8,7 @@ import {
   ChevronUp, ChevronsUpDown, Smartphone, Monitor, Clock, FileText, Wallet, BadgeCheck,
   Users, MapPin,
 } from "lucide-react";
-import { loadServiceData, persistServiceData, uploadServiceFile } from "@/lib/service/api";
+import { loadServiceData, persistServiceData, uploadServiceFile, loadBranchTrackedProductIds } from "@/lib/service/api";
 
 // ---------- helpers ----------
 // PENTING: fungsi ini HARUS menghasilkan UUID valid (bukan string acak
@@ -997,6 +997,14 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   const [batches, setBatches] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [loadError, setLoadError] = useState(false);
+  // Produk yang beneran ke-tracking di Stok Cabang (punya baris di
+  // product_stock) -- dipakai buat nyaring dropdown "Produk / Model" di
+  // form Klaim, biar Stok Cabang & Stok Supplier tetap kepisah, sesuai
+  // keputusan yang udah diambil.
+  const [trackedProductIds, setTrackedProductIds] = useState(null);
+  useEffect(() => {
+    loadBranchTrackedProductIds().then(setTrackedProductIds).catch(() => setTrackedProductIds(new Set()));
+  }, []);
 
   const [tab, setTab] = useState(section || "claims");
   // Karena kelima menu Servis di sidebar sama-sama merender komponen
@@ -1964,6 +1972,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
       {showAdd && (
         <AddClaimModal
           settings={settings}
+          trackedProductIds={trackedProductIds}
           onClose={() => setShowAdd(false)}
           onAddOption={addSettingValue}
           onAddProduct={addProduct}
@@ -2072,6 +2081,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
           onAddOption={addSettingValue}
           onAddProduct={addProduct}
           onGoToMaster={() => { setEditClaim(null); setTab("settings"); }}
+          trackedProductIds={trackedProductIds}
           onSaveCustomerAlamat={updateCustomerAlamatByName}
           isDuplicateSN={isDuplicateSN}
           onClose={() => setEditClaim(null)}
@@ -2672,13 +2682,19 @@ function ClaimsTab({ isDesktopLayout, ticketView, onSetTicketView, aktifCount, s
 }
 
 // ---------- Add claim modal (intake) ----------
-function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, onGoToMaster, isDuplicateSN, onSubmit }) {
+function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, onGoToMaster, trackedProductIds, isDuplicateSN, onSubmit }) {
   const [customer, setCustomer] = useState({ name: "", phone: "", tanggalTerima: todayStr() });
   const [rows, setRows] = useState([emptyRow()]);
 
   const updateRow = (rowId, patch) => setRows((rs) => rs.map((r) => (r.rowId === rowId ? { ...r, ...patch } : r)));
   const canSubmit = customer.name.trim() && rows.every((r) => r.brand && r.produk && r.snDiterima.trim() && r.garansi && r.kelengkapan.trim());
-  const products = settings.products || [];
+  // Cuma produk yang beneran ada di Stok Cabang yang muncul di
+  // dropdown "Produk / Model" -- lihat loadBranchTrackedProductIds().
+  // Selama trackedProductIds masih null (belum kelar di-fetch), tampilin
+  // semua dulu biar form nggak keliatan kosong pas baru dibuka.
+  const products = trackedProductIds
+    ? (settings.products || []).filter((p) => trackedProductIds.has(p.id))
+    : (settings.products || []);
 
   return (
     <Modal title="Barang Masuk" subtitle="Foto tanda terima ber-TTD diupload belakangan, setelah dicetak dan ditandatangani customer" onClose={onClose} wide>
@@ -3383,8 +3399,13 @@ function ProgressModal({ claim, claims, settings, batches, role, hasInvoice, cla
 }
 
 // ---------- Edit claim modal: data correction only ----------
-function EditClaimModal({ claim, settings, batches, claims, invoices, role, onClose, onSave, onAddOption, onAddProduct, onGoToMaster, onSaveCustomerAlamat, isDuplicateSN, onPrint, onSwitch }) {
+function EditClaimModal({ claim, settings, batches, claims, invoices, role, onClose, onSave, onAddOption, onAddProduct, onGoToMaster, trackedProductIds, onSaveCustomerAlamat, isDuplicateSN, onPrint, onSwitch }) {
   const [f, setF] = useState({ ...claim, partsUsed: claim.partsUsed || [] });
+  // Sama kayak di AddClaimModal -- cuma produk yang beneran ada di Stok
+  // Cabang yang muncul di dropdown "Produk / Model".
+  const productsForCombo = trackedProductIds
+    ? (settings.products || []).filter((p) => trackedProductIds.has(p.id))
+    : (settings.products || []);
   const customerRecord = (settings.customers || []).find((c) => c.name.trim().toLowerCase() === (claim.customerName || "").trim().toLowerCase());
   const [alamat, setAlamat] = useState(customerRecord?.alamat || "");
   const batch = batches.find((b) => b.id === claim.batchId);
@@ -3441,7 +3462,7 @@ function EditClaimModal({ claim, settings, batches, claims, invoices, role, onCl
           <ComboInput value={f.brand} options={settings.brands} onChange={(v) => setF({ ...f, brand: v })} onAddOption={(v) => onAddOption("brands", v)} />
         </Field>
         <Field label="Produk / Model">
-          <ProductCombo value={f.produk} skuValue={f.produkSku} products={settings.products || []} brand={f.brand} placeholder="Cari nama produk..."
+          <ProductCombo value={f.produk} skuValue={f.produkSku} products={productsForCombo} brand={f.brand} placeholder="Cari nama produk..."
             onChange={(name, sku) => {
               const patch = { produk: name, produkSku: sku };
               if (!f.brand) {
