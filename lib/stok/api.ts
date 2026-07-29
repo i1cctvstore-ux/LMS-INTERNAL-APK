@@ -687,13 +687,23 @@ export async function loadStockMatrix(): Promise<StockMatrixData> {
     held[key] = (held[key] || 0) + 1
   })
 
-  const products: MatrixProduct[] = productRows.map((p: any) => ({
-    productId: p.id,
-    sku: p.sku || '',
-    name: p.name,
-    kategori: p.kategori || '',
-    subjenis: p.subjenis || '',
-  }))
+  // Cuma produk yang BENERAN punya minimal 1 baris product_stock (dari
+  // sync Zoho/Accurate) yang ditampilin di sini. Produk yang cuma ada
+  // di katalog gara-gara "Tambah semua sebagai produk baru & mapping"
+  // di Stok Supplier (tapi belum pernah ke-sync dari cabang manapun)
+  // sengaja DIKELUARIN — biar Stok Cabang & Stok Supplier nggak
+  // kecampur, sesuai keputusan biar dipisah.
+  const trackedProductIds = new Set(stockRows.map((r: any) => r.product_id))
+
+  const products: MatrixProduct[] = productRows
+    .filter((p: any) => trackedProductIds.has(p.id))
+    .map((p: any) => ({
+      productId: p.id,
+      sku: p.sku || '',
+      name: p.name,
+      kategori: p.kategori || '',
+      subjenis: p.subjenis || '',
+    }))
 
   return { products, physical, held }
 }
