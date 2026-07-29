@@ -840,3 +840,30 @@ export async function persistServiceData(
 
   await Promise.all(tasks)
 }
+
+// =====================================================
+// Dipakai khusus buat dropdown "Produk / Model" di form Klaim
+// Servis/Garansi -- supaya cuma nampilin produk yang BENERAN ada di
+// Stok Cabang (punya minimal 1 baris di product_stock, dari sync
+// Zoho/Accurate). Produk yang cuma ada di katalog gara-gara upload
+// manual di Stok Supplier (belum ke-sync ke cabang manapun) sengaja
+// TIDAK ikut muncul di sini -- Stok Cabang & Stok Supplier memang
+// dipisah, jadi form Klaim juga ngikut aturan yang sama.
+// =====================================================
+export async function loadBranchTrackedProductIds(): Promise<Set<string>> {
+  const supabase = createClient()
+  const ids = new Set<string>()
+  const PAGE = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('product_stock')
+      .select('product_id')
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    ;(data || []).forEach((r: any) => ids.add(r.product_id))
+    if (!data || data.length < PAGE) break
+    from += PAGE
+  }
+  return ids
+}
