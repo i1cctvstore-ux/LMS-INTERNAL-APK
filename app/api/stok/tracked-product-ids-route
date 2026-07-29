@@ -1,1 +1,53 @@
+import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
+// =====================================================
+// GET /api/stok/tracked-product-ids
+//
+// Dipakai buat filter dropdown "Produk / Model" di form Klaim
+// Servis/Garansi -- balikin daftar product_id yang BENERAN ada di
+// Stok Cabang (punya minimal 1 baris di product_stock, dari sync
+// Zoho/Accurate), biar Stok Cabang & Stok Supplier tetap kepisah.
+//
+// PENTING kenapa ini harus lewat API route (bukan query langsung dari
+// client kayak fungsi-fungsi lain di lib/service/api.ts): product_stock
+// kena RLS yang di-scope per-cabang -- Admin Cabang cuma boleh baca
+// baris product_stock cabangnya sendiri. Kalau fungsi ini query
+// langsung pakai client biasa, Admin Cabang bakal dapet daftar KOSONG
+// (atau cuma cabangnya doang), jadi dropdown Produk/Model keliatan
+// kosong buat semua role selain Super Admin -- itu bug yang kejadian
+// pas fitur ini pertama kali dibikin. Makanya di sini dipakai
+// admin client (bypass RLS) supaya SEMUA role dapet daftar produk
+// yang SAMA, lintas cabang, apa pun role/cabang user yang login.
+//
+// Tetap wajib login (dicek pakai client biasa dulu) -- cuma bagian
+// query product_stock-nya yang pakai admin client.
+// =====================================================
+export async function GET() {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    return Response.json({ message: 'Belum login.' }, { status: 401 })
+  }
+
+  const admin = createAdminClient()
+  const ids = new Set<string>()
+  const PAGE = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await admin
+      .from('product_stock')
+      .select('product_id')
+      .range(from, from + PAGE - 1)
+    if (error) {
+      return Response.json({ message: error.message }, { status: 500 })
+    }
+    ;(data || []).forEach((r: any) => ids.add(r.product_id))
+    if (!data || data.length < PAGE) break
+    from += PAGE
+  }
+
+  return Response.json({ productIds: Array.from(ids) })
+}
