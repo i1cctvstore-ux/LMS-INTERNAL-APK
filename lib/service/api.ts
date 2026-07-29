@@ -698,7 +698,15 @@ async function syncProducts(prev: ProductItem[], next: ProductItem[]) {
       return true
     })
     if (toInsert.length)
-      tasks.push(...chunkedInsertTasks(supabase, 'service_products', toInsert.map((p) => productToRow(p))))
+      tasks.push(
+        ...chunkedInsertTasks(
+          supabase,
+          'service_products',
+          // source: 'manual' -- produk yang ditambah lewat Data Master
+          // (bukan dari sync Cabang atau upload Stok Supplier).
+          toInsert.map((p) => ({ ...productToRow(p), source: 'manual' })),
+        ),
+      )
   }
   updated.forEach((p) =>
     tasks.push(supabase.from('service_products').update(productToRow(p)).eq('id', p.id)),
@@ -849,21 +857,22 @@ export async function persistServiceData(
 // manual di Stok Supplier (belum ke-sync ke cabang manapun) sengaja
 // TIDAK ikut muncul di sini -- Stok Cabang & Stok Supplier memang
 // dipisah, jadi form Klaim juga ngikut aturan yang sama.
+//
+// PENTING: ini LEWAT API route (/api/stok/tracked-product-ids), BUKAN
+// query langsung ke Supabase kayak fungsi lain di file ini. Soalnya
+// product_stock kena RLS yang di-scope per-cabang, jadi kalau query
+// langsung dari sini pakai client biasa, Admin Cabang (dan role lain
+// selain Super Admin) bakal dapet hasil KOSONG/kepotong -- dropdown
+// Produk/Model jadi keliatan kosong buat semua orang selain Super
+// Admin. API route-nya pakai admin client (bypass RLS) biar semua
+// role dapet daftar yang sama persis.
 // =====================================================
 export async function loadBranchTrackedProductIds(): Promise<Set<string>> {
-  const supabase = createClient()
-  const ids = new Set<string>()
-  const PAGE = 1000
-  let from = 0
-  while (true) {
-    const { data, error } = await supabase
-      .from('product_stock')
-      .select('product_id')
-      .range(from, from + PAGE - 1)
-    if (error) throw new Error(error.message)
-    ;(data || []).forEach((r: any) => ids.add(r.product_id))
-    if (!data || data.length < PAGE) break
-    from += PAGE
+  const res = await fetch('/api/stok/tracked-product-ids')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body?.message || `Gagal ambil daftar produk Stok Cabang (${res.status})`)
   }
-  return ids
+  const body = await res.json()
+  return new Set<string>(body.productIds || [])
 }
