@@ -473,7 +473,7 @@ function highlightMatch(text, query) {
   );
 }
 
-function ProductCombo({ value, skuValue, onChange, products, onAddProduct, placeholder, brand }) {
+function ProductCombo({ value, skuValue, onChange, products, onAddProduct, onGoToMaster, placeholder, brand }) {
   const [query, setQuery] = useState(value || "");
   const [open, setOpen] = useState(false);
 
@@ -525,6 +525,14 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
   function submitNewProduct() {
     const name = query.trim();
     if (!name) return;
+    // Produk baru WAJIB punya SKU yang bener (format [BRAND]-[TIPE]-[VARIASI]),
+    // jadi dari sini nggak langsung dibikin -- diarahkan ke Master Data biar
+    // datanya diisi lengkap di sana. Fallback ke cara lama (onAddProduct)
+    // kalau onGoToMaster nggak disediakan parent-nya.
+    if (onGoToMaster) {
+      onGoToMaster(name);
+      return;
+    }
     onAddProduct(name, "");
     pick({ name, sku: "" });
   }
@@ -581,7 +589,7 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, place
                   onClick={submitNewProduct}
                   className="w-full flex items-center gap-1.5 justify-center px-3 py-2 rounded-full bg-indigo-600 text-white text-xs font-medium"
                 >
-                  <Plus size={12} /> Tambah "{query.trim()}" sebagai produk baru
+                  <Plus size={12} /> {onGoToMaster ? `Belum ada di katalog — tambah "${query.trim()}" di Master Data` : `Tambah "${query.trim()}" sebagai produk baru`}
                 </button>
               </div>
             )}
@@ -1959,6 +1967,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
           onClose={() => setShowAdd(false)}
           onAddOption={addSettingValue}
           onAddProduct={addProduct}
+          onGoToMaster={() => { setShowAdd(false); setTab("settings"); }}
           isDuplicateSN={isDuplicateSN}
           onSubmit={handleAddClaims}
         />
@@ -2062,6 +2071,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
           role={role}
           onAddOption={addSettingValue}
           onAddProduct={addProduct}
+          onGoToMaster={() => { setEditClaim(null); setTab("settings"); }}
           onSaveCustomerAlamat={updateCustomerAlamatByName}
           isDuplicateSN={isDuplicateSN}
           onClose={() => setEditClaim(null)}
@@ -2662,7 +2672,7 @@ function ClaimsTab({ isDesktopLayout, ticketView, onSetTicketView, aktifCount, s
 }
 
 // ---------- Add claim modal (intake) ----------
-function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, isDuplicateSN, onSubmit }) {
+function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, onGoToMaster, isDuplicateSN, onSubmit }) {
   const [customer, setCustomer] = useState({ name: "", phone: "", tanggalTerima: todayStr() });
   const [rows, setRows] = useState([emptyRow()]);
 
@@ -2709,7 +2719,7 @@ function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, isDuplica
                       if (guessed) patch.brand = guessed;
                     }
                     updateRow(r.rowId, patch);
-                  }} onAddProduct={onAddProduct} />
+                  }} onAddProduct={onAddProduct} onGoToMaster={onGoToMaster} />
               </Field>
               <Field label="SN Diterima">
                 <input className={inputCls} value={r.snDiterima} onChange={(e) => updateRow(r.rowId, { snDiterima: e.target.value })} />
@@ -3373,7 +3383,7 @@ function ProgressModal({ claim, claims, settings, batches, role, hasInvoice, cla
 }
 
 // ---------- Edit claim modal: data correction only ----------
-function EditClaimModal({ claim, settings, batches, claims, invoices, role, onClose, onSave, onAddOption, onAddProduct, onSaveCustomerAlamat, isDuplicateSN, onPrint, onSwitch }) {
+function EditClaimModal({ claim, settings, batches, claims, invoices, role, onClose, onSave, onAddOption, onAddProduct, onGoToMaster, onSaveCustomerAlamat, isDuplicateSN, onPrint, onSwitch }) {
   const [f, setF] = useState({ ...claim, partsUsed: claim.partsUsed || [] });
   const customerRecord = (settings.customers || []).find((c) => c.name.trim().toLowerCase() === (claim.customerName || "").trim().toLowerCase());
   const [alamat, setAlamat] = useState(customerRecord?.alamat || "");
@@ -3439,7 +3449,7 @@ function EditClaimModal({ claim, settings, batches, claims, invoices, role, onCl
                 if (guessed) patch.brand = guessed;
               }
               setF({ ...f, ...patch });
-            }} onAddProduct={onAddProduct} />
+            }} onAddProduct={onAddProduct} onGoToMaster={onGoToMaster} />
         </Field>
         <Field label="SN Diterima">
           <input className={inputCls} value={f.snDiterima} onChange={(e) => setF({ ...f, snDiterima: e.target.value })} />
