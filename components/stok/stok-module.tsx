@@ -107,10 +107,19 @@ function RiwayatModal({
   uploadLogs: UploadLogRow[]
   onClose: () => void
 }) {
-  const combined: CombinedHistoryEntry[] = [
-    ...syncLogs.map((d) => ({ type: 'sync' as const, at: d.startedAt, data: d })),
-    ...uploadLogs.map((d) => ({ type: 'upload' as const, at: d.uploadedAt, data: d })),
-  ].sort((a, b) => (b.at || '').localeCompare(a.at || ''))
+  // Riwayat Stok Cabang (sync Zoho/Accurate) dan Riwayat Stok Supplier
+  // (upload manual) sengaja DIPISAH jadi 2 tab -- sama kayak Stok Cabang
+  // & Stok Supplier di halaman utama yang emang udah dipisah, biar
+  // riwayatnya juga nggak kecampur.
+  const [historyTab, setHistoryTab] = useState<'cabang' | 'supplier'>('cabang')
+
+  const cabangEntries: CombinedHistoryEntry[] = [...syncLogs]
+    .map((d) => ({ type: 'sync' as const, at: d.startedAt, data: d }))
+    .sort((a, b) => (b.at || '').localeCompare(a.at || ''))
+  const supplierEntries: CombinedHistoryEntry[] = [...uploadLogs]
+    .map((d) => ({ type: 'upload' as const, at: d.uploadedAt, data: d }))
+    .sort((a, b) => (b.at || '').localeCompare(a.at || ''))
+  const combined = historyTab === 'cabang' ? cabangEntries : supplierEntries
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 flex items-start sm:items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
@@ -119,6 +128,20 @@ function RiwayatModal({
           <h3 className="font-semibold text-slate-800">Riwayat Stok</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
             <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 pt-4 flex gap-2">
+          <button
+            onClick={() => setHistoryTab('cabang')}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium ${historyTab === 'cabang' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+          >
+            Stok Cabang
+          </button>
+          <button
+            onClick={() => setHistoryTab('supplier')}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium ${historyTab === 'supplier' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+          >
+            Stok Supplier
           </button>
         </div>
         <div className="p-5 max-h-[70vh] overflow-y-auto space-y-2">
