@@ -1,14 +1,34 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 
 // =====================================================
-// Sinkronisasi stok dari Zoho Inventory ke tabel product_stock, per
-// cabang. Arahnya SATU ARAH: tarik dari Zoho, TIDAK menulis balik ke
-// Zoho. Dipakai baik oleh tombol manual di UI maupun Vercel Cron.
+// Sinkronisasi stok dari ZOHO BOOKS (bukan Zoho Inventory) ke tabel
+// product_stock, per cabang. Arahnya SATU ARAH: tarik dari Zoho, TIDAK
+// menulis balik ke Zoho. Dipakai baik oleh tombol manual di UI maupun
+// Vercel Cron.
 //
-// Region akun Zoho (.com/.in/.eu) bisa beda-beda tergantung tempat
-// akun didaftarkan — makanya base URL-nya dibuat bisa dioverride lewat
-// env var ZOHO_ACCOUNTS_BASE_URL / ZOHO_API_BASE_URL tanpa perlu ubah
-// kode ini, kalau ternyata default (.com) salah.
+// KENAPA BOOKS BUKAN INVENTORY (revisi 2026-07-30):
+// Versi sebelumnya manggil endpoint /inventory/v1/items (Zoho Inventory,
+// aplikasi terpisah yang butuh subscribe/aktivasi sendiri). Ternyata toko
+// cuma langganan Zoho BOOKS di kedua organisasi (Solo & Bali) — Inventory
+// kebetulan pernah ke-enable di organisasi Bali (makanya sync lama itu
+// "jalan" untuk Bali), tapi datanya independen dari Books dan gampang
+// out-of-sync. Solo belum pernah enable Inventory sama sekali, makanya
+// selalu gagal "not authorized". Solusinya: pindah semua ke Books API,
+// yang beneran dipakai & dibayar di kedua cabang.
+//
+// SYARAT DI SISI ZOHO BOOKS (perlu dicek manual per organisasi):
+// Item yang mau muncul stoknya lewat sync ini HARUS:
+//   1. Di halaman edit item, "Track Inventory" dinyalakan (kadang
+//      istilahnya "Track Inventory for this item").
+//   2. item_type tersimpan sebagai "inventory" (otomatis kejadian kalau
+//      poin 1 dinyalakan waktu bikin/edit item).
+// Item yang cuma "goods" biasa tanpa Track Inventory TIDAK akan punya
+// field stok sama sekali di response API, dan akan otomatis dilewati
+// (masuk hitungan itemsSkipped) oleh kode ini.
+//
+// Region akun Zoho (.com/.in/.eu) bisa beda-beda tergantung tempat akun
+// didaftarkan — base URL-nya bisa dioverride lewat env var
+// ZOHO_ACCOUNTS_BASE_URL / ZOHO_API_BASE_URL tanpa perlu ubah kode ini.
 // =====================================================
 
 const ZOHO_ACCOUNTS_BASE_URL = process.env.ZOHO_ACCOUNTS_BASE_URL || 'https://accounts.zoho.com'
@@ -72,11 +92,50 @@ async function getZohoAccessToken(config: ZohoOrgConfig): Promise<string> {
 
 type ZohoItemRow = { sku: string; available_stock: number }
 
+// Coba beberapa kemungkinan bentuk field stok dari Zoho Books, karena
+// tergantung pengaturan "Track Inventory" & multi-lokasi, bentuk
+// response bisa beda. Kembalikan null kalau item ini memang gak
+// punya data stok sama sekali (berarti Track Inventory belum aktif
+// untuk item itu) — item seperti ini akan dilewati (bukan dianggap 0),
+// supaya gak sengaja nimpa data yang sudah benar dengan angka 0 palsu.
+function extractStockFromBooksItem(it: any): number | null {
+  // Kasus 1: field langsung di level item (paling umum kalau Track
+  // Inventory aktif & organisasi gak pakai multi-lokasi/warehouse).
+  const directCandidates = [it.stock_on_hand, it.available_stock, it.actual_available_stock]
+  for (const val of directCandidates) {
+    if (val !== undefined && val !== null && val !== '') {
+      const num = Number(val)
+      if (!Number.isNaN(num)) return num
+    }
+  }
+
+  // Kasus 2: dipecah per lokasi/gudang (kalau fitur Locations aktif di
+  // Books) — jumlahkan semua lokasi.
+  if (Array.isArray(it.locations) && it.locations.length > 0) {
+    let sum = 0
+    let found = false
+    for (const loc of it.locations) {
+      const val = loc.location_stock_on_hand ?? loc.location_available_stock ?? loc.location_actual_available_stock
+      if (val !== undefined && val !== null && val !== '') {
+        const num = Number(val)
+        if (!Number.isNaN(num)) {
+          sum += num
+          found = true
+        }
+      }
+    }
+    if (found) return sum
+  }
+
+  return null // Item ini gak punya data stok — kemungkinan Track Inventory belum aktif
+}
+
 async function fetchAllZohoItemStocks(
   config: ZohoOrgConfig,
   accessToken: string,
-): Promise<ZohoItemRow[]> {
+): Promise<{ items: ZohoItemRow[]; itemsWithoutStockField: number }> {
   const items: ZohoItemRow[] = []
+  let itemsWithoutStockField = 0
   const PER_PAGE = 200
   let page = 1
 
@@ -85,21 +144,29 @@ async function fetchAllZohoItemStocks(
       organization_id: config.organizationId,
       page: String(page),
       per_page: String(PER_PAGE),
+      filter_by: 'Status.Active',
     })
-    const res = await fetch(`${ZOHO_API_BASE_URL}/inventory/v1/items?${params.toString()}`, {
+    // Endpoint Zoho BOOKS (bukan lagi /inventory/v1/items).
+    const res = await fetch(`${ZOHO_API_BASE_URL}/books/v3/items?${params.toString()}`, {
       headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
     })
     const body = await res.json()
     if (!res.ok || body.code !== 0) {
       throw new Error(
-        `Gagal ambil daftar item Zoho (${config.branchName}, halaman ${page}): ${body.message || res.statusText}`,
+        `Gagal ambil daftar item Zoho Books (${config.branchName}, halaman ${page}): ${body.message || res.statusText}`,
       )
     }
     const pageItems = (body.items || []) as any[]
     pageItems.forEach((it) => {
       const sku = (it.sku || '').trim()
       if (!sku) return // item tanpa SKU dilewati — gak bisa dicocokkan ke katalog produk
-      items.push({ sku, available_stock: Number(it.available_stock) || 0 })
+
+      const stock = extractStockFromBooksItem(it)
+      if (stock === null) {
+        itemsWithoutStockField += 1
+        return // Track Inventory belum aktif untuk item ini — dilewati, bukan dianggap 0
+      }
+      items.push({ sku, available_stock: stock })
     })
 
     const hasMore = body.page_context?.has_more_page === true || pageItems.length === PER_PAGE
@@ -107,7 +174,7 @@ async function fetchAllZohoItemStocks(
     page += 1
   }
 
-  return items
+  return { items, itemsWithoutStockField }
 }
 
 // Normalisasi SKU yang sama dengan yang dipakai di modul Servis
@@ -148,7 +215,7 @@ export async function syncZohoForBranch(
 
   try {
     const accessToken = await getZohoAccessToken(config)
-    const zohoItems = await fetchAllZohoItemStocks(config, accessToken)
+    const { items: zohoItems, itemsWithoutStockField } = await fetchAllZohoItemStocks(config, accessToken)
 
     // Ambil seluruh katalog produk (sku -> id) lewat paging, sama seperti
     // di lib/service/api.ts — jumlah produk sudah pernah lebih dari 1000.
@@ -191,17 +258,26 @@ export async function syncZohoForBranch(
       }
     }
 
+    // itemsSkipped di log gabungan dari: SKU gak ketemu di katalog KITA,
+    // + item yang Track Inventory-nya belum aktif di Zoho Books. Dua
+    // penyebab beda ini digabung di error_message biar kelihatan jelas
+    // waktu dicek dari tombol Riwayat / DevTools.
+    const totalSkipped = itemsSkipped + itemsWithoutStockField
     await supabase
       .from('stock_sync_log')
       .update({
         status: 'success',
         items_updated: itemsUpdated,
-        items_skipped: itemsSkipped,
+        items_skipped: totalSkipped,
+        error_message:
+          itemsWithoutStockField > 0
+            ? `Info: ${itemsWithoutStockField} item di Zoho Books belum aktif "Track Inventory", jadi dilewati (bukan error).`
+            : null,
         finished_at: new Date().toISOString(),
       })
       .eq('id', logId)
 
-    return { branchName: config.branchName, itemsUpdated, itemsSkipped }
+    return { branchName: config.branchName, itemsUpdated, itemsSkipped: totalSkipped }
   } catch (err: any) {
     await supabase
       .from('stock_sync_log')
