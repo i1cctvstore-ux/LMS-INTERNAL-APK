@@ -582,11 +582,14 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, onGoT
                     produknya kebetulan nggak punya SKU, fallback ke nama. */}
                 <span className="truncate font-mono text-xs">{highlightMatch(p.sku || p.name || "(tanpa SKU)", query.trim())}</span>
                 {trackedProductIds && !trackedProductIds.has(p.id) && (
-                  // Cuma titik kecil, bukan teks panjang -- biar SKU di
-                  // sebelahnya (kayak nama EZVIZ yang panjang) gak
-                  // kepotong. Detailnya tetap ada di title (tooltip
-                  // pas di-hover/di-tap-lama).
-                  <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-amber-400" title="Belum ada baris stok tercatat di cabang manapun" />
+                  // "0" -- nunjukin belum ada baris stok tercatat buat
+                  // produk ini di cabang manapun. Satu karakter doang,
+                  // jadi gak bikin SKU di sebelahnya (kayak nama EZVIZ
+                  // yang panjang) kepotong. Detailnya tetap ada di
+                  // title (tooltip pas di-hover/di-tap-lama).
+                  <span className="shrink-0 text-[10px] font-semibold leading-none px-1 py-0.5 rounded bg-amber-50 text-amber-600" title="Belum ada baris stok tercatat di cabang manapun">
+                    0
+                  </span>
                 )}
               </button>
             ))}
@@ -1012,8 +1015,12 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   // keputusan yang udah diambil.
   const [trackedProductIds, setTrackedProductIds] = useState(null);
   useEffect(() => {
-    loadBranchTrackedProductIds().then(setTrackedProductIds).catch(() => setTrackedProductIds(new Set()));
-  }, []);
+    // Di-scope ke branchId cabang yang lagi aktif -- biar tanda "0"
+    // nunjukin status stok di cabang INI, bukan gabungan semua cabang.
+    // Kalau Super Admin ganti-ganti cabang (branchSwitcher), branchId
+    // berubah, jadi di-fetch ulang tiap kali itu terjadi.
+    loadBranchTrackedProductIds(branchId).then(setTrackedProductIds).catch(() => setTrackedProductIds(new Set()));
+  }, [branchId]);
 
   const [tab, setTab] = useState(section || "claims");
   // Karena kelima menu Servis di sidebar sama-sama merender komponen
