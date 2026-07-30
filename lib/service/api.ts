@@ -102,6 +102,12 @@ export type ProductItem = {
   name: string
   kategori: string
   subjenis: string
+  // Asal produk ini: 'cabang' (ke-tracking di product_stock, dari sync
+  // Zoho/Accurate), 'supplier' (dari bulk-create di Upload Stok
+  // Supplier), atau 'manual' (ditambah langsung di Data Master).
+  // Cuma buat ditampilin/difilter di UI, bukan sesuatu yang bisa
+  // diedit user.
+  source: 'cabang' | 'supplier' | 'manual'
 }
 
 export type SupplierItem = {
@@ -347,7 +353,14 @@ async function setBranchSparepartQty(branchId: string, sparepartId: string, qty:
 }
 
 function productFromRow(row: any): ProductItem {
-  return { id: row.id, sku: row.sku || '', name: row.name, kategori: row.kategori || '', subjenis: row.subjenis || '' }
+  return {
+    id: row.id,
+    sku: row.sku || '',
+    name: row.name,
+    kategori: row.kategori || '',
+    subjenis: row.subjenis || '',
+    source: row.source === 'cabang' || row.source === 'supplier' ? row.source : 'manual',
+  }
 }
 
 // Produk sekarang katalog GLOBAL (bukan per-cabang lagi) — gak ada
