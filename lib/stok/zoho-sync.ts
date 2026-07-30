@@ -233,9 +233,14 @@ export async function syncZohoForBranch(
       from += PAGE_SIZE
     }
 
-    let itemsUpdated = 0
     let itemsSkipped = 0
-    const upsertRows: { branch_id: string; product_id: string; qty_on_hand: number }[] = []
+    // Kunci pakai product_id (bukan array biasa) supaya kalau ada 2+ item
+    // Zoho dengan SKU berbeda tapi ke-normalisasi jadi sama & mengarah ke
+    // produk internal yang sama, kita cuma simpan SATU baris per produk —
+    // Postgres upsert bakal error "cannot affect row a second time" kalau
+    // dalam 1 batch ada baris (branch_id, product_id) yang duplikat.
+    const upsertRowsByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number }>()
+    let duplicateSkuCount = 0
 
     zohoItems.forEach((item) => {
       const productId = productIdBySku.get(normalizeSku(item.sku))
@@ -243,9 +248,18 @@ export async function syncZohoForBranch(
         itemsSkipped += 1 // SKU dari Zoho ini belum ada di katalog produk internal
         return
       }
-      upsertRows.push({ branch_id: branchId, product_id: productId, qty_on_hand: Math.round(item.available_stock) })
-      itemsUpdated += 1
+      if (upsertRowsByProductId.has(productId)) {
+        duplicateSkuCount += 1 // Item Zoho lain sudah pernah mengarah ke produk yang sama
+      }
+      upsertRowsByProductId.set(productId, {
+        branch_id: branchId,
+        product_id: productId,
+        qty_on_hand: Math.round(item.available_stock),
+      })
     })
+
+    const upsertRows = Array.from(upsertRowsByProductId.values())
+    const itemsUpdated = upsertRows.length
 
     if (upsertRows.length) {
       const CHUNK = 300
@@ -263,16 +277,22 @@ export async function syncZohoForBranch(
     // penyebab beda ini digabung di error_message biar kelihatan jelas
     // waktu dicek dari tombol Riwayat / DevTools.
     const totalSkipped = itemsSkipped + itemsWithoutStockField
+    const infoNotes: string[] = []
+    if (itemsWithoutStockField > 0) {
+      infoNotes.push(`${itemsWithoutStockField} item belum aktif "Track Inventory" di Zoho Books, dilewati.`)
+    }
+    if (duplicateSkuCount > 0) {
+      infoNotes.push(
+        `${duplicateSkuCount} item Zoho ke-mapping ke produk internal yang sama dengan item lain (kemungkinan SKU beda tipis/duplikat setelah normalisasi) — cuma nilai terakhir yang dipakai.`,
+      )
+    }
     await supabase
       .from('stock_sync_log')
       .update({
         status: 'success',
         items_updated: itemsUpdated,
         items_skipped: totalSkipped,
-        error_message:
-          itemsWithoutStockField > 0
-            ? `Info: ${itemsWithoutStockField} item di Zoho Books belum aktif "Track Inventory", jadi dilewati (bukan error).`
-            : null,
+        error_message: infoNotes.length > 0 ? `Info: ${infoNotes.join(' ')}` : null,
         finished_at: new Date().toISOString(),
       })
       .eq('id', logId)
