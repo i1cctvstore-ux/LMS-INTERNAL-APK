@@ -1,68 +1,71 @@
 // File ini: app/api/stok/accurate-oauth-callback/route.ts
 //
-// Endpoint SEKALI PAKAI buat proses OAuth manual Accurate. Alurnya:
-// 1. Kamu buka URL authorize Accurate di browser (lihat instruksi chat),
-//    login, klik "Beri Akses".
-// 2. Accurate redirect balik ke URL endpoint INI dengan ?code=xxxxx
-// 3. Endpoint ini nukar code itu jadi access_token + refresh_token,
-//    lalu TAMPILIN refresh_token-nya di halaman browser kamu sendiri.
-// 4. Kamu copy refresh_token itu, taruh sebagai env var ACCURATE_REFRESH_TOKEN
-//    di Vercel. JANGAN paste refresh_token ini ke chat manapun.
+// Endpoint callback OAuth Accurate — dijalankan SEKALI PER CABANG
+// (tiap kali kamu lakukan proses "Beri Akses" login sebagai akun
+// Accurate cabang tertentu). Beda dari versi sebelumnya: sekarang
+// token LANGSUNG DISIMPAN ke Supabase (bukan cuma ditampilin buat
+// di-copy manual) — karena Accurate merotasi refresh token tiap
+// dipakai, jadi harus disimpan di tempat yang bisa diupdate otomatis
+// oleh server (lihat lib/stok/accurate-sync.ts).
 //
-// Setelah proses ini kelar 1x, endpoint ini gak perlu dipanggil lagi
-// kecuali refresh_token-nya di-revoke/rusak dan perlu di-generate ulang.
+// CARA PAKAI per cabang: waktu buka URL authorize, tambahkan param
+// &state=<branchId> supaya callback ini tau token ini punya cabang
+// mana. Contoh untuk Jakarta:
+//   https://account.accurate.id/oauth/authorize?client_id=...&response_type=code&redirect_uri=...&scope=item_view&state=5ad7239f-a7dd-47be-9ba2-c5667a3f76b2
 
 import { NextRequest, NextResponse } from 'next/server'
-import { exchangeAuthorizationCode } from '@/lib/stok/accurate-sync'
+import { exchangeAuthorizationCode, saveAccurateRefreshToken } from '@/lib/stok/accurate-sync'
+
+// Daftar cabang yang boleh terima token lewat callback ini — dicocokkan
+// dari param `state`. Disalin manual dari ACCURATE_BRANCH_MAP di
+// lib/stok/accurate-sync.ts supaya file ini gak perlu import daftar
+// privat dari sana.
+const BRANCH_NAME_BY_ID: Record<string, string> = {
+  '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2': 'Jakarta',
+  '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612': 'Purwokerto',
+}
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
+  const branchId = req.nextUrl.searchParams.get('state')
+
   if (!code) {
     return NextResponse.json({ error: 'Parameter ?code= tidak ditemukan di URL.' }, { status: 400 })
+  }
+  if (!branchId || !BRANCH_NAME_BY_ID[branchId]) {
+    return NextResponse.json(
+      { error: 'Parameter ?state= (branch id) tidak ada atau tidak dikenali. Tambahkan &state=<branchId> di URL authorize.' },
+      { status: 400 },
+    )
   }
 
   const clientId = process.env.ACCURATE_CLIENT_ID
   const clientSecret = process.env.ACCURATE_CLIENT_SECRET
-  // Redirect URI HARUS sama persis dengan yang didaftarkan di Area
-  // Developer Accurate & yang dipakai waktu buka URL authorize.
   const redirectUri = process.env.ACCURATE_OAUTH_REDIRECT_URI
 
   if (!clientId || !clientSecret || !redirectUri) {
     return NextResponse.json(
-      {
-        error:
-          'Env var ACCURATE_CLIENT_ID / ACCURATE_CLIENT_SECRET / ACCURATE_OAUTH_REDIRECT_URI belum diisi di Vercel. Isi dulu sebelum buka URL authorize.',
-      },
+      { error: 'Env var ACCURATE_CLIENT_ID / ACCURATE_CLIENT_SECRET / ACCURATE_OAUTH_REDIRECT_URI belum diisi di Vercel.' },
       { status: 500 },
     )
   }
 
   try {
     const tokenResult = await exchangeAuthorizationCode(code, clientId, clientSecret, redirectUri)
+    const branchName = BRANCH_NAME_BY_ID[branchId]
+    await saveAccurateRefreshToken(branchId, branchName, tokenResult.refresh_token)
 
-    // Ditampilin sebagai halaman HTML sederhana di browser KAMU SENDIRI
-    // (bukan dikirim ke server lain, bukan di-log) — supaya gampang
-    // di-copy manual. Halaman ini aman dibuka karena cuma kamu yang
-    // pegang URL callback dengan code sekali-pakai ini.
     const html = `
       <html>
         <body style="font-family: sans-serif; padding: 24px; line-height: 1.6;">
-          <h2>Berhasil dapat token dari Accurate ✅</h2>
-          <p><b>Langkah selanjutnya:</b> copy nilai <code>refresh_token</code> di bawah ini,
-          taruh sebagai env var <code>ACCURATE_REFRESH_TOKEN</code> di Vercel.
-          Setelah itu redeploy, lalu langkah ini gak perlu diulang lagi.</p>
-          <p style="color:#b91c1c"><b>Jangan share/paste refresh_token ini ke chat AI manapun atau tempat lain.</b></p>
-          <textarea style="width:100%; height:80px;" readonly>${tokenResult.refresh_token}</textarea>
-          <p>Scope yang didapat: ${tokenResult.scope}</p>
-          <hr/>
-          <p>Selanjutnya kamu juga perlu cari <b>ACCURATE_DB_ID</b> — buka endpoint
-          <code>${ACCOUNT_BASE_URL_PLACEHOLDER}/api/db-list.do</code> dengan header
-          <code>Authorization: Bearer ${tokenResult.access_token}</code> (misal lewat Postman),
-          cari "id" dari database toko kamu di hasilnya.</p>
+          <h2>Berhasil ✅</h2>
+          <p>Refresh token untuk cabang <b>${branchName}</b> sudah otomatis tersimpan ke database.
+          Gak perlu copy-paste manual lagi.</p>
+          <p>Sekarang cabang ini siap dipakai buat sync (setelah env var
+          <code>ACCURATE_DB_ID_${branchName.toUpperCase()}</code> juga sudah diisi di Vercel).</p>
         </body>
       </html>
-    `.replace('ACCOUNT_BASE_URL_PLACEHOLDER', 'https://account.accurate.id')
-
+    `
     return new NextResponse(html, { headers: { 'Content-Type': 'text/html' } })
   } catch (err: any) {
     return NextResponse.json({ error: String(err?.message || err) }, { status: 500 })
