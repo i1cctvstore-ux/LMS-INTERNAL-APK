@@ -473,7 +473,7 @@ function highlightMatch(text, query) {
   );
 }
 
-function ProductCombo({ value, skuValue, onChange, products, onAddProduct, onGoToMaster, placeholder, brand }) {
+function ProductCombo({ value, skuValue, onChange, products, onAddProduct, onGoToMaster, trackedProductIds, placeholder, brand }) {
   const [query, setQuery] = useState(value || "");
   const [open, setOpen] = useState(false);
 
@@ -581,6 +581,11 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, onGoT
                     jadi nggak kebaca, sementara SKU lebih ringkas & unik. Kalau
                     produknya kebetulan nggak punya SKU, fallback ke nama. */}
                 <span className="truncate font-mono text-xs">{highlightMatch(p.sku || p.name || "(tanpa SKU)", query.trim())}</span>
+                {trackedProductIds && !trackedProductIds.has(p.id) && (
+                  <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-amber-50 text-amber-600" title="Belum ada baris stok tercatat di cabang manapun">
+                    belum ada stok tercatat
+                  </span>
+                )}
               </button>
             ))}
             {filtered.length === 0 && !query.trim() && <div className="px-3 py-2 text-sm text-slate-400">Belum ada produk.</div>}
@@ -2690,13 +2695,14 @@ function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, onGoToMas
 
   const updateRow = (rowId, patch) => setRows((rs) => rs.map((r) => (r.rowId === rowId ? { ...r, ...patch } : r)));
   const canSubmit = customer.name.trim() && rows.every((r) => r.brand && r.produk && r.snDiterima.trim() && r.garansi && r.kelengkapan.trim());
-  // Cuma produk yang beneran ada di Stok Cabang yang muncul di
-  // dropdown "Produk / Model" -- lihat loadBranchTrackedProductIds().
-  // Selama trackedProductIds masih null (belum kelar di-fetch), tampilin
-  // semua dulu biar form nggak keliatan kosong pas baru dibuka.
-  const products = trackedProductIds
-    ? (settings.products || []).filter((p) => trackedProductIds.has(p.id))
-    : (settings.products || []);
+  // OPSI A (per keputusan): dropdown "Produk / Model" nampilin SEMUA
+  // produk katalog, nggak difilter berdasarkan Stok Cabang lagi --
+  // soalnya kalau difilter ketat, staf di cabang yang belum/lagi
+  // gagal sync (Jakarta, Purwokerto, atau Solo pas Zoho-nya
+  // bermasalah) jadi nggak bisa nemu produk yang customer bawa buat
+  // diservis. trackedProductIds tetap dipakai buat nge-tag produk
+  // yang belum ada stok tercatat di ProductCombo (bukan buat nyaring).
+  const products = settings.products || [];
 
   return (
     <Modal title="Barang Masuk" subtitle="Foto tanda terima ber-TTD diupload belakangan, setelah dicetak dan ditandatangani customer" onClose={onClose} wide>
@@ -2737,7 +2743,7 @@ function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, onGoToMas
                       if (guessed) patch.brand = guessed;
                     }
                     updateRow(r.rowId, patch);
-                  }} onAddProduct={onAddProduct} onGoToMaster={onGoToMaster} />
+                  }} onAddProduct={onAddProduct} onGoToMaster={onGoToMaster} trackedProductIds={trackedProductIds} />
               </Field>
               <Field label="SN Diterima">
                 <input className={inputCls} value={r.snDiterima} onChange={(e) => updateRow(r.rowId, { snDiterima: e.target.value })} />
@@ -3403,11 +3409,9 @@ function ProgressModal({ claim, claims, settings, batches, role, hasInvoice, cla
 // ---------- Edit claim modal: data correction only ----------
 function EditClaimModal({ claim, settings, batches, claims, invoices, role, onClose, onSave, onAddOption, onAddProduct, onGoToMaster, trackedProductIds, onSaveCustomerAlamat, isDuplicateSN, onPrint, onSwitch }) {
   const [f, setF] = useState({ ...claim, partsUsed: claim.partsUsed || [] });
-  // Sama kayak di AddClaimModal -- cuma produk yang beneran ada di Stok
-  // Cabang yang muncul di dropdown "Produk / Model".
-  const productsForCombo = trackedProductIds
-    ? (settings.products || []).filter((p) => trackedProductIds.has(p.id))
-    : (settings.products || []);
+  // OPSI A -- lihat catatan yang sama di AddClaimModal: nggak difilter,
+  // trackedProductIds cuma dipakai buat nge-tag di ProductCombo.
+  const productsForCombo = settings.products || [];
   const customerRecord = (settings.customers || []).find((c) => c.name.trim().toLowerCase() === (claim.customerName || "").trim().toLowerCase());
   const [alamat, setAlamat] = useState(customerRecord?.alamat || "");
   const batch = batches.find((b) => b.id === claim.batchId);
@@ -3464,7 +3468,7 @@ function EditClaimModal({ claim, settings, batches, claims, invoices, role, onCl
           <ComboInput value={f.brand} options={settings.brands} onChange={(v) => setF({ ...f, brand: v })} onAddOption={(v) => onAddOption("brands", v)} />
         </Field>
         <Field label="Produk / Model">
-          <ProductCombo value={f.produk} skuValue={f.produkSku} products={productsForCombo} brand={f.brand} placeholder="Cari nama produk..."
+          <ProductCombo value={f.produk} skuValue={f.produkSku} products={productsForCombo} trackedProductIds={trackedProductIds} brand={f.brand} placeholder="Cari nama produk..."
             onChange={(name, sku) => {
               const patch = { produk: name, produkSku: sku };
               if (!f.brand) {
