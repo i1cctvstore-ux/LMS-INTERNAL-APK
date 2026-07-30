@@ -881,8 +881,11 @@ export async function persistServiceData(
 // Admin. API route-nya pakai admin client (bypass RLS) biar semua
 // role dapet daftar yang sama persis.
 // =====================================================
-export async function loadBranchTrackedProductIds(): Promise<Set<string>> {
-  const res = await fetch('/api/stok/tracked-product-ids')
+export async function loadBranchTrackedProductIds(branchId?: string): Promise<Set<string>> {
+  const url = branchId
+    ? `/api/stok/tracked-product-ids?branchId=${encodeURIComponent(branchId)}`
+    : '/api/stok/tracked-product-ids'
+  const res = await fetch(url)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body?.message || `Gagal ambil daftar produk Stok Cabang (${res.status})`)
