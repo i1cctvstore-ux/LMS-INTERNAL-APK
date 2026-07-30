@@ -2695,14 +2695,13 @@ function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, onGoToMas
 
   const updateRow = (rowId, patch) => setRows((rs) => rs.map((r) => (r.rowId === rowId ? { ...r, ...patch } : r)));
   const canSubmit = customer.name.trim() && rows.every((r) => r.brand && r.produk && r.snDiterima.trim() && r.garansi && r.kelengkapan.trim());
-  // OPSI A (per keputusan): dropdown "Produk / Model" nampilin SEMUA
-  // produk katalog, nggak difilter berdasarkan Stok Cabang lagi --
-  // soalnya kalau difilter ketat, staf di cabang yang belum/lagi
-  // gagal sync (Jakarta, Purwokerto, atau Solo pas Zoho-nya
-  // bermasalah) jadi nggak bisa nemu produk yang customer bawa buat
-  // diservis. trackedProductIds tetap dipakai buat nge-tag produk
-  // yang belum ada stok tercatat di ProductCombo (bukan buat nyaring).
-  const products = settings.products || [];
+  // Per keputusan terbaru: dropdown "Produk / Model" CUMA nampilin
+  // produk yang source-nya 'cabang' (dari sync Zoho/Accurate).
+  // Produk 'supplier' (upload manual) dan 'manual' (input Data Master)
+  // sengaja disingkirkan dari sini. Konsekuensinya: produk yang belum
+  // ke-sync dari cabang manapun (termasuk yang ditambah manual di Data
+  // Master) nggak akan kelihatan di form Klaim sampai dia ke-sync.
+  const products = (settings.products || []).filter((p) => (p.source || "cabang") === "cabang");
 
   return (
     <Modal title="Barang Masuk" subtitle="Foto tanda terima ber-TTD diupload belakangan, setelah dicetak dan ditandatangani customer" onClose={onClose} wide>
@@ -3409,9 +3408,8 @@ function ProgressModal({ claim, claims, settings, batches, role, hasInvoice, cla
 // ---------- Edit claim modal: data correction only ----------
 function EditClaimModal({ claim, settings, batches, claims, invoices, role, onClose, onSave, onAddOption, onAddProduct, onGoToMaster, trackedProductIds, onSaveCustomerAlamat, isDuplicateSN, onPrint, onSwitch }) {
   const [f, setF] = useState({ ...claim, partsUsed: claim.partsUsed || [] });
-  // OPSI A -- lihat catatan yang sama di AddClaimModal: nggak difilter,
-  // trackedProductIds cuma dipakai buat nge-tag di ProductCombo.
-  const productsForCombo = settings.products || [];
+  // Sama kayak AddClaimModal -- cuma produk source='cabang'.
+  const productsForCombo = (settings.products || []).filter((p) => (p.source || "cabang") === "cabang");
   const customerRecord = (settings.customers || []).find((c) => c.name.trim().toLowerCase() === (claim.customerName || "").trim().toLowerCase());
   const [alamat, setAlamat] = useState(customerRecord?.alamat || "");
   const batch = batches.find((b) => b.id === claim.batchId);
@@ -5680,11 +5678,10 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
   // Filter berdasarkan asal produk -- biar produk dari sync Cabang,
   // upload Stok Supplier, dan input manual kelihatan kepisah, nggak
   // nyatu semua kayak sebelumnya.
-  const list = sourceFilter === "semua" ? allList : allList.filter((p) => (p.source || "manual") === sourceFilter);
+  const list = sourceFilter === "semua" ? allList : allList.filter((p) => (p.source || "cabang") === sourceFilter);
   const sourceCounts = {
-    cabang: allList.filter((p) => p.source === "cabang").length,
+    cabang: allList.filter((p) => (p.source || "cabang") === "cabang").length,
     supplier: allList.filter((p) => p.source === "supplier").length,
-    manual: allList.filter((p) => (p.source || "manual") === "manual").length,
   };
   const filtered = sortByName(query.trim()
     ? list.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()) || (p.sku || "").toLowerCase().includes(query.trim().toLowerCase()))
@@ -5734,7 +5731,6 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
           { key: "semua", label: `Semua (${allList.length})` },
           { key: "cabang", label: `Stok Cabang (${sourceCounts.cabang})` },
           { key: "supplier", label: `Stok Supplier (${sourceCounts.supplier})` },
-          { key: "manual", label: `Manual (${sourceCounts.manual})` },
         ].map((t) => (
           <button
             key={t.key}
@@ -5762,11 +5758,11 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
               </span>
               <span
                 className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${
-                  p.source === "cabang" ? "bg-emerald-50 text-emerald-600" : p.source === "supplier" ? "bg-amber-50 text-amber-600" : "bg-slate-50 text-slate-500"
+                  p.source === "supplier" ? "bg-amber-50 text-amber-600" : "bg-emerald-50 text-emerald-600"
                 }`}
                 title="Asal produk ini"
               >
-                {p.source === "cabang" ? "Cabang" : p.source === "supplier" ? "Supplier" : "Manual"}
+                {p.source === "supplier" ? "Supplier" : "Cabang"}
               </span>
             </div>
             {canManage && (
