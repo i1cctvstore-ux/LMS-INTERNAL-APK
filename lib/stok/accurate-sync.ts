@@ -205,7 +205,20 @@ export async function syncAccurateForBranch(
     if (!res.ok || !body.s) {
       throw new Error(`Gagal ambil sample item Accurate (${config.branchName}): ${JSON.stringify(body)}`)
     }
-    const sample = (body.d || []) as any[]
+    const listItems = (body.d || []) as any[]
+
+    // item/list.do defaultnya cuma balikin field ringkas (id + nama).
+    // Field stok kemungkinan cuma ada di item/detail.do, jadi ambil
+    // detail lengkap satu-satu untuk tiap item di sample ini.
+    const sample: any[] = []
+    for (const it of listItems) {
+      const detailParams = new URLSearchParams({ id: String(it.id) })
+      const detailRes = await fetch(`${conn.host}/accurate/api/item/detail.do?${detailParams.toString()}`, {
+        headers: { Authorization: `Bearer ${conn.accessToken}`, 'X-Session-ID': conn.session },
+      })
+      const detailBody = await detailRes.json()
+      sample.push(detailBody.s ? detailBody.d : { error: detailBody, listFallback: it })
+    }
 
     await supabase
       .from('stock_sync_log')
