@@ -5,85 +5,60 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // Accurate (baru Jakarta yang aktif; Purwokerto & Solo rencana
 // menyusul nanti — lihat ACCURATE_BRANCH_MAP di bawah).
 //
-// ARSITEKTUR (revisi ke-2): setiap cabang punya AKUN ACCURATE SENDIRI-
-// SENDIRI (login beda, bukan cuma database beda) — persis seperti
-// Zoho (tiap cabang = tiap organisasi/akun terpisah). Jadi:
-//   - Client ID & Client Secret: BOLEH SAMA untuk semua cabang (ini
-//     cuma identitas "aplikasi" kita di Accurate Developer Portal,
-//     bukan identitas akun toko — 1 aplikasi bisa dipakai buat
-//     authorize banyak akun Accurate berbeda, mirip 1 App Zoho yang
-//     bisa connect ke berbagai organisasi).
-//   - Refresh Token: BEDA per cabang (karena hasil dari proses OAuth
-//     manual yang dilakukan sambil login ke akun Accurate cabang
-//     tersebut).
-//   - DB ID: BEDA per cabang (database di dalam akun Accurate cabang
-//     itu — biasanya cuma ada 1 database per akun, tapi tetap perlu
-//     dicari lewat db-list.do).
+// ARSITEKTUR (revisi ke-3 — PENTING):
+//   - Client ID & Client Secret: SAMA untuk semua cabang (identitas
+//     aplikasi kita di Accurate Developer Portal), disimpan di env var
+//     Vercel seperti biasa (ACCURATE_CLIENT_ID / ACCURATE_CLIENT_SECRET).
+//   - DB ID: BEDA per cabang, disimpan di env var Vercel
+//     (ACCURATE_DB_ID_JAKARTA dkk) — ini aman di env var karena nilainya
+//     TIDAK PERNAH BERUBAH.
+//   - Refresh Token: BEDA per cabang, dan Accurate MEROTASI refresh
+//     token SETIAP KALI DIPAKAI (beda dari Zoho yang tokennya sama
+//     terus) — jadi TIDAK BISA disimpan di env var Vercel (env var gak
+//     bisa diupdate otomatis dari kode yang jalan). Karena itu refresh
+//     token disimpan & diupdate di tabel Supabase
+//     `accurate_oauth_tokens`, bukan di Vercel. Setiap kali sync
+//     berhasil refresh access token, refresh token BARU yang dibalikin
+//     Accurate langsung ditulis balik ke tabel ini, menimpa yang lama.
 //
-// Jadi tiap cabang butuh proses OAuth manual SENDIRI-SENDIRI (login
-// akun Accurate cabang itu, klik "Beri Akses", dapat refresh token
-// khusus cabang itu) — sama seperti generate refresh token Zoho per
-// organisasi dulu.
+// SETUP AWAL (sekali per cabang): lakukan proses OAuth manual (buka
+// URL authorize sambil login akun Accurate cabang itu, klik "Beri
+// Akses"). Halaman callback (accurate-oauth-callback/route.ts) akan
+// LANGSUNG menyimpan refresh token pertama ke tabel ini — gak perlu
+// copy-paste manual ke env var lagi seperti versi sebelumnya.
 //
-// FASE SEKARANG: diagnostik dulu (belum nulis ke product_stock) —
-// syncAccurateForBranch() di bawah masih dalam mode "ambil sample &
-// log", supaya kita bisa lihat dulu field JSON stok yang beneran
-// dikirim Accurate buat akun ini, sebelum finalisasi logic penulisan
-// ke database.
-//
-// ENV VAR:
-//   ACCURATE_CLIENT_ID                 <- sama untuk semua cabang
-//   ACCURATE_CLIENT_SECRET             <- sama untuk semua cabang
-//   ACCURATE_OAUTH_REDIRECT_URI        <- sama untuk semua cabang
-//   ACCURATE_REFRESH_TOKEN_JAKARTA     <- beda per cabang
-//   ACCURATE_DB_ID_JAKARTA             <- beda per cabang
-//   ACCURATE_REFRESH_TOKEN_PURWOKERTO  <- (isi nanti)
-//   ACCURATE_DB_ID_PURWOKERTO          <- (isi nanti)
-//   ACCURATE_REFRESH_TOKEN_SOLO        <- (isi nanti kalau Solo pindah ke Accurate)
-//   ACCURATE_DB_ID_SOLO                <- (isi nanti)
+// ENV VAR YANG MASIH DIPAKAI:
+//   ACCURATE_CLIENT_ID
+//   ACCURATE_CLIENT_SECRET
+//   ACCURATE_OAUTH_REDIRECT_URI
+//   ACCURATE_DB_ID_JAKARTA        (dan nanti ACCURATE_DB_ID_PURWOKERTO, dst)
 // =====================================================
 
 const ACCOUNT_BASE_URL = 'https://account.accurate.id'
 
-// Cuma cabang yang KEDUA env var-nya (refresh token & db id) keisi
-// yang bakal ikut disync — jadi aman nambah baris baru di sini duluan
-// sebelum credential-nya ada, gak akan bikin error, cabang itu
-// otomatis dilewati (lihat getAccurateBranchConfigs()).
-const ACCURATE_BRANCH_MAP: { envRefreshTokenKey: string; envDbIdKey: string; branchId: string; branchName: string }[] = [
-  {
-    envRefreshTokenKey: 'ACCURATE_REFRESH_TOKEN_JAKARTA',
-    envDbIdKey: 'ACCURATE_DB_ID_JAKARTA',
-    branchId: '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2',
-    branchName: 'Jakarta',
-  },
-  {
-    envRefreshTokenKey: 'ACCURATE_REFRESH_TOKEN_PURWOKERTO',
-    envDbIdKey: 'ACCURATE_DB_ID_PURWOKERTO',
-    branchId: '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612',
-    branchName: 'Purwokerto',
-  },
+const ACCURATE_BRANCH_MAP: { envDbIdKey: string; branchId: string; branchName: string }[] = [
+  { envDbIdKey: 'ACCURATE_DB_ID_JAKARTA', branchId: '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2', branchName: 'Jakarta' },
+  { envDbIdKey: 'ACCURATE_DB_ID_PURWOKERTO', branchId: '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612', branchName: 'Purwokerto' },
   // Solo baru menyusul kalau nanti resmi pindah dari Zoho ke Accurate:
-  // {
-  //   envRefreshTokenKey: 'ACCURATE_REFRESH_TOKEN_SOLO',
-  //   envDbIdKey: 'ACCURATE_DB_ID_SOLO',
-  //   branchId: 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3',
-  //   branchName: 'Solo',
-  // },
+  // { envDbIdKey: 'ACCURATE_DB_ID_SOLO', branchId: 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3', branchName: 'Solo' },
 ]
 
-export type AccurateBranchConfig = { branchId: string; branchName: string; dbId: string; refreshToken: string }
+export type AccurateBranchConfig = { branchId: string; branchName: string; dbId: string }
 
-// Cuma kembalikan cabang yang refresh token & DB ID-nya sudah diisi di
-// Vercel — jadi tombol "Sync Semua" otomatis cuma jalanin cabang yang
-// beneran siap, gak perlu ubah kode lagi waktu Purwokerto/Solo nyusul.
-export function getAccurateBranchConfigs(): AccurateBranchConfig[] {
+// Cuma kembalikan cabang yang DB ID-nya sudah diisi di Vercel DAN
+// sudah punya baris refresh token di tabel accurate_oauth_tokens
+// (artinya sudah pernah lewat proses OAuth manual).
+export async function getAccurateBranchConfigs(): Promise<AccurateBranchConfig[]> {
+  const supabase = createAdminClient()
+  const { data: tokenRows } = await supabase.from('accurate_oauth_tokens').select('branch_id')
+  const branchIdsWithToken = new Set((tokenRows || []).map((r: any) => r.branch_id))
+
   return ACCURATE_BRANCH_MAP.filter(
-    ({ envRefreshTokenKey, envDbIdKey }) => !!process.env[envRefreshTokenKey] && !!process.env[envDbIdKey],
-  ).map(({ envRefreshTokenKey, envDbIdKey, branchId, branchName }) => ({
+    ({ envDbIdKey, branchId }) => !!process.env[envDbIdKey] && branchIdsWithToken.has(branchId),
+  ).map(({ envDbIdKey, branchId, branchName }) => ({
     branchId,
     branchName,
     dbId: process.env[envDbIdKey] as string,
-    refreshToken: process.env[envRefreshTokenKey] as string,
   }))
 }
 
@@ -98,11 +73,9 @@ function basicAuthHeader(clientId: string, clientSecret: string): string {
   return 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
 }
 
-// Dipakai SETIAP KALI proses OAuth manual per cabang (dijalankan
-// beberapa kali, sekali per cabang — beda dari Zoho yang generate
-// token-nya lewat Postman, di sini lewat halaman callback route),
-// buat nukar Authorization Code jadi Access Token + Refresh Token
-// pertama kali untuk cabang itu.
+// Dipakai oleh halaman callback OAuth (dijalankan sekali per cabang,
+// tiap kali login akun Accurate cabang itu), buat nukar Authorization
+// Code jadi Access Token + Refresh Token PERTAMA KALI untuk cabang itu.
 export async function exchangeAuthorizationCode(
   code: string,
   clientId: string,
@@ -124,18 +97,64 @@ export async function exchangeAuthorizationCode(
   return body as AccurateTokenResponse
 }
 
-async function refreshAccessToken(clientId: string, clientSecret: string, refreshToken: string): Promise<string> {
+// Simpan/timpa refresh token untuk 1 cabang ke Supabase — dipanggil
+// baik oleh halaman callback OAuth (token pertama) MAUPUN tiap kali
+// refreshAccessToken() berhasil (token hasil rotasi).
+export async function saveAccurateRefreshToken(branchId: string, branchName: string, refreshToken: string) {
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('accurate_oauth_tokens')
+    .upsert(
+      { branch_id: branchId, branch_name: branchName, refresh_token: refreshToken, updated_at: new Date().toISOString() },
+      { onConflict: 'branch_id' },
+    )
+  if (error) throw new Error(`Gagal simpan refresh token Accurate ke Supabase: ${error.message}`)
+}
+
+async function getStoredRefreshToken(branchId: string): Promise<string> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('accurate_oauth_tokens')
+    .select('refresh_token')
+    .eq('branch_id', branchId)
+    .single()
+  if (error || !data) {
+    throw new Error(
+      `Belum ada refresh token Accurate tersimpan untuk cabang ini. Lakukan proses OAuth manual dulu (buka URL authorize, login, klik "Beri Akses").`,
+    )
+  }
+  return data.refresh_token as string
+}
+
+// Tukar refresh token jadi access token BARU. Karena Accurate merotasi
+// refresh token setiap dipakai, refresh_token baru dari hasil response
+// LANGSUNG disimpan balik ke Supabase di sini juga — supaya panggilan
+// berikutnya selalu pakai yang terbaru.
+async function refreshAccessToken(
+  clientId: string,
+  clientSecret: string,
+  branchId: string,
+  branchName: string,
+): Promise<string> {
+  const currentRefreshToken = await getStoredRefreshToken(branchId)
   const res = await fetch(`${ACCOUNT_BASE_URL}/oauth/token`, {
     method: 'POST',
     headers: {
       Authorization: basicAuthHeader(clientId, clientSecret),
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: currentRefreshToken }),
   })
   const body = await res.json()
   if (!res.ok || !body.access_token) {
-    throw new Error(`Gagal refresh Access Token Accurate: ${JSON.stringify(body)}`)
+    throw new Error(
+      `Gagal refresh Access Token Accurate (${branchName}): ${JSON.stringify(body)}. ` +
+        `Kalau errornya "invalid_grant"/refresh token invalid, kemungkinan token di Supabase sudah kadaluarsa/dipakai proses lain — perlu ulang proses OAuth manual untuk cabang ini.`,
+    )
+  }
+  // PENTING: simpan refresh_token BARU, jangan pakai yang lama lagi.
+  if (body.refresh_token) {
+    await saveAccurateRefreshToken(branchId, branchName, body.refresh_token)
   }
   return body.access_token as string
 }
@@ -156,24 +175,22 @@ async function openDatabase(accessToken: string, dbId: string): Promise<OpenDbRe
 
 export type AccurateConnection = { accessToken: string; session: string; host: string }
 
-// Buka koneksi ke SATU cabang tertentu — pakai refresh token & DB ID
-// khusus cabang itu (bukan lagi 1 refresh token buat semua cabang).
-export async function connectToAccurateBranch(refreshToken: string, dbId: string): Promise<AccurateConnection> {
+export async function connectToAccurateBranch(config: AccurateBranchConfig): Promise<AccurateConnection> {
   const clientId = process.env.ACCURATE_CLIENT_ID
   const clientSecret = process.env.ACCURATE_CLIENT_SECRET
   if (!clientId || !clientSecret) {
     throw new Error('Env var ACCURATE_CLIENT_ID / ACCURATE_CLIENT_SECRET belum lengkap.')
   }
-  const accessToken = await refreshAccessToken(clientId, clientSecret, refreshToken)
-  const { session, host } = await openDatabase(accessToken, dbId)
+  const accessToken = await refreshAccessToken(clientId, clientSecret, config.branchId, config.branchName)
+  const { session, host } = await openDatabase(accessToken, config.dbId)
   return { accessToken, session, host }
 }
 
 // =====================================================
 // FASE DIAGNOSTIK — dipanggil per cabang. Ambil beberapa item pertama
-// APA ADANYA dari akun/database Accurate cabang itu, biar kelihatan
-// lewat DevTools/Riwayat field stok yang beneran dipakai. Belum nulis
-// ke product_stock.
+// (list + detail lengkap) dari akun/database Accurate cabang itu,
+// biar kelihatan lewat DevTools/Riwayat field stok yang beneran
+// dipakai. Belum nulis ke product_stock.
 // =====================================================
 export async function syncAccurateForBranch(
   config: AccurateBranchConfig,
@@ -191,13 +208,9 @@ export async function syncAccurateForBranch(
   const logId = logRow.id as string
 
   try {
-    const conn = await connectToAccurateBranch(config.refreshToken, config.dbId)
+    const conn = await connectToAccurateBranch(config)
 
-    const params = new URLSearchParams({
-      'sp.pageSize': '5',
-      'sp.page': '1',
-      'filter.itemType': 'INVENTORY',
-    })
+    const params = new URLSearchParams({ 'sp.pageSize': '5', 'sp.page': '1', 'filter.itemType': 'INVENTORY' })
     const res = await fetch(`${conn.host}/accurate/api/item/list.do?${params.toString()}`, {
       headers: { Authorization: `Bearer ${conn.accessToken}`, 'X-Session-ID': conn.session },
     })
@@ -207,9 +220,6 @@ export async function syncAccurateForBranch(
     }
     const listItems = (body.d || []) as any[]
 
-    // item/list.do defaultnya cuma balikin field ringkas (id + nama).
-    // Field stok kemungkinan cuma ada di item/detail.do, jadi ambil
-    // detail lengkap satu-satu untuk tiap item di sample ini.
     const sample: any[] = []
     for (const it of listItems) {
       const detailParams = new URLSearchParams({ id: String(it.id) })
