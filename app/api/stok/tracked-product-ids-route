@@ -23,7 +23,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // Tetap wajib login (dicek pakai client biasa dulu) -- cuma bagian
 // query product_stock-nya yang pakai admin client.
 // =====================================================
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient()
   const {
     data: { user },
@@ -32,15 +32,21 @@ export async function GET() {
     return Response.json({ message: 'Belum login.' }, { status: 401 })
   }
 
+  // branchId opsional -- kalau dikasih, hasilnya di-scope ke SATU
+  // cabang itu aja (dipakai buat cek "produk ini ada stok tercatat di
+  // cabang SAYA", bukan "ada di cabang mana pun"). Kalau nggak
+  // dikasih, balikin gabungan semua cabang (perilaku lama).
+  const { searchParams } = new URL(request.url)
+  const branchId = searchParams.get('branchId') || undefined
+
   const admin = createAdminClient()
   const ids = new Set<string>()
   const PAGE = 1000
   let from = 0
   while (true) {
-    const { data, error } = await admin
-      .from('product_stock')
-      .select('product_id')
-      .range(from, from + PAGE - 1)
+    let query = admin.from('product_stock').select('product_id').range(from, from + PAGE - 1)
+    if (branchId) query = query.eq('branch_id', branchId)
+    const { data, error } = await query
     if (error) {
       return Response.json({ message: error.message }, { status: 500 })
     }
