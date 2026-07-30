@@ -582,9 +582,11 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, onGoT
                     produknya kebetulan nggak punya SKU, fallback ke nama. */}
                 <span className="truncate font-mono text-xs">{highlightMatch(p.sku || p.name || "(tanpa SKU)", query.trim())}</span>
                 {trackedProductIds && !trackedProductIds.has(p.id) && (
-                  <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-amber-50 text-amber-600" title="Belum ada baris stok tercatat di cabang manapun">
-                    belum ada stok tercatat
-                  </span>
+                  // Cuma titik kecil, bukan teks panjang -- biar SKU di
+                  // sebelahnya (kayak nama EZVIZ yang panjang) gak
+                  // kepotong. Detailnya tetap ada di title (tooltip
+                  // pas di-hover/di-tap-lama).
+                  <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-amber-400" title="Belum ada baris stok tercatat di cabang manapun" />
                 )}
               </button>
             ))}
