@@ -102,12 +102,12 @@ export type ProductItem = {
   name: string
   kategori: string
   subjenis: string
-  // Asal produk ini: 'cabang' (ke-tracking di product_stock, dari sync
-  // Zoho/Accurate), 'supplier' (dari bulk-create di Upload Stok
-  // Supplier), atau 'manual' (ditambah langsung di Data Master).
+  // Asal produk ini -- cuma 2 kategori: 'cabang' (dari sync
+  // Zoho/Accurate, ATAU diinput manual di Data Master oleh staf
+  // cabang) dan 'supplier' (dari bulk-create di Upload Stok Supplier).
   // Cuma buat ditampilin/difilter di UI, bukan sesuatu yang bisa
   // diedit user.
-  source: 'cabang' | 'supplier' | 'manual'
+  source: 'cabang' | 'supplier'
 }
 
 export type SupplierItem = {
@@ -359,7 +359,7 @@ function productFromRow(row: any): ProductItem {
     name: row.name,
     kategori: row.kategori || '',
     subjenis: row.subjenis || '',
-    source: row.source === 'cabang' || row.source === 'supplier' ? row.source : 'manual',
+    source: row.source === 'supplier' ? 'supplier' : 'cabang',
   }
 }
 
@@ -715,9 +715,10 @@ async function syncProducts(prev: ProductItem[], next: ProductItem[]) {
         ...chunkedInsertTasks(
           supabase,
           'service_products',
-          // source: 'manual' -- produk yang ditambah lewat Data Master
-          // (bukan dari sync Cabang atau upload Stok Supplier).
-          toInsert.map((p) => ({ ...productToRow(p), source: 'manual' })),
+          // source: 'cabang' -- produk yang ditambah manual lewat Data
+          // Master dianggap bagian dari Stok Cabang (bukan dari upload
+          // Stok Supplier).
+          toInsert.map((p) => ({ ...productToRow(p), source: 'cabang' })),
         ),
       )
   }
