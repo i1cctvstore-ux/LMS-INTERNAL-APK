@@ -5670,8 +5670,18 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
   const [editProduct, setEditProduct] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState("semua"); // 'semua' | 'cabang' | 'supplier' | 'manual'
   const canManage = role === "pusat";
-  const list = settings.products || [];
+  const allList = settings.products || [];
+  // Filter berdasarkan asal produk -- biar produk dari sync Cabang,
+  // upload Stok Supplier, dan input manual kelihatan kepisah, nggak
+  // nyatu semua kayak sebelumnya.
+  const list = sourceFilter === "semua" ? allList : allList.filter((p) => (p.source || "manual") === sourceFilter);
+  const sourceCounts = {
+    cabang: allList.filter((p) => p.source === "cabang").length,
+    supplier: allList.filter((p) => p.source === "supplier").length,
+    manual: allList.filter((p) => (p.source || "manual") === "manual").length,
+  };
   const filtered = sortByName(query.trim()
     ? list.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()) || (p.sku || "").toLowerCase().includes(query.trim().toLowerCase()))
     : list).slice(0, 200);
@@ -5679,7 +5689,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
   function skuOrNameTaken(name, sku, excludeId) {
     const n = name.trim().toLowerCase();
     const s = sku.trim().toLowerCase();
-    return list.some((p) => p.id !== excludeId && (p.name.trim().toLowerCase() === n || (s && (p.sku || "").trim().toLowerCase() === s)));
+    return allList.some((p) => p.id !== excludeId && (p.name.trim().toLowerCase() === n || (s && (p.sku || "").trim().toLowerCase() === s)));
   }
 
   function requestRemoveProduk(p) {
@@ -5698,7 +5708,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
       <div className="flex items-center justify-between mb-1 gap-2">
         <div className="text-sm font-semibold text-slate-700">Daftar Produk</div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-slate-400">{list.length} produk</span>
+          <span className="text-xs text-slate-400">{allList.length} produk</span>
           <button onClick={() => setShowImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50">
             <Upload size={13} /> Import
           </button>
@@ -5711,6 +5721,26 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
         Tiap produk WAJIB punya <strong>SKU</strong> (kode baku, format [BRAND]-[TIPE]-[VARIASI]) dan <strong>Nama</strong> (label yang ditampilkan). Dipakai di field "Produk / Model" saat input claim.
         {canManage ? " Salah ketik SKU? Tekan ikon pensil di baris produknya untuk perbaiki." : " Koreksi SKU yang salah ketik hanya bisa dilakukan Admin Pusat."}
       </p>
+      {/* Filter berdasarkan asal produk -- Cabang (sync Zoho/Accurate),
+          Supplier (upload manual di Stok Supplier), Manual (input
+          langsung di sini). Biar 3 sumber ini kelihatan kepisah,
+          nggak nyatu semua kayak sebelumnya. */}
+      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+        {[
+          { key: "semua", label: `Semua (${allList.length})` },
+          { key: "cabang", label: `Stok Cabang (${sourceCounts.cabang})` },
+          { key: "supplier", label: `Stok Supplier (${sourceCounts.supplier})` },
+          { key: "manual", label: `Manual (${sourceCounts.manual})` },
+        ].map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setSourceFilter(t.key)}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-medium ${sourceFilter === t.key ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
       <div className="relative mb-2">
         <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
         <input className={inputCls + " pl-8"} placeholder="Cari nama atau SKU..." value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -5725,6 +5755,14 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
               )}
               <span className={`shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded ${p.sku ? "bg-slate-100 text-slate-500" : "bg-red-100 text-red-600"}`}>
                 {p.sku || "SKU KOSONG"}
+              </span>
+              <span
+                className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${
+                  p.source === "cabang" ? "bg-emerald-50 text-emerald-600" : p.source === "supplier" ? "bg-amber-50 text-amber-600" : "bg-slate-50 text-slate-500"
+                }`}
+                title="Asal produk ini"
+              >
+                {p.source === "cabang" ? "Cabang" : p.source === "supplier" ? "Supplier" : "Manual"}
               </span>
             </div>
             {canManage && (
@@ -5743,7 +5781,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
         <ProductFormModal
           title="Tambah Produk"
           initial={{ name: "", sku: "", kategori: "", subjenis: "" }}
-          kategoriOptions={[...new Set(list.map((p) => p.kategori).filter(Boolean))]}
+          kategoriOptions={[...new Set(allList.map((p) => p.kategori).filter(Boolean))]}
           isTaken={(name, sku) => skuOrNameTaken(name, sku, null)}
           onClose={() => setAddOpen(false)}
           onSave={(v) => { onAddProduct(v.name, v.sku, v.kategori, v.subjenis); setAddOpen(false); }}
@@ -5753,7 +5791,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
         <ProductFormModal
           title="Edit Produk"
           initial={{ name: editProduct.name, sku: editProduct.sku || "", kategori: editProduct.kategori || "", subjenis: editProduct.subjenis || "" }}
-          kategoriOptions={[...new Set(list.map((p) => p.kategori).filter(Boolean))]}
+          kategoriOptions={[...new Set(allList.map((p) => p.kategori).filter(Boolean))]}
           isTaken={(name, sku) => skuOrNameTaken(name, sku, editProduct.id)}
           onClose={() => setEditProduct(null)}
           onSave={(v) => { onUpdateProduct(editProduct.id, { name: v.name, sku: v.sku, kategori: v.kategori, subjenis: v.subjenis }); setEditProduct(null); }}
