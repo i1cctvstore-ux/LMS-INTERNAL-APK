@@ -142,29 +142,29 @@ export async function searchSupplierStock(query: string): Promise<SupplierStockP
   if (!q) return []
   const supabase = createClient()
 
-  const { data: products, error: productErr } = await supabase
+  // PENTING: pakai supplier_stock!inner biar query ini CUMA nyari di
+  // antara produk yang BENERAN punya data supplier (bukan seluruh
+  // katalog service_products). Sebelumnya urutannya kebalik -- cari
+  // 100 produk yang namanya cocok dulu (dari SEMUA produk, termasuk
+  // yang nggak punya data supplier sama sekali), baru dicek belakangan
+  // mana yang punya stok. Kalau kata kuncinya umum, 100 kuota itu bisa
+  // abis duluan sama produk yang gak relevan, jadi produk yang
+  // beneran ada datanya (dari supplier manapun) malah ketutupan/gak
+  // pernah ke-cek. Dengan !inner, 100 kuota itu sekarang isinya
+  // produk yang beneran ada datanya semua.
+  const { data: rows, error } = await supabase
     .from('service_products')
-    .select('id, sku, name, kategori, subjenis')
+    .select(
+      'id, sku, name, kategori, subjenis, supplier_stock!inner(gudang, qty, updated_at, service_suppliers(name))',
+    )
     .or(`name.ilike.%${q}%,sku.ilike.%${q}%`)
-    // Sebelumnya limit 20 -- kalau kata kuncinya umum (misal cuma
-    // "hik" atau "ds-"), banyak produk yang cocok tapi ke-cut jadi
-    // cuma keliatan 20 pertama. Dinaikin ke 100 biar hasil yang mirip
-    // semua ikut muncul, nggak ada yang "hilang" diam-diam.
     .limit(100)
-  if (productErr) throw new Error(productErr.message)
-  if (!products || products.length === 0) return []
+  if (error) throw new Error(error.message)
+  if (!rows || rows.length === 0) return []
 
-  const productIds = products.map((p: any) => p.id)
-  const { data: stockRows, error: stockErr } = await supabase
-    .from('supplier_stock')
-    .select('product_id, gudang, qty, updated_at, service_suppliers(name)')
-    .in('product_id', productIds)
-  if (stockErr) throw new Error(stockErr.message)
-
-  const results: SupplierStockProductResult[] = products.map((p: any) => {
-    const rowsForProduct = (stockRows || []).filter((r: any) => r.product_id === p.id)
+  const results: SupplierStockProductResult[] = rows.map((p: any) => {
     const bySupplier = new Map<string, SupplierStockSupplierGroup>()
-    rowsForProduct.forEach((r: any) => {
+    ;(p.supplier_stock || []).forEach((r: any) => {
       const supplierName = r.service_suppliers?.name || '(supplier tidak diketahui)'
       const group = bySupplier.get(supplierName) || { supplierName, totalQty: 0, gudangEntries: [] }
       group.gudangEntries.push({ gudang: r.gudang || '', qty: Number(r.qty) || 0, updatedAt: r.updated_at })
@@ -184,7 +184,7 @@ export async function searchSupplierStock(query: string): Promise<SupplierStockP
     }
   })
 
-  return results.filter((r) => r.suppliers.length > 0).sort((a, b) => b.totalQty - a.totalQty)
+  return results.sort((a, b) => b.totalQty - a.totalQty)
 }
 
 export type PasteResult = { itemsUpdated: number; itemsSkipped: number }
