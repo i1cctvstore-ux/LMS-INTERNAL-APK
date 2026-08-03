@@ -2,8 +2,8 @@
   "crons": [
     {
       "path": "/api/stok/sync-zoho",
-      "schedule": "0 3 * * *"
-    }
+      "schedule": "0 */4 * * *"
+    },
     {
       "path": "/api/stok/sync-accurate",
       "schedule": "0 20 * * *"
