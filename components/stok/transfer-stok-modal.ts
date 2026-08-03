@@ -27,7 +27,7 @@ function fmtDateTime(iso: string) {
   return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-export function TransferStokButton() {
+export function TransferStokButton({ onSaved }: { onSaved?: () => void }) {
   const [open, setOpen] = useState(false)
   return (
     <>
@@ -35,12 +35,12 @@ export function TransferStokButton() {
         <ArrowRightLeft className="w-4 h-4" />
         Transfer Stok
       </button>
-      {open && <TransferStokModal onClose={() => setOpen(false)} />}
+      {open && <TransferStokModal onClose={() => setOpen(false)} onSaved={onSaved} />}
     </>
   )
 }
 
-function TransferStokModal({ onClose }: { onClose: () => void }) {
+function TransferStokModal({ onClose, onSaved }: { onClose: () => void; onSaved?: () => void }) {
   const [tab, setTab] = useState<'form' | 'riwayat'>('form')
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
   const [history, setHistory] = useState<TransferRow[]>([])
@@ -92,7 +92,13 @@ function TransferStokModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-5">
           {tab === 'form' ? (
-            <TransferForm branches={branches} onSuccess={() => setTab('riwayat')} />
+            <TransferForm
+              branches={branches}
+              onSuccess={() => {
+                setTab('riwayat')
+                onSaved?.()
+              }}
+            />
           ) : (
             <HistoryList rows={history} loading={loadingHistory} />
           )}
