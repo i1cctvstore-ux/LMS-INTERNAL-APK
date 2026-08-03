@@ -680,7 +680,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
-  const [visibleCount, setVisibleCount] = useState(6)
+  const [visibleCount, setVisibleCount] = useState(25)
   const [sortKey, setSortKey] = useState<string>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [syncingBranch, setSyncingBranch] = useState<string | null>(null)
@@ -805,7 +805,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
       <div className="flex flex-wrap gap-2 items-center mb-3">
         <div className="relative flex-1 min-w-[180px]">
           <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
-          <input value={query} onChange={(e) => { setQuery(e.target.value); setVisibleCount(6) }} placeholder="Cari tipe / SKU..." className={inputCls + ' pl-8'} />
+          <input value={query} onChange={(e) => { setQuery(e.target.value); setVisibleCount(25) }} placeholder="Cari tipe / SKU..." className={inputCls + ' pl-8'} />
         </div>
         <TransferStokButton onSaved={loadAll} />
         <button
@@ -956,8 +956,8 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
 
         {visibleCount < filtered.length && (
           <div className="p-4 border-t border-slate-100 text-center">
-            <button onClick={() => setVisibleCount((v) => v + 5)} className={`px-4 py-2 text-sm ${btnSecondaryCls}`}>
-              Muat 5 produk lagi
+            <button onClick={() => setVisibleCount((v) => v + 25)} className={`px-4 py-2 text-sm ${btnSecondaryCls}`}>
+              Muat 25 produk lagi
             </button>
           </div>
         )}
