@@ -795,7 +795,7 @@ function FilterStokCabangModal({
   )
 }
 
-
+function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: boolean; myBranchId: string | null }) {
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [matrix, setMatrix] = useState<StockMatrixData>({ products: [], physical: {}, held: {} })
   // Saldo "-K": barang konsinyasi/transfer manual antar cabang (dari
