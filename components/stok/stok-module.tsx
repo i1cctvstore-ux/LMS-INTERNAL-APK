@@ -14,6 +14,8 @@ import {
   stockSourceForBranch,
   triggerZohoSync,
   triggerZohoSyncAll,
+  triggerAccurateSync,
+  triggerAccurateSyncAll,
   searchSupplierStock,
   loadAllSuppliers,
   addSupplierQuick,
@@ -755,7 +757,8 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     setSyncingBranch(branchId)
     setMessage(null)
     try {
-      const result = await triggerZohoSync(branchId)
+      const source = stockSourceForBranch(branchId)
+      const result = source === 'accurate' ? await triggerAccurateSync(branchId) : await triggerZohoSync(branchId)
       const r = result.results?.[0]
       if (r?.status === 'error') setMessage(`Sync gagal: ${r.message}`)
       else if (r) setMessage(`Sync selesai — ${r.itemsUpdated} produk diperbarui${r.itemsSkipped ? `, ${r.itemsSkipped} SKU dilewati` : ''}.`)
@@ -771,9 +774,10 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     setSyncingAll(true)
     setMessage(null)
     try {
-      const result = await triggerZohoSyncAll()
-      const okCount = (result.results || []).filter((r: any) => r.status === 'success').length
-      const failCount = (result.results || []).filter((r: any) => r.status === 'error').length
+      const [zohoResult, accurateResult] = await Promise.all([triggerZohoSyncAll(), triggerAccurateSyncAll()])
+      const allResults = [...(zohoResult.results || []), ...(accurateResult.results || [])]
+      const okCount = allResults.filter((r: any) => r.status === 'success').length
+      const failCount = allResults.filter((r: any) => r.status === 'error').length
       setMessage(`Sync selesai — ${okCount} cabang berhasil${failCount ? `, ${failCount} gagal` : ''}.`)
       await loadAll()
     } catch (e: any) {
@@ -855,11 +859,11 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                             <span className="normal-case leading-tight">
                               <SortHeader label={b.name} sortKeyName={b.id} />
                             </span>
-                            {source === 'zoho' && (
+                            {(source === 'zoho' || source === 'accurate') && (
                               <button
                                 onClick={() => handleSyncBranch(b.id)}
                                 disabled={syncingAll || syncingBranch === b.id}
-                                title={`Sync ${b.name} dari Zoho`}
+                                title={`Sync ${b.name} dari ${source === 'accurate' ? 'Accurate' : 'Zoho'}`}
                                 className="text-slate-300 hover:text-indigo-600 disabled:opacity-50"
                               >
                                 {syncingBranch === b.id ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
