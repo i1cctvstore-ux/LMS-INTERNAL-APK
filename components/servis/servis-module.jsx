@@ -1545,7 +1545,12 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
     persist({ claims: nextClaims, batches: batches.filter((b) => b.id !== batchId) });
   }
   function canDeleteClaim(claim) {
-    return role === "pusat" && claim && claim.status === "Menunggu Konfirmasi";
+    // Per keputusan terbaru: SEMUA role (termasuk Admin Cabang) boleh
+    // hapus, di status apa pun -- asal belum "Selesai" (yang udah
+    // "Selesai" berarti udah diambil customer & kemungkinan besar
+    // udah kepakai buat invoice/laporan, jadi tetap dijaga gak bisa
+    // dihapus biar gak ngerusak riwayat/laporan yang udah jadi).
+    return !!claim && claim.status !== "Selesai";
   }
   function deleteClaim(claimId) {
     const claim = claims.find((c) => c.id === claimId);
@@ -2374,7 +2379,7 @@ function RowActions({ c, onPreview, onOpenInvoice, onViewInvoice, onOpenProgress
       <button onClick={() => onPreview(c.customerPhone)} className="text-slate-400 hover:text-slate-700" title="Lihat tampilan customer"><Eye size={15} /></button>
       <button onClick={() => sendTrackingLinkWA(c.customerName, c.customerPhone)} className="text-slate-400 hover:text-emerald-600" title="Kirim link cek status via WhatsApp"><MessageCircle size={15} /></button>
       {canDelete && (
-        <button onClick={() => onDelete(c)} className="text-slate-400 hover:text-red-500" title="Hapus tiket ini (Admin Pusat, sebelum diproses)"><X size={15} /></button>
+        <button onClick={() => onDelete(c)} className="text-slate-400 hover:text-red-500" title="Hapus tiket ini (bisa di status apa pun, kecuali sudah Selesai)"><X size={15} /></button>
       )}
     </div>
   );
