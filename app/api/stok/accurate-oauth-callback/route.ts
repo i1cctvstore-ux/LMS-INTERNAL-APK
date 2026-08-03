@@ -2,11 +2,10 @@
 //
 // Endpoint callback OAuth Accurate — dijalankan SEKALI PER CABANG
 // (tiap kali kamu lakukan proses "Beri Akses" login sebagai akun
-// Accurate cabang tertentu). Beda dari versi sebelumnya: sekarang
-// token LANGSUNG DISIMPAN ke Supabase (bukan cuma ditampilin buat
-// di-copy manual) — karena Accurate merotasi refresh token tiap
-// dipakai, jadi harus disimpan di tempat yang bisa diupdate otomatis
-// oleh server (lihat lib/stok/accurate-sync.ts).
+// Accurate cabang tertentu). Token LANGSUNG DISIMPAN ke Supabase
+// (bukan ditampilin buat di-copy manual) — karena Accurate merotasi
+// refresh token tiap dipakai, jadi harus disimpan di tempat yang bisa
+// diupdate otomatis oleh server (lihat lib/stok/accurate-sync.ts).
 //
 // CARA PAKAI per cabang: waktu buka URL authorize, tambahkan param
 // &state=<branchId> supaya callback ini tau token ini punya cabang
@@ -17,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { exchangeAuthorizationCode, saveAccurateRefreshToken } from '@/lib/stok/accurate-sync'
 
 // Daftar cabang yang boleh terima token lewat callback ini — dicocokkan
-// dari param `state`. Disalin manual dari ACCURATE_BRANCH_MAP di
+// dari param `state`. Disalin manual dari daftar cabang Accurate di
 // lib/stok/accurate-sync.ts supaya file ini gak perlu import daftar
 // privat dari sana.
 const BRANCH_NAME_BY_ID: Record<string, string> = {
@@ -58,7 +57,7 @@ export async function GET(req: NextRequest) {
     const html = `
       <html>
         <body style="font-family: sans-serif; padding: 24px; line-height: 1.6;">
-          <h2>Berhasil ✅</h2>
+          <h2>Berhasil</h2>
           <p>Refresh token untuk cabang <b>${branchName}</b> sudah otomatis tersimpan ke database.
           Gak perlu copy-paste manual lagi.</p>
           <p>Sekarang cabang ini siap dipakai buat sync (setelah env var
