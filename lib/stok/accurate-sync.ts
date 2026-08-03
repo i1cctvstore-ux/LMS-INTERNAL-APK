@@ -135,9 +135,13 @@ export async function connectToAccurateBranch(config: AccurateBranchConfig): Pro
   return { accessToken, session, host }
 }
 
-// Ambil daftar ringkas {id, no} semua item INVENTORY, lewat paging.
-async function fetchAllItemIds(conn: AccurateConnection): Promise<{ id: number; no: string }[]> {
-  const items: { id: number; no: string }[] = []
+// Ambil daftar ID semua item INVENTORY lewat paging. CATATAN PENTING:
+// item/list.do TERNYATA gak selalu balikin field "no" (SKU) di akun
+// ini — dari hasil diagnostik sebelumnya cuma dapat {id, modifierName}.
+// Jadi di sini CUMA ambil id-nya aja; SKU & stok dua-duanya diambil
+// bareng dari item/detail.do (lihat fetchItemDetail di bawah).
+async function fetchAllItemIds(conn: AccurateConnection): Promise<number[]> {
+  const ids: number[] = []
   const PAGE_SIZE = 100
   let page = 1
   while (true) {
@@ -149,27 +153,29 @@ async function fetchAllItemIds(conn: AccurateConnection): Promise<{ id: number; 
     if (!res.ok || !body.s) throw new Error(`Gagal ambil daftar item Accurate (halaman ${page}): ${JSON.stringify(body)}`)
     const pageItems = (body.d || []) as any[]
     pageItems.forEach((it) => {
-      if (it.no) items.push({ id: it.id, no: it.no })
+      if (it.id !== undefined && it.id !== null) ids.push(it.id)
     })
     const hasMore = pageItems.length === PAGE_SIZE
     if (!hasMore) break
     page += 1
   }
-  return items
+  return ids
 }
 
-// Ambil "balance" (stok, sudah otomatis exclude gudang Transit) untuk
-// SATU item lewat item/detail.do — ini yang dipanggil per item, gak
-// ada alternatif bulk.
-async function fetchItemBalance(conn: AccurateConnection, itemId: number): Promise<number | null> {
+// Ambil SKU ("no") + stok ("balance") sekaligus dari SATU item lewat
+// item/detail.do — ini satu-satunya endpoint yang beneran ngasih dua
+// field itu di akun ini.
+async function fetchItemDetail(conn: AccurateConnection, itemId: number): Promise<{ no: string; balance: number } | null> {
   const params = new URLSearchParams({ id: String(itemId) })
   const res = await fetch(`${conn.host}/accurate/api/item/detail.do?${params.toString()}`, {
     headers: { Authorization: `Bearer ${conn.accessToken}`, 'X-Session-ID': conn.session },
   })
   const body = await res.json()
   if (!res.ok || !body.s) return null
+  const no = body.d?.no
   const balance = body.d?.balance
-  return typeof balance === 'number' ? balance : null
+  if (!no || typeof balance !== 'number') return null
+  return { no, balance }
 }
 
 function normalizeSku(s: string): string {
@@ -195,7 +201,7 @@ export async function syncAccurateForBranch(
 
   try {
     const conn = await connectToAccurateBranch(config)
-    const itemList = await fetchAllItemIds(conn)
+    const itemIds = await fetchAllItemIds(conn)
 
     // Ambil katalog produk internal (sku -> id), sama pola kaya zoho-sync.
     const productIdBySku = new Map<string, string>()
@@ -216,18 +222,18 @@ export async function syncAccurateForBranch(
     // Panggil detail.do SATU-SATU per item (batasan API Accurate — lihat
     // catatan kuota di komentar atas file). Untuk katalog besar ini bisa
     // makan waktu beberapa menit; itu wajar, bukan error.
-    for (const item of itemList) {
-      const productId = productIdBySku.get(normalizeSku(item.no))
+    for (const itemId of itemIds) {
+      const detail = await fetchItemDetail(conn, itemId)
+      if (!detail) {
+        detailFetchFailed += 1
+        continue
+      }
+      const productId = productIdBySku.get(normalizeSku(detail.no))
       if (!productId) {
         itemsSkipped += 1
         continue
       }
-      const balance = await fetchItemBalance(conn, item.id)
-      if (balance === null) {
-        detailFetchFailed += 1
-        continue
-      }
-      upsertRowsByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(balance) })
+      upsertRowsByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
     }
 
     const upsertRows = Array.from(upsertRowsByProductId.values())
