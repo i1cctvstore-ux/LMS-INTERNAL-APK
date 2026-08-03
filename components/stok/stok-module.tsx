@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   Search, RefreshCw, Clock, CheckCircle2, XCircle, Loader2, Upload, X, PackageSearch,
-  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap, Plus,
+  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap, Plus, SlidersHorizontal, RotateCcw, Check,
 } from 'lucide-react'
 import {
   loadAllBranches,
@@ -670,7 +670,132 @@ type MatrixRow = {
   total: number
 }
 
-function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: boolean; myBranchId: string | null }) {
+function FilterStokCabangModal({
+  allKategoris,
+  selectedKategoris,
+  onChangeKategoris,
+  modeDetail,
+  onChangeModeDetail,
+  hideZeroStock,
+  onChangeHideZeroStock,
+  kolomDetailCount,
+  onClose,
+}: {
+  allKategoris: string[]
+  selectedKategoris: Set<string> | null
+  onChangeKategoris: (v: Set<string> | null) => void
+  modeDetail: boolean
+  onChangeModeDetail: (v: boolean) => void
+  hideZeroStock: boolean
+  onChangeHideZeroStock: (v: boolean) => void
+  kolomDetailCount: number
+  onClose: () => void
+}) {
+  // Draft lokal biar perubahan cuma keterapkan pas klik "Terapkan"
+  // (bukan langsung tiap klik checkbox) — sesuai pola bottom-sheet
+  // filter pada umumnya.
+  const [draftKategoris, setDraftKategoris] = useState<Set<string> | null>(selectedKategoris)
+  const [draftModeDetail, setDraftModeDetail] = useState(modeDetail)
+  const [draftHideZero, setDraftHideZero] = useState(hideZeroStock)
+
+  const allChecked = draftKategoris === null
+  function toggleAll() {
+    setDraftKategoris(null)
+  }
+  function toggleOne(kategori: string) {
+    setDraftKategoris((prev) => {
+      const base = prev === null ? new Set(allKategoris) : new Set(prev)
+      if (base.has(kategori)) base.delete(kategori)
+      else base.add(kategori)
+      // Kalau semua kecentang lagi, balik jadi null ("Semua Kategori").
+      if (base.size === allKategoris.length) return null
+      return base
+    })
+  }
+
+  function handleReset() {
+    setDraftKategoris(null)
+    setDraftModeDetail(false)
+    setDraftHideZero(false)
+  }
+
+  function handleTerapkan() {
+    onChangeKategoris(draftKategoris)
+    onChangeModeDetail(draftModeDetail)
+    onChangeHideZeroStock(draftHideZero)
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-end sm:items-center justify-center">
+      <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-xl w-full sm:max-w-md max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <h3 className="font-semibold text-slate-800">Filter Stok Cabang</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-5 overflow-y-auto space-y-5">
+          <div>
+            <div className="text-[11px] font-semibold text-slate-400 uppercase mb-2">Kategori</div>
+            <label className="flex items-center gap-2 py-1.5 text-sm font-medium text-slate-800">
+              <input type="checkbox" checked={allChecked} onChange={toggleAll} className="accent-indigo-600" />
+              Semua Kategori
+            </label>
+            <div className="pl-1 mt-1 space-y-0.5 max-h-48 overflow-y-auto">
+              {allKategoris.map((k) => (
+                <label key={k} className="flex items-center gap-2 py-1 pl-3 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={allChecked || (draftKategoris?.has(k) ?? false)}
+                    onChange={() => toggleOne(k)}
+                    className="accent-indigo-600"
+                  />
+                  {k}
+                </label>
+              ))}
+              {allKategoris.length === 0 && <p className="text-xs text-slate-400 pl-3">Belum ada kategori.</p>}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[11px] font-semibold text-slate-400 uppercase mb-2">Tampilan</div>
+            <label className="flex items-center gap-2 py-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={draftModeDetail}
+                onChange={(e) => setDraftModeDetail(e.target.checked)}
+                className="accent-indigo-600"
+              />
+              Mode Detail ({kolomDetailCount} kolom per akun/gudang)
+            </label>
+            <label className="flex items-center gap-2 py-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={draftHideZero}
+                onChange={(e) => setDraftHideZero(e.target.checked)}
+                className="accent-indigo-600"
+              />
+              Sembunyikan produk stok 0
+            </label>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 px-5 py-4 border-t border-slate-100">
+          <button onClick={handleReset} className={`flex items-center gap-1.5 px-4 py-2.5 text-sm ${btnSecondaryCls}`}>
+            <RotateCcw size={13} /> Reset
+          </button>
+          <button onClick={handleTerapkan} className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm ${btnPrimaryCls}`}>
+            <Check size={14} /> Terapkan
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [matrix, setMatrix] = useState<StockMatrixData>({ products: [], physical: {}, held: {} })
   // Saldo "-K": barang konsinyasi/transfer manual antar cabang (dari
@@ -686,6 +811,12 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
   const [syncingBranch, setSyncingBranch] = useState<string | null>(null)
   const [syncingAll, setSyncingAll] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [showFilter, setShowFilter] = useState(false)
+  // null = "Semua Kategori" (belum ada filter aktif). Kalau diisi, cuma
+  // kategori yang ada di dalam Set ini yang ditampilkan.
+  const [selectedKategoris, setSelectedKategoris] = useState<Set<string> | null>(null)
+  const [modeDetail, setModeDetail] = useState(false)
+  const [hideZeroStock, setHideZeroStock] = useState(false)
 
   async function loadAll() {
     setLoading(true)
@@ -733,9 +864,18 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     })
   }, [matrix, branches, transferMatrix])
 
+  // Daftar kategori unik dari data yang ada, buat isi checkbox filter.
+  const allKategoris = useMemo(() => {
+    const set = new Set<string>()
+    rows.forEach((r) => { if (r.kategori) set.add(r.kategori) })
+    return Array.from(set).sort()
+  }, [rows])
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const base = q ? rows.filter((r) => `${r.name} ${r.sku} ${r.kategori}`.toLowerCase().includes(q)) : rows
+    let base = q ? rows.filter((r) => `${r.name} ${r.sku} ${r.kategori}`.toLowerCase().includes(q)) : rows
+    if (selectedKategoris) base = base.filter((r) => selectedKategoris.has(r.kategori))
+    if (hideZeroStock) base = base.filter((r) => r.total > 0)
     const sorted = [...base].sort((a, b) => {
       let av: number | string, bv: number | string
       if (sortKey === 'name') { av = a.name.toLowerCase(); bv = b.name.toLowerCase() }
@@ -746,7 +886,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
       return sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
     })
     return sorted
-  }, [rows, query, sortKey, sortDir])
+  }, [rows, query, sortKey, sortDir, selectedKategoris, hideZeroStock])
 
   function toggleSort(key: string) {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -807,6 +947,13 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
           <input value={query} onChange={(e) => { setQuery(e.target.value); setVisibleCount(25) }} placeholder="Cari tipe / SKU..." className={inputCls + ' pl-8'} />
         </div>
+        <button onClick={() => setShowFilter(true)} className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}>
+          <SlidersHorizontal size={14} />
+          Filter
+          {(selectedKategoris || hideZeroStock || modeDetail) && (
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+          )}
+        </button>
         <TransferStokButton onSaved={loadAll} />
         <button
           onClick={handleSyncAll}
@@ -871,12 +1018,14 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                             )}
                           </div>
                         </th>
-                        <th
-                          className={`p-3 max-w-[70px] normal-case text-[10px] text-slate-400 ${isMine ? 'bg-indigo-50/60' : ''}`}
-                          title="Stok konsinyasi/transfer manual antar cabang"
-                        >
-                          {b.name}-K
-                        </th>
+                        {modeDetail && (
+                          <th
+                            className={`p-3 max-w-[70px] normal-case text-[10px] text-slate-400 ${isMine ? 'bg-indigo-50/60' : ''}`}
+                            title="Stok konsinyasi/transfer manual antar cabang"
+                          >
+                            {b.name}-K
+                          </th>
+                        )}
                       </Fragment>
                     )
                   })}
@@ -902,9 +1051,11 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                             </span>
                             {cell.held > 0 && <div className="text-[10px] text-slate-400">({cell.physical}-{cell.held})</div>}
                           </td>
-                          <td className={`p-3 text-xs ${isMine ? 'bg-indigo-50/30' : ''} ${cell.transferK === 0 ? 'text-slate-300' : 'text-indigo-700 font-medium'}`}>
-                            {cell.transferK}
-                          </td>
+                          {modeDetail && (
+                            <td className={`p-3 text-xs ${isMine ? 'bg-indigo-50/30' : ''} ${cell.transferK === 0 ? 'text-slate-300' : 'text-indigo-700 font-medium'}`}>
+                              {cell.transferK}
+                            </td>
+                          )}
                         </Fragment>
                       )
                     })}
@@ -913,7 +1064,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                 ))}
                 {visibleRows.length === 0 && (
                   <tr>
-                    <td colSpan={branches.length * 2 + 3} className="p-8 text-center text-slate-400">
+                    <td colSpan={branches.length * (modeDetail ? 2 : 1) + 3} className="p-8 text-center text-slate-400">
                       {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
                     </td>
                   </tr>
@@ -935,7 +1086,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                       <div key={b.id} className="text-center">
                         <div className="text-[10px] text-slate-400 uppercase">{b.name}</div>
                         <div className={cell.net < 0 ? 'text-red-600 font-semibold' : 'text-slate-700 font-semibold'}>{cell.net}</div>
-                        {cell.transferK !== 0 && <div className="text-[10px] text-indigo-600">-K: {cell.transferK}</div>}
+                        {modeDetail && cell.transferK !== 0 && <div className="text-[10px] text-indigo-600">-K: {cell.transferK}</div>}
                       </div>
                     )
                   })}
@@ -967,6 +1118,20 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           </div>
         )}
       </div>
+
+      {showFilter && (
+        <FilterStokCabangModal
+          allKategoris={allKategoris}
+          selectedKategoris={selectedKategoris}
+          onChangeKategoris={setSelectedKategoris}
+          modeDetail={modeDetail}
+          onChangeModeDetail={setModeDetail}
+          hideZeroStock={hideZeroStock}
+          onChangeHideZeroStock={setHideZeroStock}
+          kolomDetailCount={branches.length}
+          onClose={() => setShowFilter(false)}
+        />
+      )}
     </div>
   )
 }
