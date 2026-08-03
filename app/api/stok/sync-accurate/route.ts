@@ -1,6 +1,11 @@
 // File ini: app/api/stok/sync-accurate/route.ts
 // Pola sama persis kaya app/api/stok/sync-zoho/route.ts yang sudah ada.
 
+// Naikkan batas waktu maksimal function (default Vercel cuma 10-15
+// detik) — sync Accurate manggil ratusan API call, walau sudah
+// diparalelkan tetap butuh waktu lebih dari default.
+export const maxDuration = 300 // detik (5 menit)
+
 import { createClient } from '@/lib/supabase/server'
 import { getAccurateBranchConfigs, syncAccurateForBranch } from '@/lib/stok/accurate-sync'
 
