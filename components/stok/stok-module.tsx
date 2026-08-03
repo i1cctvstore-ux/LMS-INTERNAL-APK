@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   Search, RefreshCw, Clock, CheckCircle2, XCircle, Loader2, Upload, X, PackageSearch,
   ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap, Plus,
@@ -44,6 +44,8 @@ import {
   type ParsedSupplierRow,
   type GudangColumnChoice,
 } from '@/lib/stok/parse-supplier-file'
+import { TransferStokButton } from './transfer-stok-modal'
+import { loadTransferBalanceMatrix } from '@/lib/stok/transfer-api'
 
 type StokModuleProps = {
   currentUserRole: string
@@ -662,13 +664,17 @@ type MatrixRow = {
   name: string
   kategori: string
   subjenis: string
-  perBranch: Record<string, { physical: number; held: number; net: number }>
+  perBranch: Record<string, { physical: number; held: number; net: number; transferK: number }>
   total: number
 }
 
 function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: boolean; myBranchId: string | null }) {
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [matrix, setMatrix] = useState<StockMatrixData>({ products: [], physical: {}, held: {} })
+  // Saldo "-K": barang konsinyasi/transfer manual antar cabang (dari
+  // tabel stock_transfers, BUKAN dari sync Zoho/Accurate). Map<branchId,
+  // Map<productId, qty>>.
+  const [transferMatrix, setTransferMatrix] = useState<Map<string, Map<string, number>>>(new Map())
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
@@ -682,10 +688,19 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
   async function loadAll() {
     setLoading(true)
     try {
-      const [b, m, ls] = await Promise.all([loadAllBranches(), loadStockMatrix(), loadLastSyncFreshness()])
+      const [b, m, ls, tk] = await Promise.all([
+        loadAllBranches(),
+        loadStockMatrix(),
+        loadLastSyncFreshness(),
+        // Gak boleh sampai numbangin seluruh halaman stok utama kalau
+        // fitur transfer ini kenapa-kenapa (misal migration belum
+        // dijalanin) — jadi di-catch sendiri, fallback ke Map kosong.
+        loadTransferBalanceMatrix().catch(() => new Map()),
+      ])
       setBranches(b)
       setMatrix(m)
       setLastSync(ls)
+      setTransferMatrix(tk)
     } catch (e: any) {
       setMessage(`Gagal memuat data: ${e?.message || e}`)
     } finally {
@@ -705,12 +720,16 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
         const physical = matrix.physical[`${b.id}|${p.productId}`] || 0
         const heldVal = p.sku ? matrix.held[`${b.id}|${normalizeSku(p.sku)}`] || 0 : 0
         const net = physical - heldVal
-        perBranch[b.id] = { physical, held: heldVal, net }
-        total += net
+        // Kolom "-K": saldo transfer/konsinyasi manual antar cabang.
+        // Ditambahkan ke Total karena barang ini secara fisik memang
+        // ada di cabang ini juga, meski gak lewat sync Zoho/Accurate.
+        const transferK = transferMatrix.get(b.id)?.get(p.productId) || 0
+        perBranch[b.id] = { physical, held: heldVal, net, transferK }
+        total += net + transferK
       })
       return { productId: p.productId, sku: p.sku, name: p.name, kategori: p.kategori, subjenis: p.subjenis, perBranch, total }
     })
-  }, [matrix, branches])
+  }, [matrix, branches, transferMatrix])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -784,6 +803,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
           <input value={query} onChange={(e) => { setQuery(e.target.value); setVisibleCount(6) }} placeholder="Cari tipe / SKU..." className={inputCls + ' pl-8'} />
         </div>
+        <TransferStokButton onSaved={loadAll} />
         <button
           onClick={handleSyncAll}
           disabled={syncingAll || !!syncingBranch}
@@ -813,7 +833,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
         </div>
 
         <div className="px-4 py-2 bg-slate-50 text-[11px] text-slate-500 border-b border-slate-100">
-          Angka dalam kurung = (stok fisik − ditahan servis). Klik header kolom untuk urutkan.
+          Angka dalam kurung = (stok fisik − ditahan servis). Kolom "-K" = stok konsinyasi/transfer manual antar cabang. Klik header kolom untuk urutkan.
         </div>
 
         {loading ? (
@@ -829,23 +849,31 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                     const source = stockSourceForBranch(b.id)
                     const isMine = myBranchId === b.id
                     return (
-                      <th key={b.id} className={`p-3 max-w-[110px] ${isMine ? 'bg-indigo-50/60' : ''}`}>
-                        <div className="flex items-start gap-1">
-                          <span className="normal-case leading-tight">
-                            <SortHeader label={b.name} sortKeyName={b.id} />
-                          </span>
-                          {source === 'zoho' && (
-                            <button
-                              onClick={() => handleSyncBranch(b.id)}
-                              disabled={syncingAll || syncingBranch === b.id}
-                              title={`Sync ${b.name} dari Zoho`}
-                              className="text-slate-300 hover:text-indigo-600 disabled:opacity-50"
-                            >
-                              {syncingBranch === b.id ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-                            </button>
-                          )}
-                        </div>
-                      </th>
+                      <Fragment key={b.id}>
+                        <th className={`p-3 max-w-[110px] ${isMine ? 'bg-indigo-50/60' : ''}`}>
+                          <div className="flex items-start gap-1">
+                            <span className="normal-case leading-tight">
+                              <SortHeader label={b.name} sortKeyName={b.id} />
+                            </span>
+                            {source === 'zoho' && (
+                              <button
+                                onClick={() => handleSyncBranch(b.id)}
+                                disabled={syncingAll || syncingBranch === b.id}
+                                title={`Sync ${b.name} dari Zoho`}
+                                className="text-slate-300 hover:text-indigo-600 disabled:opacity-50"
+                              >
+                                {syncingBranch === b.id ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                              </button>
+                            )}
+                          </div>
+                        </th>
+                        <th
+                          className={`p-3 max-w-[70px] normal-case text-[10px] text-slate-400 ${isMine ? 'bg-indigo-50/60' : ''}`}
+                          title="Stok konsinyasi/transfer manual antar cabang"
+                        >
+                          {b.name}-K
+                        </th>
+                      </Fragment>
                     )
                   })}
                   <th className="p-3"><SortHeader label="Total" sortKeyName="total" /></th>
@@ -863,12 +891,17 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                       const cell = r.perBranch[b.id]
                       const isMine = myBranchId === b.id
                       return (
-                        <td key={b.id} className={`p-3 ${isMine ? 'bg-indigo-50/30' : ''}`}>
-                          <span className={cell.net < 0 ? 'text-red-600 font-medium' : cell.net === 0 ? 'text-slate-300' : 'text-slate-700 font-medium'}>
-                            {cell.net}
-                          </span>
-                          {cell.held > 0 && <div className="text-[10px] text-slate-400">({cell.physical}-{cell.held})</div>}
-                        </td>
+                        <Fragment key={b.id}>
+                          <td className={`p-3 ${isMine ? 'bg-indigo-50/30' : ''}`}>
+                            <span className={cell.net < 0 ? 'text-red-600 font-medium' : cell.net === 0 ? 'text-slate-300' : 'text-slate-700 font-medium'}>
+                              {cell.net}
+                            </span>
+                            {cell.held > 0 && <div className="text-[10px] text-slate-400">({cell.physical}-{cell.held})</div>}
+                          </td>
+                          <td className={`p-3 text-xs ${isMine ? 'bg-indigo-50/30' : ''} ${cell.transferK === 0 ? 'text-slate-300' : 'text-indigo-700 font-medium'}`}>
+                            {cell.transferK}
+                          </td>
+                        </Fragment>
                       )
                     })}
                     <td className="p-3 font-semibold text-slate-800">{r.total}</td>
@@ -876,7 +909,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                 ))}
                 {visibleRows.length === 0 && (
                   <tr>
-                    <td colSpan={branches.length + 3} className="p-8 text-center text-slate-400">
+                    <td colSpan={branches.length * 2 + 3} className="p-8 text-center text-slate-400">
                       {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
                     </td>
                   </tr>
@@ -898,6 +931,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                       <div key={b.id} className="text-center">
                         <div className="text-[10px] text-slate-400 uppercase">{b.name}</div>
                         <div className={cell.net < 0 ? 'text-red-600 font-semibold' : 'text-slate-700 font-semibold'}>{cell.net}</div>
+                        {cell.transferK !== 0 && <div className="text-[10px] text-indigo-600">-K: {cell.transferK}</div>}
                       </div>
                     )
                   })}
