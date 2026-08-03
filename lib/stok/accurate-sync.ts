@@ -219,21 +219,27 @@ export async function syncAccurateForBranch(
     let detailFetchFailed = 0
     const upsertRowsByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number }>()
 
-    // Panggil detail.do SATU-SATU per item (batasan API Accurate — lihat
-    // catatan kuota di komentar atas file). Untuk katalog besar ini bisa
-    // makan waktu beberapa menit; itu wajar, bukan error.
-    for (const itemId of itemIds) {
-      const detail = await fetchItemDetail(conn, itemId)
-      if (!detail) {
-        detailFetchFailed += 1
-        continue
-      }
-      const productId = productIdBySku.get(normalizeSku(detail.no))
-      if (!productId) {
-        itemsSkipped += 1
-        continue
-      }
-      upsertRowsByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
+    // Panggil detail.do secara PARALEL per batch (bukan 1-per-1
+    // berurutan) — dengan 1.200+ produk, panggilan berurutan bisa
+    // makan waktu puluhan menit dan kena timeout server. Batch 15
+    // sekaligus memangkas waktu total secara signifikan sambil tetap
+    // gak terlalu agresif ke rate limit Accurate.
+    const CONCURRENCY = 15
+    for (let i = 0; i < itemIds.length; i += CONCURRENCY) {
+      const batch = itemIds.slice(i, i + CONCURRENCY)
+      const details = await Promise.all(batch.map((id) => fetchItemDetail(conn, id)))
+      details.forEach((detail) => {
+        if (!detail) {
+          detailFetchFailed += 1
+          return
+        }
+        const productId = productIdBySku.get(normalizeSku(detail.no))
+        if (!productId) {
+          itemsSkipped += 1
+          return
+        }
+        upsertRowsByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
+      })
     }
 
     const upsertRows = Array.from(upsertRowsByProductId.values())
