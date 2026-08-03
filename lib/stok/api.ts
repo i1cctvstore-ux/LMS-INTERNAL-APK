@@ -81,11 +81,11 @@ export async function fetchBranchName(branchId: string): Promise<string> {
 // branches ternyata gak konsisten/rapi — ada yang isinya "solo cctv
 // cabang bali" misalnya, jadi rawan salah kalau dicocokin dari nama).
 // Dipakai buat nentuin tombol sync mana yang ditampilkan/di-nonaktifkan.
-// Kalau nanti Accurate Online sudah jalan (Jakarta/Purwokerto), tinggal
-// tambah entri id cabangnya di sini.
 export const BRANCH_STOCK_SOURCE: Record<string, 'zoho' | 'accurate' | null> = {
   'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3': 'zoho', // Solo
   '9b4c7834-2e20-4416-8163-2faff97294c0': 'zoho', // Bali
+  '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2': 'accurate', // Jakarta
+  // '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612': 'accurate', // Purwokerto (aktifkan nanti)
 }
 
 export function stockSourceForBranch(branchId: string | null): 'zoho' | 'accurate' | null {
@@ -101,6 +101,17 @@ export async function triggerZohoSync(branchId: string): Promise<{ results: any[
   })
   const body = await res.json()
   if (!res.ok) throw new Error(body?.message || 'Gagal menjalankan sinkronisasi.')
+  return body
+}
+
+export async function triggerAccurateSync(branchId: string): Promise<{ results: any[]; message?: string }> {
+  const res = await fetch('/api/stok/sync-accurate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branchId }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body?.message || 'Gagal menjalankan sinkronisasi Accurate.')
   return body
 }
 
@@ -737,6 +748,17 @@ export async function triggerZohoSyncAll(): Promise<{ results: any[]; message?: 
   })
   const body = await res.json()
   if (!res.ok) throw new Error(body?.message || 'Gagal menjalankan sinkronisasi.')
+  return body
+}
+
+export async function triggerAccurateSyncAll(): Promise<{ results: any[]; message?: string }> {
+  const res = await fetch('/api/stok/sync-accurate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body?.message || 'Gagal menjalankan sinkronisasi Accurate.')
   return body
 }
 
