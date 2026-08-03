@@ -4,5 +4,9 @@
       "path": "/api/stok/sync-zoho",
       "schedule": "0 3 * * *"
     }
+    {
+      "path": "/api/stok/sync-accurate",
+      "schedule": "0 20 * * *"
+    }
   ]
 }
