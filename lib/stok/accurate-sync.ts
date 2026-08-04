@@ -241,12 +241,12 @@ export async function syncAccurateForBranch(
     // Accurate, nama dari Accurate juga. Dedupe dulu (kalau ada 2 item
     // Accurate somehow SKU-nya sama persis, cuma dibikin 1 produk).
     const seenNewSku = new Set<string>()
-    const toInsert: { id: string; sku: string; name: string }[] = []
+    const toInsert: { id: string; sku: string; name: string; source: string }[] = []
     allDetails.forEach((d) => {
       const key = normalizeSku(d.no)
       if (productIdBySku.has(key) || seenNewSku.has(key)) return
       seenNewSku.add(key)
-      toInsert.push({ id: crypto.randomUUID(), sku: d.no, name: d.name })
+      toInsert.push({ id: crypto.randomUUID(), sku: d.no, name: d.name, source: 'cabang' })
     })
     if (toInsert.length) {
       const CHUNK = 300
