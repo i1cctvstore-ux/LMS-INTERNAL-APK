@@ -103,28 +103,54 @@ export async function loadTransferHistory(limitCount = 100): Promise<TransferRow
   }))
 }
 
-// Saldo "-K" per cabang: Map<branchId, Map<productId, qty>> — dipakai
-// buat nyuntikkan kolom tambahan di tabel Stok Cabang yang sudah ada.
+// Saldo "-K" per cabang: Map<branchId, Map<productId, qty>> — GABUNGAN
+// dari 2 sumber: (1) stock_transfer_balance = transfer manual antar
+// cabang yang dicatat lewat form Transfer Stok, dan (2)
+// product_stock_konsi = item konsinyasi "(K)" yang Accurate sendiri
+// udah catat terpisah (diisi otomatis lewat sync, bukan input manual).
+// Dua-duanya dijumlah jadi 1 angka yang ditampilin di UI.
 export async function loadTransferBalanceMatrix(): Promise<Map<string, Map<string, number>>> {
   const supabase = createClient()
-  const rows: { branch_id: string; product_id: string; balance_qty: number }[] = []
-  const PAGE = 1000
-  let from = 0
-  while (true) {
-    const { data, error } = await supabase
-      .from('stock_transfer_balance')
-      .select('branch_id, product_id, balance_qty')
-      .range(from, from + PAGE - 1)
-    if (error) throw new Error(error.message)
-    rows.push(...((data || []) as any[]))
-    if (!data || data.length < PAGE) break
-    from += PAGE
+  const matrix = new Map<string, Map<string, number>>()
+
+  function addToMatrix(branchId: string, productId: string, qty: number) {
+    if (!matrix.has(branchId)) matrix.set(branchId, new Map())
+    const branchMap = matrix.get(branchId)!
+    branchMap.set(productId, (branchMap.get(productId) || 0) + qty)
   }
 
-  const matrix = new Map<string, Map<string, number>>()
-  rows.forEach((r) => {
-    if (!matrix.has(r.branch_id)) matrix.set(r.branch_id, new Map())
-    matrix.get(r.branch_id)!.set(r.product_id, Number(r.balance_qty) || 0)
-  })
+  const PAGE = 1000
+
+  // Sumber 1: transfer manual antar cabang.
+  {
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from('stock_transfer_balance')
+        .select('branch_id, product_id, balance_qty')
+        .range(from, from + PAGE - 1)
+      if (error) throw new Error(error.message)
+      ;(data || []).forEach((r: any) => addToMatrix(r.branch_id, r.product_id, Number(r.balance_qty) || 0))
+      if (!data || data.length < PAGE) break
+      from += PAGE
+    }
+  }
+
+  // Sumber 2: item konsinyasi "(K)" dari Accurate (lihat
+  // lib/stok/accurate-sync.ts — stripKonsiSuffix).
+  {
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from('product_stock_konsi')
+        .select('branch_id, product_id, qty_on_hand')
+        .range(from, from + PAGE - 1)
+      if (error) throw new Error(error.message)
+      ;(data || []).forEach((r: any) => addToMatrix(r.branch_id, r.product_id, Number(r.qty_on_hand) || 0))
+      if (!data || data.length < PAGE) break
+      from += PAGE
+    }
+  }
+
   return matrix
 }
