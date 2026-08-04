@@ -162,10 +162,10 @@ async function fetchAllItemIds(conn: AccurateConnection): Promise<number[]> {
   return ids
 }
 
-// Ambil SKU ("no") + stok ("balance") sekaligus dari SATU item lewat
-// item/detail.do — ini satu-satunya endpoint yang beneran ngasih dua
-// field itu di akun ini.
-async function fetchItemDetail(conn: AccurateConnection, itemId: number): Promise<{ no: string; balance: number } | null> {
+// Ambil SKU ("no") + nama + stok ("balance") sekaligus dari SATU item
+// lewat item/detail.do — ini satu-satunya endpoint yang beneran ngasih
+// field-field itu di akun ini.
+async function fetchItemDetail(conn: AccurateConnection, itemId: number): Promise<{ no: string; name: string; balance: number } | null> {
   const params = new URLSearchParams({ id: String(itemId) })
   const res = await fetch(`${conn.host}/accurate/api/item/detail.do?${params.toString()}`, {
     headers: { Authorization: `Bearer ${conn.accessToken}`, 'X-Session-ID': conn.session },
@@ -173,9 +173,10 @@ async function fetchItemDetail(conn: AccurateConnection, itemId: number): Promis
   const body = await res.json()
   if (!res.ok || !body.s) return null
   const no = body.d?.no
+  const name = body.d?.name
   const balance = body.d?.balance
   if (!no || typeof balance !== 'number') return null
-  return { no, balance }
+  return { no, name: name || no, balance }
 }
 
 function normalizeSku(s: string): string {
@@ -217,32 +218,54 @@ export async function syncAccurateForBranch(
 
     let itemsSkipped = 0
     let detailFetchFailed = 0
-    const skippedSkuSamples: string[] = []
+    let newProductsCreated = 0
     const upsertRowsByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number }>()
 
-    // Panggil detail.do secara PARALEL per batch (bukan 1-per-1
-    // berurutan) — dengan 1.200+ produk, panggilan berurutan bisa
-    // makan waktu puluhan menit dan kena timeout server. Batch 15
-    // sekaligus memangkas waktu total secara signifikan sambil tetap
-    // gak terlalu agresif ke rate limit Accurate.
+    // FASE 1: ambil detail (no/name/balance) semua item, PARALEL per
+    // batch 15 (bukan 1-per-1) — dengan 1.200+ produk, panggilan
+    // berurutan bisa makan waktu puluhan menit dan kena timeout server.
     const CONCURRENCY = 15
+    const allDetails: { no: string; name: string; balance: number }[] = []
     for (let i = 0; i < itemIds.length; i += CONCURRENCY) {
       const batch = itemIds.slice(i, i + CONCURRENCY)
       const details = await Promise.all(batch.map((id) => fetchItemDetail(conn, id)))
       details.forEach((detail) => {
-        if (!detail) {
-          detailFetchFailed += 1
-          return
-        }
-        const productId = productIdBySku.get(normalizeSku(detail.no))
-        if (!productId) {
-          itemsSkipped += 1
-          if (skippedSkuSamples.length < 20) skippedSkuSamples.push(detail.no)
-          return
-        }
-        upsertRowsByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
+        if (!detail) { detailFetchFailed += 1; return }
+        allDetails.push(detail)
       })
     }
+
+    // FASE 2: cari item yang SKU-nya belum ada di katalog produk kita,
+    // otomatis bikinin sebagai produk baru (pola sama kayak "Tambah
+    // semua sebagai produk baru & mapping" di Stok Supplier) — SKU dari
+    // Accurate, nama dari Accurate juga. Dedupe dulu (kalau ada 2 item
+    // Accurate somehow SKU-nya sama persis, cuma dibikin 1 produk).
+    const seenNewSku = new Set<string>()
+    const toInsert: { id: string; sku: string; name: string }[] = []
+    allDetails.forEach((d) => {
+      const key = normalizeSku(d.no)
+      if (productIdBySku.has(key) || seenNewSku.has(key)) return
+      seenNewSku.add(key)
+      toInsert.push({ id: crypto.randomUUID(), sku: d.no, name: d.name })
+    })
+    if (toInsert.length) {
+      const CHUNK = 300
+      for (let i = 0; i < toInsert.length; i += CHUNK) {
+        const chunk = toInsert.slice(i, i + CHUNK)
+        const { error } = await supabase.from('service_products').insert(chunk)
+        if (error) throw new Error(`Gagal bikin produk baru dari Accurate: ${error.message}`)
+      }
+      toInsert.forEach((p) => productIdBySku.set(normalizeSku(p.sku), p.id))
+      newProductsCreated = toInsert.length
+    }
+
+    // FASE 3: sekarang semua SKU harusnya udah ada productId-nya
+    // (baik yang lama maupun yang baru dibikin barusan) — tulis stoknya.
+    allDetails.forEach((detail) => {
+      const productId = productIdBySku.get(normalizeSku(detail.no))
+      if (!productId) { itemsSkipped += 1; return } // harusnya gak kejadian lagi, jaga-jaga aja
+      upsertRowsByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
+    })
 
     const upsertRows = Array.from(upsertRowsByProductId.values())
     const itemsUpdated = upsertRows.length
@@ -261,10 +284,8 @@ export async function syncAccurateForBranch(
     if (detailFetchFailed > 0) {
       notes.push(`${detailFetchFailed} item gagal diambil detailnya (kemungkinan kuota API atau item bermasalah), dilewati.`)
     }
-    if (itemsSkipped > 0) {
-      notes.push(
-        `${itemsSkipped} item SKU-nya (field "no" di Accurate) gak ketemu cocoknya di katalog produk. Contoh: ${skippedSkuSamples.join(', ')}`,
-      )
+    if (newProductsCreated > 0) {
+      notes.push(`${newProductsCreated} produk baru otomatis dibuat di katalog dari SKU Accurate yang belum ada.`)
     }
     await supabase
       .from('stock_sync_log')
