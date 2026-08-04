@@ -183,6 +183,19 @@ function normalizeSku(s: string): string {
   return (s || '').replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '').normalize('NFKC').trim().toLowerCase()
 }
 
+// Deteksi item konsinyasi Accurate — SKU/nama yang diakhiri "(K)"
+// (dengan atau tanpa spasi/tanda hubung sebelum kurung, misal
+// "EZVIZ-C6N-1080P-(K)" atau "CAMERA EZVIZ C6N 1080P (K)"). Item kayak
+// gini BUKAN produk terpisah — dia representasi stok konsinyasi dari
+// produk dasarnya (tanpa suffix ini), jadi harus dipetakan balik ke
+// produk dasar & ditulis ke product_stock_konsi, bukan bikin produk
+// baru sendiri.
+const KONSI_SUFFIX_PATTERN = /[\s\-]*\(k\)\s*$/i
+function stripKonsiSuffix(s: string): { base: string; isKonsi: boolean } {
+  if (!KONSI_SUFFIX_PATTERN.test(s)) return { base: s, isKonsi: false }
+  return { base: s.replace(KONSI_SUFFIX_PATTERN, '').trim(), isKonsi: true }
+}
+
 export type SyncResult = { branchName: string; itemsUpdated: number; itemsSkipped: number }
 
 export async function syncAccurateForBranch(
@@ -235,18 +248,32 @@ export async function syncAccurateForBranch(
       })
     }
 
-    // FASE 2: cari item yang SKU-nya belum ada di katalog produk kita,
+    // Pisahkan dulu: item KONSI (K) dipetakan ke SKU/nama DASARNYA
+    // (suffix dibuang), item normal tetap pakai SKU aslinya.
+    type ResolvedDetail = { matchSku: string; matchName: string; balance: number; isKonsi: boolean }
+    const resolvedDetails: ResolvedDetail[] = allDetails.map((d) => {
+      const skuResult = stripKonsiSuffix(d.no)
+      const nameResult = stripKonsiSuffix(d.name)
+      return {
+        matchSku: skuResult.base,
+        matchName: nameResult.base || skuResult.base,
+        balance: d.balance,
+        isKonsi: skuResult.isKonsi,
+      }
+    })
+
+    // FASE 2: cari SKU DASAR yang belum ada di katalog produk kita,
     // otomatis bikinin sebagai produk baru (pola sama kayak "Tambah
-    // semua sebagai produk baru & mapping" di Stok Supplier) — SKU dari
-    // Accurate, nama dari Accurate juga. Dedupe dulu (kalau ada 2 item
-    // Accurate somehow SKU-nya sama persis, cuma dibikin 1 produk).
+    // semua sebagai produk baru & mapping" di Stok Supplier). Dedupe
+    // dulu berdasarkan SKU dasar yang sudah di-normalize — item normal
+    // & item (K) dengan SKU dasar sama CUMA bikin 1 produk.
     const seenNewSku = new Set<string>()
     const toInsert: { id: string; sku: string; name: string; source: string }[] = []
-    allDetails.forEach((d) => {
-      const key = normalizeSku(d.no)
-      if (productIdBySku.has(key) || seenNewSku.has(key)) return
+    resolvedDetails.forEach((d) => {
+      const key = normalizeSku(d.matchSku)
+      if (!key || productIdBySku.has(key) || seenNewSku.has(key)) return
       seenNewSku.add(key)
-      toInsert.push({ id: crypto.randomUUID(), sku: d.no, name: d.name, source: 'cabang' })
+      toInsert.push({ id: crypto.randomUUID(), sku: d.matchSku, name: d.matchName, source: 'cabang' })
     })
     if (toInsert.length) {
       const CHUNK = 300
@@ -259,13 +286,29 @@ export async function syncAccurateForBranch(
       newProductsCreated = toInsert.length
     }
 
-    // FASE 3: sekarang semua SKU harusnya udah ada productId-nya
-    // (baik yang lama maupun yang baru dibikin barusan) — tulis stoknya.
-    allDetails.forEach((detail) => {
-      const productId = productIdBySku.get(normalizeSku(detail.no))
+    // FASE 3: tulis stoknya — item normal ke product_stock (kolom
+    // utama), item KONSI (K) ke product_stock_konsi (jadi angka "-K"
+    // di UI, DIGABUNG sama transfer manual yang udah ada).
+    const upsertKonsiByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number }>()
+    resolvedDetails.forEach((detail) => {
+      const productId = productIdBySku.get(normalizeSku(detail.matchSku))
       if (!productId) { itemsSkipped += 1; return } // harusnya gak kejadian lagi, jaga-jaga aja
-      upsertRowsByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
+      if (detail.isKonsi) {
+        upsertKonsiByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
+      } else {
+        upsertRowsByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
+      }
     })
+
+    if (upsertKonsiByProductId.size) {
+      const konsiRows = Array.from(upsertKonsiByProductId.values()).map((r) => ({ ...r, updated_at: new Date().toISOString() }))
+      const CHUNK = 300
+      for (let i = 0; i < konsiRows.length; i += CHUNK) {
+        const chunk = konsiRows.slice(i, i + CHUNK)
+        const { error } = await supabase.from('product_stock_konsi').upsert(chunk, { onConflict: 'branch_id,product_id' })
+        if (error) throw new Error(error.message)
+      }
+    }
 
     const upsertRows = Array.from(upsertRowsByProductId.values())
     const itemsUpdated = upsertRows.length
@@ -286,6 +329,9 @@ export async function syncAccurateForBranch(
     }
     if (newProductsCreated > 0) {
       notes.push(`${newProductsCreated} produk baru otomatis dibuat di katalog dari SKU Accurate yang belum ada.`)
+    }
+    if (upsertKonsiByProductId.size > 0) {
+      notes.push(`${upsertKonsiByProductId.size} item konsinyasi (K) dipetakan ke kolom "-K", bukan kolom utama.`)
     }
     await supabase
       .from('stock_sync_log')
