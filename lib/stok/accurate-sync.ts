@@ -217,6 +217,7 @@ export async function syncAccurateForBranch(
 
     let itemsSkipped = 0
     let detailFetchFailed = 0
+    const skippedSkuSamples: string[] = []
     const upsertRowsByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number }>()
 
     // Panggil detail.do secara PARALEL per batch (bukan 1-per-1
@@ -236,6 +237,7 @@ export async function syncAccurateForBranch(
         const productId = productIdBySku.get(normalizeSku(detail.no))
         if (!productId) {
           itemsSkipped += 1
+          if (skippedSkuSamples.length < 20) skippedSkuSamples.push(detail.no)
           return
         }
         upsertRowsByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
@@ -255,16 +257,22 @@ export async function syncAccurateForBranch(
     }
 
     const totalSkipped = itemsSkipped + detailFetchFailed
+    const notes: string[] = []
+    if (detailFetchFailed > 0) {
+      notes.push(`${detailFetchFailed} item gagal diambil detailnya (kemungkinan kuota API atau item bermasalah), dilewati.`)
+    }
+    if (itemsSkipped > 0) {
+      notes.push(
+        `${itemsSkipped} item SKU-nya (field "no" di Accurate) gak ketemu cocoknya di katalog produk. Contoh: ${skippedSkuSamples.join(', ')}`,
+      )
+    }
     await supabase
       .from('stock_sync_log')
       .update({
         status: 'success',
         items_updated: itemsUpdated,
         items_skipped: totalSkipped,
-        error_message:
-          detailFetchFailed > 0
-            ? `Info: ${detailFetchFailed} item gagal diambil detailnya (kemungkinan kuota API atau item bermasalah), dilewati.`
-            : null,
+        error_message: notes.length > 0 ? `Info: ${notes.join(' | ')}` : null,
         finished_at: new Date().toISOString(),
       })
       .eq('id', logId)
