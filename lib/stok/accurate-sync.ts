@@ -35,8 +35,7 @@ const ACCOUNT_BASE_URL = 'https://account.accurate.id'
 const ACCURATE_BRANCH_MAP: { envDbIdKey: string; branchId: string; branchName: string }[] = [
   { envDbIdKey: 'ACCURATE_DB_ID_JAKARTA', branchId: '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2', branchName: 'Jakarta' },
   { envDbIdKey: 'ACCURATE_DB_ID_PURWOKERTO', branchId: '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612', branchName: 'Purwokerto' },
-  // Solo baru menyusul kalau nanti resmi pindah dari Zoho ke Accurate:
-  // { envDbIdKey: 'ACCURATE_DB_ID_SOLO', branchId: 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3', branchName: 'Solo' },
+  { envDbIdKey: 'ACCURATE_DB_ID_SOLO', branchId: 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3', branchName: 'Solo' },
 ]
 
 export type AccurateBranchConfig = { branchId: string; branchName: string; dbId: string }
