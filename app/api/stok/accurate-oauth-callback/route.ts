@@ -22,6 +22,7 @@ import { exchangeAuthorizationCode, saveAccurateRefreshToken } from '@/lib/stok/
 const BRANCH_NAME_BY_ID: Record<string, string> = {
   '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2': 'Jakarta',
   '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612': 'Purwokerto',
+  'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3': 'Solo',
 }
 
 export async function GET(req: NextRequest) {
