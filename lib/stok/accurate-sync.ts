@@ -238,14 +238,26 @@ export async function syncAccurateForBranch(
     // berurutan bisa makan waktu puluhan menit dan kena timeout server.
     const CONCURRENCY = 15
     const allDetails: { no: string; name: string; balance: number }[] = []
-    for (let i = 0; i < itemIds.length; i += CONCURRENCY) {
-      const batch = itemIds.slice(i, i + CONCURRENCY)
-      const details = await Promise.all(batch.map((id) => fetchItemDetail(conn, id)))
-      details.forEach((detail) => {
-        if (!detail) { detailFetchFailed += 1; return }
-        allDetails.push(detail)
-      })
+    let failedIds: number[] = itemIds
+    // Coba sampai 3x total (1 percobaan awal + 2 retry) — kegagalan
+    // ambil detail sering cuma sementara (rate limit sesaat, koneksi
+    // putus-nyambung), jadi diulang dulu sebelum beneran dianggap
+    // gagal permanen.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const stillFailed: number[] = []
+      for (let i = 0; i < failedIds.length; i += CONCURRENCY) {
+        const batch = failedIds.slice(i, i + CONCURRENCY)
+        const details = await Promise.all(batch.map((id) => fetchItemDetail(conn, id)))
+        details.forEach((detail, idx) => {
+          if (!detail) { stillFailed.push(batch[idx]); return }
+          allDetails.push(detail)
+        })
+      }
+      failedIds = stillFailed
+      if (failedIds.length === 0) break
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 1500)) // jeda sebentar sebelum retry
     }
+    detailFetchFailed = failedIds.length
 
     // Pisahkan dulu: item KONSI (K) dipetakan ke SKU/nama DASARNYA
     // (suffix dibuang), item normal tetap pakai SKU aslinya.
