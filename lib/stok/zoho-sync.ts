@@ -90,7 +90,7 @@ async function getZohoAccessToken(config: ZohoOrgConfig): Promise<string> {
   return body.access_token as string
 }
 
-type ZohoItemRow = { sku: string; available_stock: number }
+type ZohoItemRow = { sku: string; name: string; available_stock: number }
 
 // Coba beberapa kemungkinan bentuk field stok dari Zoho Books, karena
 // tergantung pengaturan "Track Inventory" & multi-lokasi, bentuk
@@ -166,7 +166,7 @@ async function fetchAllZohoItemStocks(
         itemsWithoutStockField += 1
         return // Track Inventory belum aktif untuk item ini — dilewati, bukan dianggap 0
       }
-      items.push({ sku, available_stock: stock })
+      items.push({ sku, name: it.name || sku, available_stock: stock })
     })
 
     const hasMore = body.page_context?.has_more_page === true || pageItems.length === PER_PAGE
@@ -234,6 +234,31 @@ export async function syncZohoForBranch(
     }
 
     let itemsSkipped = 0
+    let newProductsCreated = 0
+
+    // Sebelum nyocokin stok, cari dulu SKU Zoho yang BELUM ada di
+    // katalog produk kita, otomatis bikinin sebagai produk baru (pola
+    // sama kayak yang udah jalan di sync Accurate) — SKU & nama dari
+    // Zoho langsung. Dedupe dulu biar SKU yang sama gak dobel-insert.
+    const seenNewSku = new Set<string>()
+    const toInsert: { id: string; sku: string; name: string; source: string }[] = []
+    zohoItems.forEach((item) => {
+      const key = normalizeSku(item.sku)
+      if (!key || productIdBySku.has(key) || seenNewSku.has(key)) return
+      seenNewSku.add(key)
+      toInsert.push({ id: crypto.randomUUID(), sku: item.sku, name: item.name, source: 'cabang' })
+    })
+    if (toInsert.length) {
+      const CHUNK = 300
+      for (let i = 0; i < toInsert.length; i += CHUNK) {
+        const chunk = toInsert.slice(i, i + CHUNK)
+        const { error } = await supabase.from('service_products').insert(chunk)
+        if (error) throw new Error(`Gagal bikin produk baru dari Zoho: ${error.message}`)
+      }
+      toInsert.forEach((p) => productIdBySku.set(normalizeSku(p.sku), p.id))
+      newProductsCreated = toInsert.length
+    }
+
     // Kunci pakai product_id (bukan array biasa) supaya kalau ada 2+ item
     // Zoho dengan SKU berbeda tapi ke-normalisasi jadi sama & mengarah ke
     // produk internal yang sama, kita cuma simpan SATU baris per produk —
@@ -245,7 +270,7 @@ export async function syncZohoForBranch(
     zohoItems.forEach((item) => {
       const productId = productIdBySku.get(normalizeSku(item.sku))
       if (!productId) {
-        itemsSkipped += 1 // SKU dari Zoho ini belum ada di katalog produk internal
+        itemsSkipped += 1 // harusnya gak kejadian lagi setelah auto-create di atas, jaga-jaga aja
         return
       }
       if (upsertRowsByProductId.has(productId)) {
@@ -280,6 +305,9 @@ export async function syncZohoForBranch(
     const infoNotes: string[] = []
     if (itemsWithoutStockField > 0) {
       infoNotes.push(`${itemsWithoutStockField} item belum aktif "Track Inventory" di Zoho Books, dilewati.`)
+    }
+    if (newProductsCreated > 0) {
+      infoNotes.push(`${newProductsCreated} produk baru otomatis dibuat di katalog dari SKU Zoho yang belum ada.`)
     }
     if (duplicateSkuCount > 0) {
       infoNotes.push(
