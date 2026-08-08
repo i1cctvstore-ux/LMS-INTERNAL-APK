@@ -751,6 +751,13 @@ export async function triggerZohoSyncAll(): Promise<{ results: any[]; message?: 
   return body
 }
 
+export async function triggerAccurateSoloKonsi(): Promise<{ results: any[]; message?: string }> {
+  const res = await fetch('/api/stok/sync-accurate-solo-konsi', { method: 'POST' })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body?.message || 'Gagal menjalankan sinkronisasi Accurate Solo (konsinyasi).')
+  return body
+}
+
 export async function triggerAccurateSyncAll(): Promise<{ results: any[]; message?: string }> {
   const res = await fetch('/api/stok/sync-accurate', {
     method: 'POST',
