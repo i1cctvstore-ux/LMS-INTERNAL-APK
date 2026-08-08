@@ -16,6 +16,7 @@ import {
   triggerZohoSyncAll,
   triggerAccurateSync,
   triggerAccurateSyncAll,
+  triggerAccurateSoloKonsi,
   searchSupplierStock,
   loadAllSuppliers,
   addSupplierQuick,
@@ -914,8 +915,12 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     setSyncingAll(true)
     setMessage(null)
     try {
-      const [zohoResult, accurateResult] = await Promise.all([triggerZohoSyncAll(), triggerAccurateSyncAll()])
-      const allResults = [...(zohoResult.results || []), ...(accurateResult.results || [])]
+      const [zohoResult, accurateResult, accurateSoloKonsiResult] = await Promise.all([
+        triggerZohoSyncAll(),
+        triggerAccurateSyncAll(),
+        triggerAccurateSoloKonsi().catch((e: any) => ({ results: [{ branchName: 'Solo (multi-gudang)', status: 'error', message: String(e?.message || e) }] })),
+      ])
+      const allResults = [...(zohoResult.results || []), ...(accurateResult.results || []), ...(accurateSoloKonsiResult.results || [])]
       const okCount = allResults.filter((r: any) => r.status === 'success').length
       const failCount = allResults.filter((r: any) => r.status === 'error').length
       setMessage(`Sync selesai — ${okCount} cabang berhasil${failCount ? `, ${failCount} gagal` : ''}.`)
