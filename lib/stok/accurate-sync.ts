@@ -389,3 +389,183 @@ export async function syncAccurateForBranch(
     throw err
   }
 }
+
+// =====================================================
+// SYNC KHUSUS: Accurate "Solo" (CV Yasin Putra Sejahtera) — database
+// MULTI-GUDANG yang nampung stok konsinyasi buat 4 cabang sekaligus,
+// bukan stok utama Solo. Nama gudang di database ini (dikonfirmasi
+// lewat diagnostik langsung, BUKAN tebakan):
+//   "Jakarta" -> konsinyasi Jakarta
+//   "Bali" -> konsinyasi Bali
+//   "Purwokerto" -> konsinyasi Purwokerto
+//   "Utama" -> konsinyasi Solo (gudang default akun ini sendiri)
+//   "Transit (AOL System)" -> DIABAIKAN (gudang sistem, bukan cabang)
+//
+// Ditulis SEMUA ke product_stock_konsi (kolom "-K"), TIDAK PERNAH ke
+// product_stock (kolom utama) — kolom utama Solo tetap murni dari
+// Zoho. Dipanggil TERPISAH dari syncAccurateForBranch/getAccurateBranchConfigs
+// biasa karena satu database ini nulis ke BANYAK cabang sekaligus.
+// =====================================================
+
+const SOLO_BRANCH_ID = 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3'
+
+const SOLO_WAREHOUSE_TO_BRANCH: Record<string, string> = {
+  jakarta: '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2',
+  bali: '9b4c7834-2e20-4416-8163-2faff97294c0',
+  purwokerto: '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612',
+  utama: SOLO_BRANCH_ID, // "Utama" = gudang default akun ini = Solo sendiri
+}
+
+export async function syncAccurateSoloMultiGudang(
+  triggeredBy: 'manual' | 'cron',
+  createdBy?: string,
+): Promise<{ branchName: string; itemsUpdated: number; itemsSkipped: number }> {
+  const supabase = createAdminClient()
+  const dbId = process.env.ACCURATE_DB_ID_SOLO
+  if (!dbId) throw new Error('Env var ACCURATE_DB_ID_SOLO belum diisi.')
+
+  const { data: logRow, error: logInsertErr } = await supabase
+    .from('stock_sync_log')
+    .insert({ branch_id: SOLO_BRANCH_ID, source: 'accurate', triggered_by: triggeredBy, created_by: createdBy || null })
+    .select('id')
+    .single()
+  if (logInsertErr) throw new Error(logInsertErr.message)
+  const logId = logRow.id as string
+
+  try {
+    const config: AccurateBranchConfig = { branchId: SOLO_BRANCH_ID, branchName: 'Solo (multi-gudang)', dbId }
+
+    let conn: AccurateConnection | null = null
+    let itemIds: number[] = []
+    let lastConnError: any = null
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        conn = await connectToAccurateBranch(config)
+        itemIds = await fetchAllItemIds(conn)
+        lastConnError = null
+        break
+      } catch (err) {
+        lastConnError = err
+        conn = null
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 2000))
+      }
+    }
+    if (!conn || lastConnError) throw lastConnError || new Error('Gagal buka koneksi Accurate Solo setelah 3x percobaan.')
+
+    type RawDetail = { no: string; name: string; warehouses: { name: string; balance: number }[] }
+    async function fetchRawDetail(id: number): Promise<RawDetail | null> {
+      const params = new URLSearchParams({ id: String(id) })
+      const res = await fetch(`${conn!.host}/accurate/api/item/detail.do?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${conn!.accessToken}`, 'X-Session-ID': conn!.session },
+      })
+      const body = await res.json()
+      if (!res.ok || !body.s || !body.d?.no) return null
+      return {
+        no: body.d.no,
+        name: body.d.name || body.d.no,
+        warehouses: (body.d.detailWarehouseData || []).map((w: any) => ({ name: w.name, balance: Number(w.balance) || 0 })),
+      }
+    }
+
+    const CONCURRENCY = 15
+    const allDetails: RawDetail[] = []
+    let failedIds: number[] = itemIds
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const stillFailed: number[] = []
+      for (let i = 0; i < failedIds.length; i += CONCURRENCY) {
+        const batch = failedIds.slice(i, i + CONCURRENCY)
+        const details = await Promise.all(batch.map((id) => fetchRawDetail(id)))
+        details.forEach((d, idx) => {
+          if (!d) { stillFailed.push(batch[idx]); return }
+          allDetails.push(d)
+        })
+      }
+      failedIds = stillFailed
+      if (failedIds.length === 0) break
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 1500))
+    }
+    const detailFetchFailed = failedIds.length
+
+    const productIdBySku = new Map<string, string>()
+    {
+      let from = 0
+      const PAGE_SIZE = 1000
+      while (true) {
+        const { data, error } = await supabase.from('service_products').select('id, sku').range(from, from + PAGE_SIZE - 1)
+        if (error) throw new Error(error.message)
+        ;(data || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
+        if (!data || data.length < PAGE_SIZE) break
+        from += PAGE_SIZE
+      }
+    }
+
+    const seenNewSku = new Set<string>()
+    const toInsert: { id: string; sku: string; name: string; source: string }[] = []
+    allDetails.forEach((d) => {
+      const key = normalizeSku(d.no)
+      if (!key || productIdBySku.has(key) || seenNewSku.has(key)) return
+      seenNewSku.add(key)
+      toInsert.push({ id: crypto.randomUUID(), sku: d.no, name: d.name, source: 'cabang' })
+    })
+    let newProductsCreated = 0
+    if (toInsert.length) {
+      const CHUNK = 300
+      for (let i = 0; i < toInsert.length; i += CHUNK) {
+        const chunk = toInsert.slice(i, i + CHUNK)
+        const { error } = await supabase.from('service_products').insert(chunk)
+        if (error) throw new Error(`Gagal bikin produk baru dari Accurate Solo: ${error.message}`)
+      }
+      toInsert.forEach((p) => productIdBySku.set(normalizeSku(p.sku), p.id))
+      newProductsCreated = toInsert.length
+    }
+
+    // Rutekan tiap baris gudang ke cabang yang sesuai, tulis ke
+    // product_stock_konsi (BUKAN product_stock).
+    const konsiRows = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number }>()
+    let itemsSkipped = 0
+    allDetails.forEach((d) => {
+      const productId = productIdBySku.get(normalizeSku(d.no))
+      if (!productId) { itemsSkipped += 1; return }
+      d.warehouses.forEach((w) => {
+        const branchId = SOLO_WAREHOUSE_TO_BRANCH[(w.name || '').trim().toLowerCase()]
+        if (!branchId) return // gudang sistem (Transit) atau gudang gak dikenal, dilewati
+        konsiRows.set(`${branchId}|${productId}`, { branch_id: branchId, product_id: productId, qty_on_hand: Math.round(w.balance) })
+      })
+    })
+
+    const rows = Array.from(konsiRows.values()).map((r) => ({ ...r, updated_at: new Date().toISOString() }))
+    if (rows.length) {
+      const CHUNK = 300
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const chunk = rows.slice(i, i + CHUNK)
+        const { error } = await supabase.from('product_stock_konsi').upsert(chunk, { onConflict: 'branch_id,product_id' })
+        if (error) throw new Error(error.message)
+      }
+    }
+
+    const totalSkipped = itemsSkipped + detailFetchFailed
+    const notes: string[] = []
+    if (detailFetchFailed > 0) notes.push(`${detailFetchFailed} item gagal diambil detailnya.`)
+    if (newProductsCreated > 0) notes.push(`${newProductsCreated} produk baru otomatis dibuat.`)
+    notes.push(`Stok konsinyasi ditulis ke ${rows.length} kombinasi cabang+produk (Jakarta-K/Bali-K/Purwokerto-K/Solo-K).`)
+
+    await supabase
+      .from('stock_sync_log')
+      .update({
+        status: 'success',
+        items_updated: rows.length,
+        items_skipped: totalSkipped,
+        error_message: `Info: ${notes.join(' | ')}`,
+        finished_at: new Date().toISOString(),
+      })
+      .eq('id', logId)
+
+    return { branchName: 'Solo (multi-gudang → -K)', itemsUpdated: rows.length, itemsSkipped: totalSkipped }
+  } catch (err: any) {
+    await supabase
+      .from('stock_sync_log')
+      .update({ status: 'error', error_message: String(err?.message || err), finished_at: new Date().toISOString() })
+      .eq('id', logId)
+    throw err
+  }
+}
