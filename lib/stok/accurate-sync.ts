@@ -213,8 +213,28 @@ export async function syncAccurateForBranch(
   const logId = logRow.id as string
 
   try {
-    const conn = await connectToAccurateBranch(config)
-    const itemIds = await fetchAllItemIds(conn)
+    // Tahap awal (buka koneksi + ambil daftar item) juga di-retry —
+    // kadang Accurate ngebalikin error sementara (halaman HTML/gateway
+    // timeout, bukan JSON) di tahap ini. Dicoba sampai 3x sebelum
+    // beneran dianggap gagal.
+    let conn: AccurateConnection | null = null
+    let itemIds: number[] = []
+    let lastConnError: any = null
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        conn = await connectToAccurateBranch(config)
+        itemIds = await fetchAllItemIds(conn)
+        lastConnError = null
+        break
+      } catch (err) {
+        lastConnError = err
+        conn = null
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 2000))
+      }
+    }
+    if (!conn || lastConnError) {
+      throw lastConnError || new Error('Gagal buka koneksi Accurate setelah 3x percobaan.')
+    }
 
     // Ambil katalog produk internal (sku -> id), sama pola kaya zoho-sync.
     const productIdBySku = new Map<string, string>()
