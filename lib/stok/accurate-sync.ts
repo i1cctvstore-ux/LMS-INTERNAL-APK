@@ -35,7 +35,12 @@ const ACCOUNT_BASE_URL = 'https://account.accurate.id'
 const ACCURATE_BRANCH_MAP: { envDbIdKey: string; branchId: string; branchName: string }[] = [
   { envDbIdKey: 'ACCURATE_DB_ID_JAKARTA', branchId: '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2', branchName: 'Jakarta' },
   { envDbIdKey: 'ACCURATE_DB_ID_PURWOKERTO', branchId: '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612', branchName: 'Purwokerto' },
-  { envDbIdKey: 'ACCURATE_DB_ID_SOLO', branchId: 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3', branchName: 'Solo' },
+  // Solo SENGAJA gak ditaruh di sini lagi — akun Accurate "Solo" (CV
+  // Yasin Putra Sejahtera) ternyata database MULTI-GUDANG yang nampung
+  // konsinyasi buat SEMUA cabang (Jakarta/Bali/Purwokerto/Solo), bukan
+  // stok utama Solo doang. Logic sync-nya beda total, lihat
+  // syncAccurateSoloMultiGudang() di bawah, dipanggil terpisah dari
+  // syncAccurateForBranch biasa.
 ]
 
 export type AccurateBranchConfig = { branchId: string; branchName: string; dbId: string }
