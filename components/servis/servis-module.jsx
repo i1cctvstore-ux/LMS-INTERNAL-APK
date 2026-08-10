@@ -1546,12 +1546,13 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
     persist({ claims: nextClaims, batches: batches.filter((b) => b.id !== batchId) });
   }
   function canDeleteClaim(claim) {
-    // Per keputusan terbaru: SEMUA role (termasuk Admin Cabang) boleh
-    // hapus, di status apa pun -- asal belum "Selesai" (yang udah
-    // "Selesai" berarti udah diambil customer & kemungkinan besar
-    // udah kepakai buat invoice/laporan, jadi tetap dijaga gak bisa
-    // dihapus biar gak ngerusak riwayat/laporan yang udah jadi).
-    return !!claim && claim.status !== "Selesai";
+    // Per keputusan terbaru: SEMUA role boleh hapus, di STATUS APA PUN
+    // termasuk "Selesai" -- buat jaga-jaga kalau ada salah input yang
+    // baru ketauan belakangan. Invoice yang udah kebuat TETAP AMAN
+    // walau klaimnya dihapus (invoice nyimpen datanya sendiri terpisah,
+    // gak "nempel" langsung ke data klaim), jadi laporan/riwayat
+    // transaksi gak ikut rusak.
+    return !!claim;
   }
   function deleteClaim(claimId) {
     const claim = claims.find((c) => c.id === claimId);
