@@ -9,6 +9,7 @@ import {
   Users, MapPin,
 } from "lucide-react";
 import { loadServiceData, persistServiceData, uploadServiceFile, loadBranchTrackedProductIds } from "@/lib/service/api";
+import { generateTandaTerimaPDF, generateSuratJalanPDF, generatePickupPDF, generateInvoicePDF } from "@/lib/service/receipt-pdf";
 
 // ---------- helpers ----------
 // PENTING: fungsi ini HARUS menghasilkan UUID valid (bukan string acak
@@ -6110,15 +6111,15 @@ function CustomerTrackPage({ claims, initialPhone }) {
 // terima masuk, tanda terima pengambilan, surat jalan, invoice) supaya
 // wrapper/tombol Tutup+Cetak nggak diduplikasi 4x. Isi tiap cetakan tetap unik
 // lewat children, cuma bungkusnya yang digabung. ----------
-function PrintModalShell({ onClose, children }) {
+function PrintModalShell({ onClose, children, onDownloadPdf }) {
   return (
     <div className="fixed inset-0 bg-slate-900/50 flex items-start sm:items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
       <div className="bg-white rounded-3xl shadow-xl max-w-lg w-full my-4">
         <div className="print-area p-8">{children}</div>
         <div className="p-4 border-t border-slate-100 flex justify-end gap-2">
           <button onClick={onClose} className={`px-4 py-2 text-sm ${btnSecondaryCls} border-none`}>Tutup</button>
-          <button onClick={() => window.print()} className={`flex items-center gap-1.5 px-4 py-2 text-sm ${btnPrimaryCls}`}>
-            <Printer size={14} /> Cetak / Simpan PDF
+          <button onClick={onDownloadPdf} className={`flex items-center gap-1.5 px-4 py-2 text-sm ${btnPrimaryCls}`}>
+            <Download size={14} /> Download PDF
           </button>
         </div>
       </div>
@@ -6156,7 +6157,7 @@ function PrintReceipt({ items, branchInfo, onClose }) {
   const date = items[0]?.tanggalTerima;
 
   return (
-    <PrintModalShell onClose={onClose}>
+    <PrintModalShell onClose={onClose} onDownloadPdf={() => generateTandaTerimaPDF(items, branchInfo)}>
       <CompanyHeader branchInfo={branchInfo} />
       <h2 className="text-lg font-bold text-center mb-1">TANDA TERIMA BARANG SERVIS</h2>
       <p className="text-center text-xs text-slate-500 mb-6">Tanggal: {fmtDate(date)}</p>
@@ -6192,7 +6193,7 @@ function PrintReceipt({ items, branchInfo, onClose }) {
 
 function PrintSuratJalanReceipt({ batch, items, branchInfo, onClose }) {
   return (
-    <PrintModalShell onClose={onClose}>
+   <PrintModalShell onClose={onClose} onDownloadPdf={() => generateSuratJalanPDF(batch, items, branchInfo)}>
       <CompanyHeader branchInfo={branchInfo} />
       <h2 className="text-lg font-bold text-center mb-1">SURAT JALAN KE SUPPLIER</h2>
       <p className="text-center text-xs text-slate-500 mb-6">{batch.kodeBatch}</p>
@@ -6234,7 +6235,7 @@ function PickupReceipt({ items, onClose }) {
   // karena itu detail proses toko yang nggak perlu diketahui customer.
   const penangananLabel = (c) => (c.jenis === "Ganti Baru" ? "Ganti Baru" : c.jenis === "Servis" ? "Servis" : (c.jenis || "-"));
   return (
-    <PrintModalShell onClose={onClose}>
+   <PrintModalShell onClose={onClose} onDownloadPdf={() => generatePickupPDF(items)}>
       <h2 className="text-lg font-bold text-center mb-1">TANDA TERIMA PENGAMBILAN BARANG</h2>
       <p className="text-center text-xs text-slate-500 mb-6">Tanggal: {fmtDate(todayStr())}</p>
       <div className="text-sm mb-4">
@@ -6612,7 +6613,7 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
 
 function InvoiceReceipt({ data, claims, onClose }) {
   return (
-    <PrintModalShell onClose={onClose}>
+    <PrintModalShell onClose={onClose} onDownloadPdf={() => generateInvoicePDF(data)}>
       <h2 className="text-lg font-bold text-center mb-1">INVOICE</h2>
       <p className="text-center text-xs text-slate-500 mb-6">{data.invoiceNo} · {fmtDate(data.date)}</p>
       <div className="text-sm mb-4">
