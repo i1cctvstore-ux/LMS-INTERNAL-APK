@@ -55,6 +55,15 @@ type StokModuleProps = {
   currentUserBranchId: string | null
 }
 
+// Cabang yang PUNYA akun Accurate sendiri DAN perlu ditampilin
+// terpisah dari kontribusi database Accurate Solo — cuma Jakarta.
+// Cabang lain (Purwokerto, Bali, Solo) ditampilin gabungan 1 kolom
+// "-K" aja (jumlah dari stok akun sendiri + stok dari Solo), lebih
+// simpel karena mereka gak punya akun Accurate sendiri yang aktif.
+const BRANCHES_WITH_OWN_ACCURATE = new Set([
+  '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2', // Jakarta
+])
+
 const inputCls =
   'w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400'
 const btnPrimaryCls = 'rounded-full bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-40'
@@ -1027,7 +1036,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                             )}
                           </div>
                         </th>
-                        {modeDetail && (
+                        {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
                           <th
                             className={`p-3 max-w-[70px] normal-case text-[10px] text-slate-400 ${isMine ? 'bg-indigo-50/60' : ''}`}
                             title="Stok konsinyasi/transfer manual antar cabang"
@@ -1035,12 +1044,20 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                             {b.name}-K
                           </th>
                         )}
-                        {modeDetail && (
+                        {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
                           <th
                             className={`p-3 max-w-[70px] normal-case text-[10px] text-slate-400 ${isMine ? 'bg-indigo-50/60' : ''}`}
                             title="Konsinyasi yang dititipkan lewat database Accurate Solo (multi-gudang)"
                           >
                             {b.name}-Solo-K
+                          </th>
+                        )}
+                        {modeDetail && !BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
+                          <th
+                            className={`p-3 max-w-[70px] normal-case text-[10px] text-slate-400 ${isMine ? 'bg-indigo-50/60' : ''}`}
+                            title="Stok konsinyasi/transfer manual antar cabang (gabungan semua sumber)"
+                          >
+                            {b.name}-K
                           </th>
                         )}
                       </Fragment>
@@ -1068,14 +1085,19 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                             </span>
                             {cell.held > 0 && <div className="text-[10px] text-slate-400">({cell.physical}-{cell.held})</div>}
                           </td>
-                          {modeDetail && (
+                          {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
                             <td className={`p-3 text-xs ${isMine ? 'bg-indigo-50/30' : ''} ${cell.transferK === 0 ? 'text-slate-300' : 'text-indigo-700 font-medium'}`}>
                               {cell.transferK}
                             </td>
                           )}
-                          {modeDetail && (
+                          {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
                             <td className={`p-3 text-xs ${isMine ? 'bg-indigo-50/30' : ''} ${cell.transferKSolo === 0 ? 'text-slate-300' : 'text-purple-700 font-medium'}`}>
                               {cell.transferKSolo}
+                            </td>
+                          )}
+                          {modeDetail && !BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
+                            <td className={`p-3 text-xs ${isMine ? 'bg-indigo-50/30' : ''} ${cell.transferK + cell.transferKSolo === 0 ? 'text-slate-300' : 'text-indigo-700 font-medium'}`}>
+                              {cell.transferK + cell.transferKSolo}
                             </td>
                           )}
                         </Fragment>
@@ -1086,7 +1108,12 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                 ))}
                 {visibleRows.length === 0 && (
                   <tr>
-                    <td colSpan={branches.length * (modeDetail ? 3 : 1) + 3} className="p-8 text-center text-slate-400">
+                    <td
+                      colSpan={
+                        branches.reduce((sum, b) => sum + (modeDetail ? (BRANCHES_WITH_OWN_ACCURATE.has(b.id) ? 3 : 2) : 1), 0) + 3
+                      }
+                      className="p-8 text-center text-slate-400"
+                    >
                       {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
                     </td>
                   </tr>
@@ -1108,8 +1135,11 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                       <div key={b.id} className="text-center">
                         <div className="text-[10px] text-slate-400 uppercase">{b.name}</div>
                         <div className={cell.net < 0 ? 'text-red-600 font-semibold' : 'text-slate-700 font-semibold'}>{cell.net}</div>
-                        {modeDetail && cell.transferK !== 0 && <div className="text-[10px] text-indigo-600">-K: {cell.transferK}</div>}
-                        {modeDetail && cell.transferKSolo !== 0 && <div className="text-[10px] text-purple-600">-Solo-K: {cell.transferKSolo}</div>}
+                        {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && cell.transferK !== 0 && <div className="text-[10px] text-indigo-600">-K: {cell.transferK}</div>}
+                        {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && cell.transferKSolo !== 0 && <div className="text-[10px] text-purple-600">-Solo-K: {cell.transferKSolo}</div>}
+                        {modeDetail && !BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (cell.transferK + cell.transferKSolo) !== 0 && (
+                          <div className="text-[10px] text-indigo-600">-K: {cell.transferK + cell.transferKSolo}</div>
+                        )}
                       </div>
                     )
                   })}
@@ -1151,7 +1181,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           onChangeModeDetail={setModeDetail}
           hideZeroStock={hideZeroStock}
           onChangeHideZeroStock={setHideZeroStock}
-          kolomDetailCount={branches.length * 2}
+          kolomDetailCount={branches.reduce((sum, b) => sum + (BRANCHES_WITH_OWN_ACCURATE.has(b.id) ? 2 : 1), 0)}
           onClose={() => setShowFilter(false)}
         />
       )}
