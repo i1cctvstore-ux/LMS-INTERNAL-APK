@@ -200,6 +200,40 @@ function stripKonsiSuffix(s: string): { base: string; isKonsi: boolean } {
   return { base: s.replace(KONSI_SUFFIX_PATTERN, '').trim(), isKonsi: true }
 }
 
+// Bikin produk baru pakai upsert + ignoreDuplicates (bukan insert
+// biasa) — mengandalkan unique index `service_products_sku_key_uidx`
+// di database (lihat migration 20260810000000). Kalau 2 proses sync
+// jalan BARENGAN (misal Zoho & Accurate) dan sama-sama nemu SKU baru
+// yang sama persis, database sendiri yang jamin cuma 1 baris yang
+// beneran kebuat — proses yang "kalah" otomatis dilewati (ignoreDuplicates)
+// tanpa error. Setelah itu, katalog di-query ULANG PENUH biar dapet ID
+// yang BENAR (baik yang berhasil kita insert sendiri, atau yang ternyata
+// udah kebuat duluan sama proses lain).
+async function createNewProductsAndRefreshCatalog(
+  supabase: ReturnType<typeof createAdminClient>,
+  toInsert: { id: string; sku: string; name: string; source: string }[],
+  productIdBySku: Map<string, string>,
+): Promise<number> {
+  if (toInsert.length === 0) return 0
+  const CHUNK = 300
+  for (let i = 0; i < toInsert.length; i += CHUNK) {
+    const chunk = toInsert.slice(i, i + CHUNK)
+    const { error } = await supabase.from('service_products').upsert(chunk, { onConflict: 'sku_key', ignoreDuplicates: true })
+    if (error) throw new Error(`Gagal bikin produk baru: ${error.message}`)
+  }
+  productIdBySku.clear()
+  let from = 0
+  const PAGE_SIZE = 1000
+  while (true) {
+    const { data, error } = await supabase.from('service_products').select('id, sku').range(from, from + PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    ;(data || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
+    if (!data || data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return toInsert.length
+}
+
 export type SyncResult = { branchName: string; itemsUpdated: number; itemsSkipped: number }
 
 export async function syncAccurateForBranch(
@@ -312,25 +346,18 @@ export async function syncAccurateForBranch(
       toInsert.push({ id: crypto.randomUUID(), sku: d.matchSku, name: d.matchName, source: 'cabang' })
     })
     if (toInsert.length) {
-      const CHUNK = 300
-      for (let i = 0; i < toInsert.length; i += CHUNK) {
-        const chunk = toInsert.slice(i, i + CHUNK)
-        const { error } = await supabase.from('service_products').insert(chunk)
-        if (error) throw new Error(`Gagal bikin produk baru dari Accurate: ${error.message}`)
-      }
-      toInsert.forEach((p) => productIdBySku.set(normalizeSku(p.sku), p.id))
-      newProductsCreated = toInsert.length
+      newProductsCreated = await createNewProductsAndRefreshCatalog(supabase, toInsert, productIdBySku)
     }
 
     // FASE 3: tulis stoknya — item normal ke product_stock (kolom
     // utama), item KONSI (K) ke product_stock_konsi (jadi angka "-K"
     // di UI, DIGABUNG sama transfer manual yang udah ada).
-    const upsertKonsiByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number }>()
+    const upsertKonsiByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number; source: string }>()
     resolvedDetails.forEach((detail) => {
       const productId = productIdBySku.get(normalizeSku(detail.matchSku))
       if (!productId) { itemsSkipped += 1; return } // harusnya gak kejadian lagi, jaga-jaga aja
       if (detail.isKonsi) {
-        upsertKonsiByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
+        upsertKonsiByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance), source: 'own' })
       } else {
         upsertRowsByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance) })
       }
@@ -341,7 +368,7 @@ export async function syncAccurateForBranch(
       const CHUNK = 300
       for (let i = 0; i < konsiRows.length; i += CHUNK) {
         const chunk = konsiRows.slice(i, i + CHUNK)
-        const { error } = await supabase.from('product_stock_konsi').upsert(chunk, { onConflict: 'branch_id,product_id' })
+        const { error } = await supabase.from('product_stock_konsi').upsert(chunk, { onConflict: 'branch_id,product_id,source' })
         if (error) throw new Error(error.message)
       }
     }
@@ -408,6 +435,13 @@ export async function syncAccurateForBranch(
 // =====================================================
 
 const SOLO_BRANCH_ID = 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3'
+
+const SOLO_WAREHOUSE_SOURCE_LABEL: Record<string, 'own' | 'solo'> = {
+  jakarta: 'solo',
+  bali: 'solo',
+  purwokerto: 'solo',
+  utama: 'own', // "Utama" = konsinyasi Solo sendiri, bukan "titipan" dari cabang lain
+}
 
 const SOLO_WAREHOUSE_TO_BRANCH: Record<string, string> = {
   jakarta: '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2',
@@ -509,27 +543,22 @@ export async function syncAccurateSoloMultiGudang(
     })
     let newProductsCreated = 0
     if (toInsert.length) {
-      const CHUNK = 300
-      for (let i = 0; i < toInsert.length; i += CHUNK) {
-        const chunk = toInsert.slice(i, i + CHUNK)
-        const { error } = await supabase.from('service_products').insert(chunk)
-        if (error) throw new Error(`Gagal bikin produk baru dari Accurate Solo: ${error.message}`)
-      }
-      toInsert.forEach((p) => productIdBySku.set(normalizeSku(p.sku), p.id))
-      newProductsCreated = toInsert.length
+      newProductsCreated = await createNewProductsAndRefreshCatalog(supabase, toInsert, productIdBySku)
     }
 
     // Rutekan tiap baris gudang ke cabang yang sesuai, tulis ke
     // product_stock_konsi (BUKAN product_stock).
-    const konsiRows = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number }>()
+    const konsiRows = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number; source: string }>()
     let itemsSkipped = 0
     allDetails.forEach((d) => {
       const productId = productIdBySku.get(normalizeSku(d.no))
       if (!productId) { itemsSkipped += 1; return }
       d.warehouses.forEach((w) => {
-        const branchId = SOLO_WAREHOUSE_TO_BRANCH[(w.name || '').trim().toLowerCase()]
+        const key = (w.name || '').trim().toLowerCase()
+        const branchId = SOLO_WAREHOUSE_TO_BRANCH[key]
         if (!branchId) return // gudang sistem (Transit) atau gudang gak dikenal, dilewati
-        konsiRows.set(`${branchId}|${productId}`, { branch_id: branchId, product_id: productId, qty_on_hand: Math.round(w.balance) })
+        const source = SOLO_WAREHOUSE_SOURCE_LABEL[key] || 'solo'
+        konsiRows.set(`${branchId}|${productId}|${source}`, { branch_id: branchId, product_id: productId, qty_on_hand: Math.round(w.balance), source })
       })
     })
 
@@ -538,7 +567,7 @@ export async function syncAccurateSoloMultiGudang(
       const CHUNK = 300
       for (let i = 0; i < rows.length; i += CHUNK) {
         const chunk = rows.slice(i, i + CHUNK)
-        const { error } = await supabase.from('product_stock_konsi').upsert(chunk, { onConflict: 'branch_id,product_id' })
+        const { error } = await supabase.from('product_stock_konsi').upsert(chunk, { onConflict: 'branch_id,product_id,source' })
         if (error) throw new Error(error.message)
       }
     }
