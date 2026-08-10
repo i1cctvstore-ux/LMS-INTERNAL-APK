@@ -6152,12 +6152,27 @@ function CustomerTrackPage({ claims, initialPhone }) {
 // terima masuk, tanda terima pengambilan, surat jalan, invoice) supaya
 // wrapper/tombol Tutup+Cetak nggak diduplikasi 4x. Isi tiap cetakan tetap unik
 // lewat children, cuma bungkusnya yang digabung. ----------
-function PrintModalShell({ onClose, children, onDownloadPdf }) {
+function PrintModalShell({ onClose, children, onDownloadPdf, orientation, onChangeOrientation }) {
   return (
     <div className="fixed inset-0 bg-slate-900/50 flex items-start sm:items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
       <div className="bg-white rounded-3xl shadow-xl max-w-lg w-full my-4">
         <div className="print-area p-8">{children}</div>
-        <div className="p-4 border-t border-slate-100 flex justify-end gap-2">
+        <div className="px-4 pt-3 flex items-center gap-1.5 border-t border-slate-100">
+          <span className="text-xs text-slate-400 mr-1">Orientasi PDF:</span>
+          <button
+            onClick={() => onChangeOrientation("portrait")}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium border ${orientation === "portrait" ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-300 text-slate-500"}`}
+          >
+            Portrait
+          </button>
+          <button
+            onClick={() => onChangeOrientation("landscape")}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium border ${orientation === "landscape" ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-300 text-slate-500"}`}
+          >
+            Landscape
+          </button>
+        </div>
+        <div className="p-4 flex justify-end gap-2">
           <button onClick={onClose} className={`px-4 py-2 text-sm ${btnSecondaryCls} border-none`}>Tutup</button>
           <button onClick={onDownloadPdf} className={`flex items-center gap-1.5 px-4 py-2 text-sm ${btnPrimaryCls}`}>
             <Download size={14} /> Download PDF
@@ -6196,9 +6211,15 @@ function PrintReceipt({ items, branchInfo, onClose }) {
   const customerName = items[0]?.customerName;
   const customerPhone = items[0]?.customerPhone;
   const date = items[0]?.tanggalTerima;
+  const [orientation, setOrientation] = useState("landscape");
 
   return (
-    <PrintModalShell onClose={onClose} onDownloadPdf={() => generateTandaTerimaPDF(items, branchInfo)}>
+    <PrintModalShell
+      onClose={onClose}
+      orientation={orientation}
+      onChangeOrientation={setOrientation}
+      onDownloadPdf={() => generateTandaTerimaPDF(items, branchInfo, orientation)}
+    >
       <CompanyHeader branchInfo={branchInfo} />
       <h2 className="text-lg font-bold text-center mb-1">TANDA TERIMA BARANG SERVIS</h2>
       <p className="text-center text-xs text-slate-500 mb-6">Tanggal: {fmtDate(date)}</p>
@@ -6233,8 +6254,14 @@ function PrintReceipt({ items, branchInfo, onClose }) {
 }
 
 function PrintSuratJalanReceipt({ batch, items, branchInfo, onClose }) {
+  const [orientation, setOrientation] = useState("landscape");
   return (
-   <PrintModalShell onClose={onClose} onDownloadPdf={() => generateSuratJalanPDF(batch, items, branchInfo)}>
+    <PrintModalShell
+      onClose={onClose}
+      orientation={orientation}
+      onChangeOrientation={setOrientation}
+      onDownloadPdf={() => generateSuratJalanPDF(batch, items, branchInfo, orientation)}
+    >
       <CompanyHeader branchInfo={branchInfo} />
       <h2 className="text-lg font-bold text-center mb-1">SURAT JALAN KE SUPPLIER</h2>
       <p className="text-center text-xs text-slate-500 mb-6">{batch.kodeBatch}</p>
@@ -6271,12 +6298,15 @@ function PrintSuratJalanReceipt({ batch, items, branchInfo, onClose }) {
 function PickupReceipt({ items, onClose }) {
   const customerName = items[0]?.customerName;
   const customerPhone = items[0]?.customerPhone;
-  // Kolom "Penanganan" cuma menampilkan jenis (Ganti Baru / Servis) — tanpa
-  // embel-embel sumber penyelesaian internal (mis. "Stok Toko"/"Supplier"),
-  // karena itu detail proses toko yang nggak perlu diketahui customer.
   const penangananLabel = (c) => (c.jenis === "Ganti Baru" ? "Ganti Baru" : c.jenis === "Servis" ? "Servis" : (c.jenis || "-"));
+  const [orientation, setOrientation] = useState("landscape");
   return (
-   <PrintModalShell onClose={onClose} onDownloadPdf={() => generatePickupPDF(items)}>
+    <PrintModalShell
+      onClose={onClose}
+      orientation={orientation}
+      onChangeOrientation={setOrientation}
+      onDownloadPdf={() => generatePickupPDF(items, orientation)}
+    >
       <h2 className="text-lg font-bold text-center mb-1">TANDA TERIMA PENGAMBILAN BARANG</h2>
       <p className="text-center text-xs text-slate-500 mb-6">Tanggal: {fmtDate(todayStr())}</p>
       <div className="text-sm mb-4">
@@ -6653,8 +6683,14 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
 }
 
 function InvoiceReceipt({ data, claims, onClose }) {
+  const [orientation, setOrientation] = useState("landscape");
   return (
-    <PrintModalShell onClose={onClose} onDownloadPdf={() => generateInvoicePDF(data)}>
+    <PrintModalShell
+      onClose={onClose}
+      orientation={orientation}
+      onChangeOrientation={setOrientation}
+      onDownloadPdf={() => generateInvoicePDF(data, orientation)}
+    >
       <h2 className="text-lg font-bold text-center mb-1">INVOICE</h2>
       <p className="text-center text-xs text-slate-500 mb-6">{data.invoiceNo} · {fmtDate(data.date)}</p>
       <div className="text-sm mb-4">
