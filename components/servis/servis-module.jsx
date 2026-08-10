@@ -3642,7 +3642,7 @@ const SUPPLIER_STATE_META = {
 };
 const SUPPLIER_EMPTY_FILTERS = { supplier: "", jenis: "", state: "", dokumen: "", minHari: "", from: "", to: "" };
 
-function SupplierBatchOptionsMenu({ onPrint, onEdit, onDelete, canManage = true }) {
+function SupplierBatchOptionsMenu({ onPrint, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative" onClick={(e) => e.stopPropagation()}>
@@ -3656,23 +3656,18 @@ function SupplierBatchOptionsMenu({ onPrint, onEdit, onDelete, canManage = true 
             <button onClick={() => { setOpen(false); onPrint(); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
               <Printer size={14} /> Cetak Surat Jalan
             </button>
-            {canManage && (
-              <>
-                <button onClick={() => { setOpen(false); onEdit(); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
-                  <Pencil size={14} /> Edit Batch
-                </button>
-                <button onClick={() => { setOpen(false); onDelete(); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left">
-                  <X size={14} /> Hapus Batch
-                </button>
-              </>
-            )}
+            <button onClick={() => { setOpen(false); onEdit(); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
+              <Pencil size={14} /> Edit Batch
+            </button>
+            <button onClick={() => { setOpen(false); onDelete(); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left">
+              <X size={14} /> Hapus Batch
+            </button>
           </div>
         </>
       )}
     </div>
   );
 }
-
 function SupplierBatchCard({ batch, items, docsComplete, canManage, onOpenBatch, onPrint, onEdit, onDelete }) {
   const total = items.length;
   const done = items.filter((c) => isDoneState(batchItemState(c))).length;
@@ -3818,6 +3813,21 @@ function SupplierTab({ batches, claims, settings, role, isDesktopLayout, onOpenS
   const [filters, setFilters] = useState(SUPPLIER_EMPTY_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sort, setSort] = useState({ key: "hari", dir: "desc" });
+  const [selected, setSelected] = useState([]);
+  const toggleSelect = (id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  function handlePrintSuratJalanFromSelection() {
+    const selectedClaims = claims.filter((c) => selected.includes(c.id));
+    if (selectedClaims.length === 0) return;
+    const firstBatchId = selectedClaims[0].batchId || selectedClaims[0].stokReimbursedBatchId;
+    const batch = batches.find((b) => b.id === firstBatchId);
+    if (!batch) return;
+    // Kalau yang dipilih ternyata nyampur dari beberapa batch beda,
+    // cuma yang satu batch sama kayak item pertama yang ikut dicetak
+    // (surat jalan itu 1 dokumen = 1 pengiriman/batch).
+    const itemsInSameBatch = selectedClaims.filter((c) => (c.batchId || c.stokReimbursedBatchId) === firstBatchId);
+    onPrintSuratJalan(batch, itemsInSameBatch);
+    setSelected([]);
+  }
 
   function onSort(key) {
     setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "hari" ? "desc" : "asc" }));
@@ -3934,8 +3944,14 @@ function SupplierTab({ batches, claims, settings, role, isDesktopLayout, onOpenS
           <SupplierFilterPanel filters={filters} settings={settings} onClose={() => setFilterOpen(false)} onApply={(f) => { setFilters(f); setFilterOpen(false); }} />
         )}
       </div>
+      {selected.length > 0 && (
+        <button onClick={handlePrintSuratJalanFromSelection} className="mb-3 flex items-center gap-1.5 px-3 py-2 rounded-full bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
+          <Printer size={14} /> Cetak Surat Jalan dari Pilihan ({selected.length})
+        </button>
+      )}
 
       <div className="text-sm text-slate-500 mb-3">{rows.length} barang · {batchesForView.length} batch</div>
+      
 
       {!isDesktopLayout && (
         <div className="space-y-3">
@@ -3963,6 +3979,15 @@ function SupplierTab({ batches, claims, settings, role, isDesktopLayout, onOpenS
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide">
+                <th className="p-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={rows.length > 0 && rows.every((r) => selected.includes(r.claim.id))}
+                    onChange={() =>
+                      setSelected((s) => (rows.every((r) => s.includes(r.claim.id)) ? [] : rows.map((r) => r.claim.id)))
+                    }
+                  />
+                </th>
                 <SupplierTh label="Status" sortKey="status" sort={sort} onSort={onSort} />
                 <SupplierTh label="Kode Batch" sortKey="kodeBatch" sort={sort} onSort={onSort} />
                 <SupplierTh label="Supplier" sortKey="supplier" sort={sort} onSort={onSort} />
@@ -3988,6 +4013,9 @@ function SupplierTab({ batches, claims, settings, role, isDesktopLayout, onOpenS
                 const overdue = r.hari !== null && r.hari >= 14;
                 return (
                   <tr key={r.rowId} className="border-b border-slate-50 hover:bg-slate-50/60 cursor-pointer" onClick={() => onView(r.batch.id)}>
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={selected.includes(r.claim.id)} onChange={() => toggleSelect(r.claim.id)} />
+                    </td>
                     <td className="p-3"><span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${meta.bg} ${meta.text} whitespace-nowrap`}>{meta.label}</span></td>
                     <td className="p-3 whitespace-nowrap font-medium text-slate-700">{r.batch.kodeBatch}</td>
                     <td className="p-3 whitespace-nowrap">{r.batch.supplier}</td>
@@ -4024,18 +4052,16 @@ function SupplierTab({ batches, claims, settings, role, isDesktopLayout, onOpenS
                       )}
                     </td>
                     <td className="p-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      <SupplierBatchOptionsMenu
+                     <SupplierBatchOptionsMenu
                         onPrint={() => onPrintSuratJalan(r.batch, claimsInBatch(claims, r.batch.id))}
                         onEdit={() => onEditBatch(r.batch.id)}
                         onDelete={() => onDeleteBatch(r.batch.id)}
-                        canManage={canManage}
                       />
                     </td>
                   </tr>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={16} className="p-8 text-center text-slate-400">Tidak ada data yang cocok dengan filter.</td></tr>}
-            </tbody>
+              {rows.length === 0 && <tr><td colSpan={17} className="p-8 text-center text-slate-400">Tidak ada data yang cocok dengan filter.</td></tr>}            </tbody>
           </table>
         </div>
       )}
