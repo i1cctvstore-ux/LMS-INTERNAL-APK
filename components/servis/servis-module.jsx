@@ -4063,6 +4063,14 @@ function SendToSupplierModal({ claims, settings, preselectIds, onClose, onSend, 
     return true;
   });
   const toggle = (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const allAvailableChecked = available.length > 0 && available.every((c) => picked.includes(c.id));
+  function toggleSelectAllAvailable() {
+    if (allAvailableChecked) {
+      setPicked((p) => p.filter((id) => !available.some((c) => c.id === id)));
+    } else {
+      setPicked((p) => [...new Set([...p, ...available.map((c) => c.id)])]);
+    }
+  }
 
   const kodeBatch = supplier ? `KRM-${tanggalKirim.replace(/-/g, "")}-${supplier.replace(/\s+/g, "").slice(0, 6).toUpperCase()}` : "";
   const pickedItems = claims.filter((c) => picked.includes(c.id));
@@ -4124,7 +4132,13 @@ function SendToSupplierModal({ claims, settings, preselectIds, onClose, onSend, 
           {settings.brands.map((b) => <option key={b}>{b}</option>)}
         </select>
       </div>
-      <div className="text-xs font-semibold text-slate-400 uppercase mb-2">Barang siap dikirim ({available.length} tersedia)</div>
+     <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-slate-400 uppercase">Barang siap dikirim ({available.length} tersedia)</div>
+        <label className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 cursor-pointer">
+          <input type="checkbox" checked={allAvailableChecked} onChange={toggleSelectAllAvailable} />
+          Pilih Semua
+        </label>
+      </div>
       <div className="border border-slate-200 rounded-xl max-h-64 overflow-y-auto divide-y divide-slate-50">
         {available.map((c) => {
           const isReimbursement = c.jenis === "Ganti Baru";
