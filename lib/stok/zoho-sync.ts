@@ -188,6 +188,38 @@ function normalizeSku(s: string): string {
     .toLowerCase()
 }
 
+// Bikin produk baru pakai upsert + ignoreDuplicates (bukan insert
+// biasa) — mengandalkan unique index `service_products_sku_key_uidx`
+// di database (lihat migration 20260810000000). Kalau 2 proses sync
+// jalan BARENGAN (misal Zoho & Accurate) dan sama-sama nemu SKU baru
+// yang sama persis, database sendiri yang jamin cuma 1 baris yang
+// beneran kebuat — proses yang "kalah" otomatis dilewati tanpa error.
+// Setelah itu, katalog di-query ULANG PENUH biar dapet ID yang BENAR.
+async function createNewProductsAndRefreshCatalog(
+  supabase: ReturnType<typeof createAdminClient>,
+  toInsert: { id: string; sku: string; name: string; source: string }[],
+  productIdBySku: Map<string, string>,
+): Promise<number> {
+  if (toInsert.length === 0) return 0
+  const CHUNK = 300
+  for (let i = 0; i < toInsert.length; i += CHUNK) {
+    const chunk = toInsert.slice(i, i + CHUNK)
+    const { error } = await supabase.from('service_products').upsert(chunk, { onConflict: 'sku_key', ignoreDuplicates: true })
+    if (error) throw new Error(`Gagal bikin produk baru dari Zoho: ${error.message}`)
+  }
+  productIdBySku.clear()
+  let from = 0
+  const PAGE_SIZE = 1000
+  while (true) {
+    const { data, error } = await supabase.from('service_products').select('id, sku').range(from, from + PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    ;(data || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
+    if (!data || data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return toInsert.length
+}
+
 export type SyncResult = {
   branchName: string
   itemsUpdated: number
@@ -249,14 +281,7 @@ export async function syncZohoForBranch(
       toInsert.push({ id: crypto.randomUUID(), sku: item.sku, name: item.name, source: 'cabang' })
     })
     if (toInsert.length) {
-      const CHUNK = 300
-      for (let i = 0; i < toInsert.length; i += CHUNK) {
-        const chunk = toInsert.slice(i, i + CHUNK)
-        const { error } = await supabase.from('service_products').insert(chunk)
-        if (error) throw new Error(`Gagal bikin produk baru dari Zoho: ${error.message}`)
-      }
-      toInsert.forEach((p) => productIdBySku.set(normalizeSku(p.sku), p.id))
-      newProductsCreated = toInsert.length
+      newProductsCreated = await createNewProductsAndRefreshCatalog(supabase, toInsert, productIdBySku)
     }
 
     // Kunci pakai product_id (bukan array biasa) supaya kalau ada 2+ item
