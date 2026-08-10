@@ -6155,7 +6155,7 @@ function CustomerTrackPage({ claims, initialPhone }) {
 function PrintModalShell({ onClose, children, onDownloadPdf, orientation, onChangeOrientation }) {
   return (
     <div className="fixed inset-0 bg-slate-900/50 flex items-start sm:items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl shadow-xl max-w-lg w-full my-4">
+      <div className={`bg-white rounded-3xl shadow-xl w-full my-4 ${orientation === "portrait" ? "max-w-lg" : "max-w-4xl"}`}>
         <div className="print-area p-8">{children}</div>
         <div className="px-4 pt-3 flex items-center gap-1.5 border-t border-slate-100">
           <span className="text-xs text-slate-400 mr-1">Orientasi PDF:</span>
