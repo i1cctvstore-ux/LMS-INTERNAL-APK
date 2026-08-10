@@ -667,7 +667,7 @@ type MatrixRow = {
   name: string
   kategori: string
   subjenis: string
-  perBranch: Record<string, { physical: number; held: number; net: number; transferK: number }>
+  perBranch: Record<string, { physical: number; held: number; net: number; transferK: number; transferKSolo: number }>
   total: number
 }
 
@@ -803,6 +803,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
   // tabel stock_transfers, BUKAN dari sync Zoho/Accurate). Map<branchId,
   // Map<productId, qty>>.
   const [transferMatrix, setTransferMatrix] = useState<Map<string, Map<string, number>>>(new Map())
+  const [soloTransferMatrix, setSoloTransferMatrix] = useState<Map<string, Map<string, number>>>(new Map())
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
@@ -829,12 +830,13 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
         // Gak boleh sampai numbangin seluruh halaman stok utama kalau
         // fitur transfer ini kenapa-kenapa (misal migration belum
         // dijalanin) — jadi di-catch sendiri, fallback ke Map kosong.
-        loadTransferBalanceMatrix().catch(() => new Map()),
+        loadTransferBalanceMatrix().catch(() => ({ matrix: new Map(), soloMatrix: new Map() })),
       ])
       setBranches(b)
       setMatrix(m)
       setLastSync(ls)
-      setTransferMatrix(tk)
+      setTransferMatrix(tk.matrix)
+      setSoloTransferMatrix(tk.soloMatrix)
     } catch (e: any) {
       setMessage(`Gagal memuat data: ${e?.message || e}`)
     } finally {
@@ -854,16 +856,18 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
         const physical = matrix.physical[`${b.id}|${p.productId}`] || 0
         const heldVal = p.sku ? matrix.held[`${b.id}|${normalizeSku(p.sku)}`] || 0 : 0
         const net = physical - heldVal
-        // Kolom "-K": saldo transfer/konsinyasi manual antar cabang.
-        // Ditambahkan ke Total karena barang ini secara fisik memang
-        // ada di cabang ini juga, meski gak lewat sync Zoho/Accurate.
+        // Kolom "-K": saldo transfer manual + item "(K)" punya akun
+        // Accurate cabang itu sendiri. Kolom "-Solo-K" (khusus
+        // Jakarta/Bali/Purwokerto): konsinyasi yang dititipkan lewat
+        // database Accurate Solo yang multi-gudang.
         const transferK = transferMatrix.get(b.id)?.get(p.productId) || 0
-        perBranch[b.id] = { physical, held: heldVal, net, transferK }
-        total += net + transferK
+        const transferKSolo = soloTransferMatrix.get(b.id)?.get(p.productId) || 0
+        perBranch[b.id] = { physical, held: heldVal, net, transferK, transferKSolo }
+        total += net + transferK + transferKSolo
       })
       return { productId: p.productId, sku: p.sku, name: p.name, kategori: p.kategori, subjenis: p.subjenis, perBranch, total }
     })
-  }, [matrix, branches, transferMatrix])
+  }, [matrix, branches, transferMatrix, soloTransferMatrix])
 
   // Daftar kategori unik dari data yang ada, buat isi checkbox filter.
   const allKategoris = useMemo(() => {
@@ -989,7 +993,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
         </div>
 
         <div className="px-4 py-2 bg-slate-50 text-[11px] text-slate-500 border-b border-slate-100">
-          Angka dalam kurung = (stok fisik − ditahan servis). Kolom "-K" = stok konsinyasi/transfer manual antar cabang. Klik header kolom untuk urutkan.
+          Angka dalam kurung = (stok fisik − ditahan servis). Kolom "-K" = transfer manual + konsinyasi akun sendiri. Kolom "-Solo-K" = konsinyasi dititipkan lewat database Accurate Solo. Klik header kolom untuk urutkan.
         </div>
 
         {loading ? (
@@ -1031,6 +1035,14 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                             {b.name}-K
                           </th>
                         )}
+                        {modeDetail && (
+                          <th
+                            className={`p-3 max-w-[70px] normal-case text-[10px] text-slate-400 ${isMine ? 'bg-indigo-50/60' : ''}`}
+                            title="Konsinyasi yang dititipkan lewat database Accurate Solo (multi-gudang)"
+                          >
+                            {b.name}-Solo-K
+                          </th>
+                        )}
                       </Fragment>
                     )
                   })}
@@ -1061,6 +1073,11 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                               {cell.transferK}
                             </td>
                           )}
+                          {modeDetail && (
+                            <td className={`p-3 text-xs ${isMine ? 'bg-indigo-50/30' : ''} ${cell.transferKSolo === 0 ? 'text-slate-300' : 'text-purple-700 font-medium'}`}>
+                              {cell.transferKSolo}
+                            </td>
+                          )}
                         </Fragment>
                       )
                     })}
@@ -1069,7 +1086,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                 ))}
                 {visibleRows.length === 0 && (
                   <tr>
-                    <td colSpan={branches.length * (modeDetail ? 2 : 1) + 3} className="p-8 text-center text-slate-400">
+                    <td colSpan={branches.length * (modeDetail ? 3 : 1) + 3} className="p-8 text-center text-slate-400">
                       {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
                     </td>
                   </tr>
@@ -1092,6 +1109,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                         <div className="text-[10px] text-slate-400 uppercase">{b.name}</div>
                         <div className={cell.net < 0 ? 'text-red-600 font-semibold' : 'text-slate-700 font-semibold'}>{cell.net}</div>
                         {modeDetail && cell.transferK !== 0 && <div className="text-[10px] text-indigo-600">-K: {cell.transferK}</div>}
+                        {modeDetail && cell.transferKSolo !== 0 && <div className="text-[10px] text-purple-600">-Solo-K: {cell.transferKSolo}</div>}
                       </div>
                     )
                   })}
@@ -1133,7 +1151,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           onChangeModeDetail={setModeDetail}
           hideZeroStock={hideZeroStock}
           onChangeHideZeroStock={setHideZeroStock}
-          kolomDetailCount={branches.length}
+          kolomDetailCount={branches.length * 2}
           onClose={() => setShowFilter(false)}
         />
       )}
