@@ -200,15 +200,29 @@ function stripKonsiSuffix(s: string): { base: string; isKonsi: boolean } {
   return { base: s.replace(KONSI_SUFFIX_PATTERN, '').trim(), isKonsi: true }
 }
 
-// Bikin produk baru pakai upsert + ignoreDuplicates (bukan insert
-// biasa) — mengandalkan unique index `service_products_sku_key_uidx`
-// di database (lihat migration 20260810000000). Kalau 2 proses sync
-// jalan BARENGAN (misal Zoho & Accurate) dan sama-sama nemu SKU baru
-// yang sama persis, database sendiri yang jamin cuma 1 baris yang
-// beneran kebuat — proses yang "kalah" otomatis dilewati (ignoreDuplicates)
-// tanpa error. Setelah itu, katalog di-query ULANG PENUH biar dapet ID
-// yang BENAR (baik yang berhasil kita insert sendiri, atau yang ternyata
-// udah kebuat duluan sama proses lain).
+// Bikin produk baru — dulu pakai upsert(onConflict:'sku_key',
+// ignoreDuplicates:true), TAPI itu ternyata gak bisa jalan: unique
+// index `service_products_sku_key_uidx` adalah PARTIAL index (WHERE
+// sku_key IS NOT NULL AND sku_key <> ''), sementara Supabase-js/
+// PostgREST cuma bisa generate `ON CONFLICT (sku_key) DO NOTHING`
+// POLOS tanpa klausa WHERE — Postgres nolak itu ("there is no unique
+// or exclusion constraint matching the ON CONFLICT specification").
+// Bug ini baru kena begitu ada SKU baru yang perlu di-insert, jadi
+// sync sebelumnya bisa "Sukses" berkali-kali sebelum akhirnya gagal.
+//
+// Perbaikan: panggil RPC `insert_new_products_ignore_dup` (migration
+// 20260811010000_fix_sku_key_conflict.sql) yang jalanin INSERT ...
+// ON CONFLICT (sku_key) WHERE (...) DO NOTHING mentah lewat SQL,
+// match persis predicate index partial-nya. sku_key sendiri GENERATED
+// ALWAYS AS (lower(btrim(sku))) — otomatis, gak perlu dikirim di sini.
+//
+// Kalau 2 proses sync jalan BARENGAN (misal Zoho & Accurate) dan
+// sama-sama nemu SKU baru yang sama persis, ON CONFLICT DO NOTHING di
+// dalam RPC ini yang jamin cuma 1 baris yang beneran kebuat — proses
+// yang "kalah" otomatis dilewati tanpa error. Setelah itu, katalog
+// di-query ULANG PENUH biar dapet ID yang BENAR (baik yang berhasil
+// kita insert sendiri, atau yang ternyata udah kebuat duluan sama
+// proses lain).
 async function createNewProductsAndRefreshCatalog(
   supabase: ReturnType<typeof createAdminClient>,
   toInsert: { id: string; sku: string; name: string; source: string }[],
@@ -218,7 +232,7 @@ async function createNewProductsAndRefreshCatalog(
   const CHUNK = 300
   for (let i = 0; i < toInsert.length; i += CHUNK) {
     const chunk = toInsert.slice(i, i + CHUNK)
-    const { error } = await supabase.from('service_products').upsert(chunk, { onConflict: 'sku_key', ignoreDuplicates: true })
+    const { error } = await supabase.rpc('insert_new_products_ignore_dup', { new_products: chunk })
     if (error) throw new Error(`Gagal bikin produk baru: ${error.message}`)
   }
   productIdBySku.clear()
