@@ -55,14 +55,62 @@ type StokModuleProps = {
   currentUserBranchId: string | null
 }
 
-// Cabang yang PUNYA akun Accurate sendiri DAN perlu ditampilin
-// terpisah dari kontribusi database Accurate Solo — cuma Jakarta.
-// Cabang lain (Purwokerto, Bali, Solo) ditampilin gabungan 1 kolom
-// "-K" aja (jumlah dari stok akun sendiri + stok dari Solo), lebih
-// simpel karena mereka gak punya akun Accurate sendiri yang aktif.
-const BRANCHES_WITH_OWN_ACCURATE = new Set([
-  '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2', // Jakarta
-])
+// =====================================================
+// 9 "SUMBER" STOK CABANG — redesign sesuai mockup cek-stok__3_.html.
+// Tiap sumber dipetakan ke salah satu dari 3 data yang SUDAH dimuat
+// oleh StokCabangMatrix (matrix.physical/held, transferMatrix ="-K",
+// soloTransferMatrix ="-Solo-K"), TIDAK ada tabel/kolom baru:
+//   - 'main'          : product_stock fisik cabang itu dikurangi held servis
+//                       (persis kolom utama yang sudah ada sekarang).
+//   - 'own'           : transferMatrix (transfer manual antar cabang +
+//                       item "(K)" dari akun Accurate cabang itu sendiri).
+//   - 'solo'          : soloTransferMatrix (konsinyasi yang dititipkan
+//                       lewat database Accurate Solo yang multi-gudang).
+//   - 'own_plus_solo' : own + solo digabung jadi SATU kolom — dipakai
+//                       buat Bali & Purwokerto (gak punya akun Accurate
+//                       sendiri, jadi transfer manual + titipan Solo
+//                       digabung jadi 1 angka "-K" nya, sesuai keputusan
+//                       user 2026-08-11).
+//
+// branchId di-hardcode by UUID (pola yang sama dipakai di seluruh
+// lib/stok/*.ts — BRANCH_STOCK_SOURCE, ZOHO_ORG_BRANCH_MAP, dst) karena
+// nama cabang di tabel `branches` gak konsisten/rapi.
+// =====================================================
+
+const BR_JAKARTA = '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2'
+const BR_SOLO = 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3'
+const BR_BALI = '9b4c7834-2e20-4416-8163-2faff97294c0'
+const BR_PWT = '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612'
+
+type SourceKind = 'main' | 'own' | 'solo' | 'own_plus_solo'
+type CabangSource = {
+  code: string
+  label: string
+  group: string
+  branchId: string
+  kind: SourceKind
+  /** true = TIDAK dihitung ke Total kota maupun Total keseluruhan, cuma buat cross-check. */
+  excludeTotal: boolean
+}
+
+const CABANG_SOURCES: CabangSource[] = [
+  { code: 'jkt', label: 'JKT', group: 'Jakarta', branchId: BR_JAKARTA, kind: 'main', excludeTotal: false },
+  { code: 'jkt_k', label: 'JKT-K', group: 'Jakarta', branchId: BR_JAKARTA, kind: 'own', excludeTotal: false },
+  { code: 'jkt_k_solo', label: 'JKT-K-SOLO', group: 'Jakarta', branchId: BR_JAKARTA, kind: 'solo', excludeTotal: true },
+  { code: 'solo_z', label: 'SOLO-Z', group: 'Solo', branchId: BR_SOLO, kind: 'main', excludeTotal: false },
+  { code: 'solo_cv', label: 'SOLO-CV', group: 'Solo', branchId: BR_SOLO, kind: 'own', excludeTotal: false },
+  { code: 'bali_z', label: 'BALI-Z', group: 'Bali', branchId: BR_BALI, kind: 'main', excludeTotal: false },
+  { code: 'bali_k', label: 'BALI-K', group: 'Bali', branchId: BR_BALI, kind: 'own_plus_solo', excludeTotal: false },
+  { code: 'pwt', label: 'PWT', group: 'Purwokerto', branchId: BR_PWT, kind: 'main', excludeTotal: false },
+  { code: 'pwt_k', label: 'PWT-K', group: 'Purwokerto', branchId: BR_PWT, kind: 'own_plus_solo', excludeTotal: false },
+]
+
+const CITY_GROUPS = ['Jakarta', 'Solo', 'Bali', 'Purwokerto'] as const
+const CITY_SHORT: Record<string, string> = { Jakarta: 'JKT', Solo: 'SOLO', Bali: 'BALI', Purwokerto: 'PWT' }
+
+function sourcesInGroup(group: string): CabangSource[] {
+  return CABANG_SOURCES.filter((s) => s.group === group)
+}
 
 const inputCls =
   'w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400'
@@ -669,15 +717,77 @@ function UploadSupplierModal({
   )
 }
 
-// ---------- Tab: Stok Cabang — tabel matriks lintas cabang ----------
+// ---------- Tab: Stok Cabang — 9 sumber dikelompokkan jadi 4 kota (Mode Simpel) ----------
+type SourceCell = { qty: number; physical?: number; held?: number }
 type MatrixRow = {
   productId: string
   sku: string
   name: string
   kategori: string
   subjenis: string
-  perBranch: Record<string, { physical: number; held: number; net: number; transferK: number; transferKSolo: number }>
+  sources: Record<string, SourceCell>
+  cityTotal: Record<string, number>
   total: number
+}
+
+function cellDisplay(cell: SourceCell | undefined) {
+  const qty = cell?.qty ?? 0
+  const held = cell?.held ?? 0
+  return { qty, held, physical: cell?.physical ?? qty }
+}
+
+// Sheet "Rincian" — dibuka dari tap angka kota di Mode Simpel, isinya
+// breakdown per sumber/akun/gudang dalam kota itu.
+function RincianSheet({
+  row,
+  group,
+  onClose,
+}: {
+  row: MatrixRow
+  group: string
+  onClose: () => void
+}) {
+  const sources = sourcesInGroup(group)
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-xl w-full sm:max-w-md max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <div className="min-w-0">
+            <h3 className="font-semibold text-slate-800 flex items-center gap-1.5">
+              <PackageSearch size={16} className="text-indigo-600 shrink-0" /> Rincian {group}
+            </h3>
+            <p className="text-xs text-slate-400 truncate mt-0.5">{row.name}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 shrink-0">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="p-5 overflow-y-auto space-y-2">
+          {sources.map((s) => {
+            const cell = cellDisplay(row.sources[s.code])
+            return (
+              <div key={s.code} className="flex items-center justify-between gap-2 border border-slate-200 rounded-2xl p-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                    {s.label}
+                    {s.excludeTotal && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                        cek saja, gak masuk Total
+                      </span>
+                    )}
+                  </div>
+                  {cell.held > 0 && <div className="text-[11px] text-slate-400 mt-0.5">({cell.physical}−{cell.held} ditahan servis)</div>}
+                </div>
+                <div className={`text-base font-semibold shrink-0 ${cell.qty < 0 ? 'text-red-600' : cell.qty === 0 ? 'text-slate-300' : 'text-slate-800'}`}>
+                  {cell.qty}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function FilterStokCabangModal({
@@ -828,6 +938,8 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
   const [selectedKategoris, setSelectedKategoris] = useState<Set<string> | null>(null)
   const [modeDetail, setModeDetail] = useState(false)
   const [hideZeroStock, setHideZeroStock] = useState(false)
+  // Sheet Rincian, dibuka dari tap angka kota di Mode Simpel.
+  const [rincian, setRincian] = useState<{ row: MatrixRow; group: string } | null>(null)
 
   async function loadAll() {
     setLoading(true)
@@ -857,26 +969,36 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     loadAll()
   }, [])
 
+  // Bangun 9 sumber (jkt/jkt_k/jkt_k_solo/solo_z/solo_cv/bali_z/bali_k/
+  // pwt/pwt_k) per produk dari 3 data yang sudah dimuat di atas — TIDAK
+  // ada query/tabel baru. Total & Total kota mengecualikan sumber yang
+  // excludeTotal (cuma JKT-K-SOLO, dipakai buat cross-check aja).
   const rows: MatrixRow[] = useMemo(() => {
     return matrix.products.map((p) => {
-      const perBranch: MatrixRow['perBranch'] = {}
-      let total = 0
-      branches.forEach((b) => {
-        const physical = matrix.physical[`${b.id}|${p.productId}`] || 0
-        const heldVal = p.sku ? matrix.held[`${b.id}|${normalizeSku(p.sku)}`] || 0 : 0
-        const net = physical - heldVal
-        // Kolom "-K": saldo transfer manual + item "(K)" punya akun
-        // Accurate cabang itu sendiri. Kolom "-Solo-K" (khusus
-        // Jakarta/Bali/Purwokerto): konsinyasi yang dititipkan lewat
-        // database Accurate Solo yang multi-gudang.
-        const transferK = transferMatrix.get(b.id)?.get(p.productId) || 0
-        const transferKSolo = soloTransferMatrix.get(b.id)?.get(p.productId) || 0
-        perBranch[b.id] = { physical, held: heldVal, net, transferK, transferKSolo }
-        total += net + transferK + transferKSolo
+      const sources: Record<string, SourceCell> = {}
+      CABANG_SOURCES.forEach((src) => {
+        if (src.kind === 'main') {
+          const physical = matrix.physical[`${src.branchId}|${p.productId}`] || 0
+          const held = p.sku ? matrix.held[`${src.branchId}|${normalizeSku(p.sku)}`] || 0 : 0
+          sources[src.code] = { qty: physical - held, physical, held }
+        } else if (src.kind === 'own') {
+          sources[src.code] = { qty: transferMatrix.get(src.branchId)?.get(p.productId) || 0 }
+        } else if (src.kind === 'solo') {
+          sources[src.code] = { qty: soloTransferMatrix.get(src.branchId)?.get(p.productId) || 0 }
+        } else {
+          const own = transferMatrix.get(src.branchId)?.get(p.productId) || 0
+          const solo = soloTransferMatrix.get(src.branchId)?.get(p.productId) || 0
+          sources[src.code] = { qty: own + solo }
+        }
       })
-      return { productId: p.productId, sku: p.sku, name: p.name, kategori: p.kategori, subjenis: p.subjenis, perBranch, total }
+      const total = CABANG_SOURCES.reduce((sum, src) => (src.excludeTotal ? sum : sum + sources[src.code].qty), 0)
+      const cityTotal: Record<string, number> = {}
+      CITY_GROUPS.forEach((g) => {
+        cityTotal[g] = sourcesInGroup(g).reduce((sum, s) => (s.excludeTotal ? sum : sum + sources[s.code].qty), 0)
+      })
+      return { productId: p.productId, sku: p.sku, name: p.name, kategori: p.kategori, subjenis: p.subjenis, sources, cityTotal, total }
     })
-  }, [matrix, branches, transferMatrix, soloTransferMatrix])
+  }, [matrix, transferMatrix, soloTransferMatrix])
 
   // Daftar kategori unik dari data yang ada, buat isi checkbox filter.
   const allKategoris = useMemo(() => {
@@ -895,7 +1017,8 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
       if (sortKey === 'name') { av = a.name.toLowerCase(); bv = b.name.toLowerCase() }
       else if (sortKey === 'kategori') { av = a.kategori.toLowerCase(); bv = b.kategori.toLowerCase() }
       else if (sortKey === 'total') { av = a.total; bv = b.total }
-      else { av = a.perBranch[sortKey]?.net ?? 0; bv = b.perBranch[sortKey]?.net ?? 0 }
+      else if ((CITY_GROUPS as readonly string[]).includes(sortKey)) { av = a.cityTotal[sortKey] ?? 0; bv = b.cityTotal[sortKey] ?? 0 }
+      else { av = a.sources[sortKey]?.qty ?? 0; bv = b.sources[sortKey]?.qty ?? 0 }
       if (typeof av === 'number' && typeof bv === 'number') return sortDir === 'asc' ? av - bv : bv - av
       return sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
     })
@@ -955,6 +1078,16 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     )
   }
 
+  function CellQty({ cell }: { cell: SourceCell | undefined }) {
+    const d = cellDisplay(cell)
+    return (
+      <>
+        <span className={d.qty < 0 ? 'text-red-600 font-medium' : d.qty === 0 ? 'text-slate-300' : 'text-slate-700 font-medium'}>{d.qty}</span>
+        {d.held > 0 && <div className="text-[10px] text-slate-400">({d.physical}-{d.held})</div>}
+      </>
+    )
+  }
+
   const zeroStockCount = rows.filter((r) => r.total <= 0).length
   const visibleRows = filtered.slice(0, visibleCount)
 
@@ -993,7 +1126,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-800">Daftar Stok Cabang</div>
             <div className="text-xs text-slate-400">
-              {rows.length} produk · {zeroStockCount} stok 0
+              {rows.length} produk · {zeroStockCount} stok 0{modeDetail ? ' · Mode Detail' : ''}
             </div>
             <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
               <Clock size={10} /> {lastSync ? `Diperbarui ${fmtRelative(lastSync)} — dari sync API otomatis` : 'Belum pernah sync'}
@@ -1002,7 +1135,9 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
         </div>
 
         <div className="px-4 py-2 bg-slate-50 text-[11px] text-slate-500 border-b border-slate-100">
-          Angka dalam kurung = (stok fisik − ditahan servis). Kolom "-K" = transfer manual + konsinyasi akun sendiri. Kolom "-Solo-K" = konsinyasi dititipkan lewat database Accurate Solo. Klik header kolom untuk urutkan.
+          Angka dalam kurung = (stok fisik − ditahan servis). {modeDetail
+            ? 'JKT-K/SOLO-CV/BALI-K/PWT-K = transfer manual + konsinyasi akun sendiri. JKT-K-SOLO = konsinyasi dititipkan lewat Accurate Solo (cross-check, gak masuk Total).'
+            : 'Tap angka kota untuk lihat rincian per akun/gudang.'} Klik header kolom untuk urutkan.
         </div>
 
         {loading ? (
@@ -1010,115 +1145,94 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
         ) : isDesktopLayout ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide">
-                  <th className="p-3"><SortHeader label="Kategori" sortKeyName="kategori" /></th>
-                  <th className="p-3"><SortHeader label="Nama Produk" sortKeyName="name" /></th>
-                  {branches.map((b) => {
-                    const source = stockSourceForBranch(b.id)
-                    const isMine = myBranchId === b.id
-                    return (
-                      <Fragment key={b.id}>
-                        <th className={`p-3 max-w-[110px] ${isMine ? 'bg-indigo-50/60' : ''}`}>
-                          <div className="flex items-start gap-1">
-                            <span className="normal-case leading-tight">
-                              <SortHeader label={b.name} sortKeyName={b.id} />
-                            </span>
-                            {(source === 'zoho' || source === 'accurate') && (
-                              <button
-                                onClick={() => handleSyncBranch(b.id)}
-                                disabled={syncingAll || syncingBranch === b.id}
-                                title={`Sync ${b.name} dari ${source === 'accurate' ? 'Accurate' : 'Zoho'}`}
-                                className="text-slate-300 hover:text-indigo-600 disabled:opacity-50"
-                              >
-                                {syncingBranch === b.id ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-                              </button>
-                            )}
-                          </div>
+              {modeDetail ? (
+                <>
+                  <thead>
+                    <tr className="border-b border-slate-100 text-left text-[10px] text-slate-400 uppercase tracking-wide">
+                      <th className="p-3" rowSpan={2}><SortHeader label="Kategori" sortKeyName="kategori" /></th>
+                      <th className="p-3" rowSpan={2}><SortHeader label="Nama Produk" sortKeyName="name" /></th>
+                      {CITY_GROUPS.map((g) => (
+                        <th key={g} className="p-2 text-center bg-indigo-50 text-indigo-600 font-semibold" colSpan={sourcesInGroup(g).length}>
+                          {g}
                         </th>
-                        {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
-                          <th
-                            className={`p-3 max-w-[70px] normal-case text-[10px] text-slate-400 ${isMine ? 'bg-indigo-50/60' : ''}`}
-                            title="Stok konsinyasi/transfer manual antar cabang"
-                          >
-                            {b.name}-K
-                          </th>
-                        )}
-                        {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
-                          <th
-                            className={`p-3 max-w-[70px] normal-case text-[10px] text-slate-400 ${isMine ? 'bg-indigo-50/60' : ''}`}
-                            title="Konsinyasi yang dititipkan lewat database Accurate Solo (multi-gudang)"
-                          >
-                            {b.name}-Solo-K
-                          </th>
-                        )}
-                        {modeDetail && !BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
-                          <th
-                            className={`p-3 max-w-[70px] normal-case text-[10px] text-slate-400 ${isMine ? 'bg-indigo-50/60' : ''}`}
-                            title="Stok konsinyasi/transfer manual antar cabang (gabungan semua sumber)"
-                          >
-                            {b.name}-K
-                          </th>
-                        )}
-                      </Fragment>
-                    )
-                  })}
-                  <th className="p-3"><SortHeader label="Total" sortKeyName="total" /></th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleRows.map((r) => (
-                  <tr key={r.productId} className="border-b border-slate-50">
-                    <td className="p-3 whitespace-nowrap text-xs text-indigo-600">{r.kategori || '-'}</td>
-                    <td className="p-3">
-                      <div className="font-medium text-slate-800">{r.name}</div>
-                      {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
-                    </td>
-                    {branches.map((b) => {
-                      const cell = r.perBranch[b.id]
-                      const isMine = myBranchId === b.id
-                      return (
-                        <Fragment key={b.id}>
-                          <td className={`p-3 ${isMine ? 'bg-indigo-50/30' : ''}`}>
-                            <span className={cell.net < 0 ? 'text-red-600 font-medium' : cell.net === 0 ? 'text-slate-300' : 'text-slate-700 font-medium'}>
-                              {cell.net}
-                            </span>
-                            {cell.held > 0 && <div className="text-[10px] text-slate-400">({cell.physical}-{cell.held})</div>}
+                      ))}
+                      <th className="p-3" rowSpan={2}><SortHeader label="Total" sortKeyName="total" /></th>
+                    </tr>
+                    <tr className="border-b border-slate-100 text-center text-[10px] text-slate-400 uppercase tracking-wide">
+                      {CABANG_SOURCES.map((s) => (
+                        <th key={s.code} className={`p-2 ${s.excludeTotal ? 'bg-slate-50' : ''}`}>
+                          <SortHeader label={s.label} sortKeyName={s.code} />
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleRows.map((r) => (
+                      <tr key={r.productId} className="border-b border-slate-50">
+                        <td className="p-3 whitespace-nowrap text-xs text-indigo-600">{r.kategori || '-'}</td>
+                        <td className="p-3">
+                          <div className="font-medium text-slate-800">{r.name}</div>
+                          {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
+                        </td>
+                        {CABANG_SOURCES.map((s) => (
+                          <td key={s.code} className={`p-3 text-center ${s.excludeTotal ? 'bg-slate-50/60' : ''}`}>
+                            <CellQty cell={r.sources[s.code]} />
                           </td>
-                          {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
-                            <td className={`p-3 text-xs ${isMine ? 'bg-indigo-50/30' : ''} ${cell.transferK === 0 ? 'text-slate-300' : 'text-indigo-700 font-medium'}`}>
-                              {cell.transferK}
-                            </td>
-                          )}
-                          {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
-                            <td className={`p-3 text-xs ${isMine ? 'bg-indigo-50/30' : ''} ${cell.transferKSolo === 0 ? 'text-slate-300' : 'text-purple-700 font-medium'}`}>
-                              {cell.transferKSolo}
-                            </td>
-                          )}
-                          {modeDetail && !BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (
-                            <td className={`p-3 text-xs ${isMine ? 'bg-indigo-50/30' : ''} ${cell.transferK + cell.transferKSolo === 0 ? 'text-slate-300' : 'text-indigo-700 font-medium'}`}>
-                              {cell.transferK + cell.transferKSolo}
-                            </td>
-                          )}
-                        </Fragment>
-                      )
-                    })}
-                    <td className="p-3 font-semibold text-slate-800">{r.total}</td>
-                  </tr>
-                ))}
-                {visibleRows.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={
-                        branches.reduce((sum, b) => sum + (modeDetail ? (BRANCHES_WITH_OWN_ACCURATE.has(b.id) ? 3 : 2) : 1), 0) + 3
-                      }
-                      className="p-8 text-center text-slate-400"
-                    >
-                      {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
+                        ))}
+                        <td className="p-3 font-semibold text-slate-800">{r.total}</td>
+                      </tr>
+                    ))}
+                    {visibleRows.length === 0 && (
+                      <tr>
+                        <td colSpan={CABANG_SOURCES.length + 3} className="p-8 text-center text-slate-400">
+                          {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </>
+              ) : (
+                <>
+                  <thead>
+                    <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide">
+                      <th className="p-3"><SortHeader label="Kategori" sortKeyName="kategori" /></th>
+                      <th className="p-3"><SortHeader label="Nama Produk" sortKeyName="name" /></th>
+                      {CITY_GROUPS.map((g) => (
+                        <th key={g} className="p-3 text-center"><SortHeader label={CITY_SHORT[g]} sortKeyName={g} /></th>
+                      ))}
+                      <th className="p-3"><SortHeader label="Total" sortKeyName="total" /></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleRows.map((r) => (
+                      <tr key={r.productId} className="border-b border-slate-50">
+                        <td className="p-3 whitespace-nowrap text-xs text-indigo-600">{r.kategori || '-'}</td>
+                        <td className="p-3">
+                          <div className="font-medium text-slate-800">{r.name}</div>
+                          {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
+                        </td>
+                        {CITY_GROUPS.map((g) => (
+                          <td key={g} className="p-3 text-center">
+                            <button onClick={() => setRincian({ row: r, group: g })} className="w-full hover:text-indigo-600">
+                              <span className={r.cityTotal[g] < 0 ? 'text-red-600 font-medium' : r.cityTotal[g] === 0 ? 'text-slate-300' : 'text-slate-700 font-medium'}>
+                                {r.cityTotal[g]}
+                              </span>
+                            </button>
+                          </td>
+                        ))}
+                        <td className="p-3 font-semibold text-slate-800">{r.total}</td>
+                      </tr>
+                    ))}
+                    {visibleRows.length === 0 && (
+                      <tr>
+                        <td colSpan={CITY_GROUPS.length + 3} className="p-8 text-center text-slate-400">
+                          {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </>
+              )}
             </table>
           </div>
         ) : (
@@ -1129,20 +1243,19 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                 <div className="font-medium text-slate-800">{r.name}</div>
                 {r.subjenis && <div className="text-xs text-slate-400 mb-2">{r.subjenis}</div>}
                 <div className="flex flex-wrap gap-3 mt-2">
-                  {branches.map((b) => {
-                    const cell = r.perBranch[b.id]
-                    return (
-                      <div key={b.id} className="text-center">
-                        <div className="text-[10px] text-slate-400 uppercase">{b.name}</div>
-                        <div className={cell.net < 0 ? 'text-red-600 font-semibold' : 'text-slate-700 font-semibold'}>{cell.net}</div>
-                        {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && cell.transferK !== 0 && <div className="text-[10px] text-indigo-600">-K: {cell.transferK}</div>}
-                        {modeDetail && BRANCHES_WITH_OWN_ACCURATE.has(b.id) && cell.transferKSolo !== 0 && <div className="text-[10px] text-purple-600">-Solo-K: {cell.transferKSolo}</div>}
-                        {modeDetail && !BRANCHES_WITH_OWN_ACCURATE.has(b.id) && (cell.transferK + cell.transferKSolo) !== 0 && (
-                          <div className="text-[10px] text-indigo-600">-K: {cell.transferK + cell.transferKSolo}</div>
-                        )}
-                      </div>
-                    )
-                  })}
+                  {modeDetail
+                    ? CABANG_SOURCES.map((s) => (
+                        <div key={s.code} className="text-center">
+                          <div className="text-[10px] text-slate-400 uppercase">{s.label}</div>
+                          <div><CellQty cell={r.sources[s.code]} /></div>
+                        </div>
+                      ))
+                    : CITY_GROUPS.map((g) => (
+                        <button key={g} onClick={() => setRincian({ row: r, group: g })} className="text-center">
+                          <div className="text-[10px] text-slate-400 uppercase">{CITY_SHORT[g]}</div>
+                          <div className={r.cityTotal[g] < 0 ? 'text-red-600 font-semibold' : 'text-slate-700 font-semibold'}>{r.cityTotal[g]}</div>
+                        </button>
+                      ))}
                   <div className="text-center">
                     <div className="text-[10px] text-slate-400 uppercase">Total</div>
                     <div className="text-slate-800 font-semibold">{r.total}</div>
@@ -1181,10 +1294,12 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           onChangeModeDetail={setModeDetail}
           hideZeroStock={hideZeroStock}
           onChangeHideZeroStock={setHideZeroStock}
-          kolomDetailCount={branches.reduce((sum, b) => sum + (BRANCHES_WITH_OWN_ACCURATE.has(b.id) ? 2 : 1), 0)}
+          kolomDetailCount={CABANG_SOURCES.length}
           onClose={() => setShowFilter(false)}
         />
       )}
+
+      {rincian && <RincianSheet row={rincian.row} group={rincian.group} onClose={() => setRincian(null)} />}
     </div>
   )
 }
