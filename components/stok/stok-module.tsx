@@ -798,7 +798,8 @@ function FilterStokCabangModal({
   onChangeModeDetail,
   hideZeroStock,
   onChangeHideZeroStock,
-  kolomDetailCount,
+  hiddenCols,
+  onChangeHiddenCols,
   onClose,
 }: {
   allKategoris: string[]
@@ -808,7 +809,8 @@ function FilterStokCabangModal({
   onChangeModeDetail: (v: boolean) => void
   hideZeroStock: boolean
   onChangeHideZeroStock: (v: boolean) => void
-  kolomDetailCount: number
+  hiddenCols: Set<string>
+  onChangeHiddenCols: (v: Set<string>) => void
   onClose: () => void
 }) {
   // Draft lokal biar perubahan cuma keterapkan pas klik "Terapkan"
@@ -817,6 +819,7 @@ function FilterStokCabangModal({
   const [draftKategoris, setDraftKategoris] = useState<Set<string> | null>(selectedKategoris)
   const [draftModeDetail, setDraftModeDetail] = useState(modeDetail)
   const [draftHideZero, setDraftHideZero] = useState(hideZeroStock)
+  const [draftHiddenCols, setDraftHiddenCols] = useState<Set<string>>(new Set(hiddenCols))
 
   const allChecked = draftKategoris === null
   function toggleAll() {
@@ -833,18 +836,38 @@ function FilterStokCabangModal({
     })
   }
 
+  const allColsChecked = draftHiddenCols.size === 0
+  function toggleAllCols(checked: boolean) {
+    setDraftHiddenCols(checked ? new Set() : new Set(CABANG_SOURCES.map((s) => s.code)))
+  }
+  function toggleOneCol(code: string) {
+    setDraftHiddenCols((prev) => {
+      const next = new Set(prev)
+      if (next.has(code)) next.delete(code)
+      else next.add(code)
+      return next
+    })
+  }
+
   function handleReset() {
     setDraftKategoris(null)
     setDraftModeDetail(false)
     setDraftHideZero(false)
+    setDraftHiddenCols(new Set())
   }
 
   function handleTerapkan() {
     onChangeKategoris(draftKategoris)
     onChangeModeDetail(draftModeDetail)
     onChangeHideZeroStock(draftHideZero)
+    onChangeHiddenCols(draftHiddenCols)
     onClose()
   }
+
+  // Kelompokkan kolom per grup kota buat header section di tree, sama
+  // kayak buildCabangColTree() di mockup (JAKARTA / SOLO / BALI /
+  // PURWOKERTO sebagai sub-header, bukan checkbox).
+  let lastGroup: string | null = null
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-end sm:items-center justify-center">
@@ -859,23 +882,27 @@ function FilterStokCabangModal({
         <div className="p-5 overflow-y-auto space-y-5">
           <div>
             <div className="text-[11px] font-semibold text-slate-400 uppercase mb-2">Kategori</div>
-            <label className="flex items-center gap-2 py-1.5 text-sm font-medium text-slate-800">
-              <input type="checkbox" checked={allChecked} onChange={toggleAll} className="accent-indigo-600" />
-              Semua Kategori
-            </label>
-            <div className="pl-1 mt-1 space-y-0.5 max-h-48 overflow-y-auto">
-              {allKategoris.map((k) => (
-                <label key={k} className="flex items-center gap-2 py-1 pl-3 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={allChecked || (draftKategoris?.has(k) ?? false)}
-                    onChange={() => toggleOne(k)}
-                    className="accent-indigo-600"
-                  />
-                  {k}
-                </label>
-              ))}
-              {allKategoris.length === 0 && <p className="text-xs text-slate-400 pl-3">Belum ada kategori.</p>}
+            {/* Tree 2-level: root "Semua Kategori" + anak-anaknya, sesuai
+                pola buildCabangCatTree() di mockup. */}
+            <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-1">
+              <label className="flex items-center gap-2 py-1.5 px-2 text-sm font-semibold text-slate-800 rounded-lg hover:bg-white">
+                <input type="checkbox" checked={allChecked} onChange={toggleAll} className="accent-indigo-600 size-4" />
+                Semua Kategori
+              </label>
+              <div className="mt-0.5 space-y-0.5 max-h-48 overflow-y-auto">
+                {allKategoris.map((k) => (
+                  <label key={k} className="flex items-center gap-2 py-1.5 pl-7 pr-2 text-sm text-slate-600 rounded-lg hover:bg-white">
+                    <input
+                      type="checkbox"
+                      checked={allChecked || (draftKategoris?.has(k) ?? false)}
+                      onChange={() => toggleOne(k)}
+                      className="accent-indigo-600 size-4"
+                    />
+                    {k}
+                  </label>
+                ))}
+                {allKategoris.length === 0 && <p className="text-xs text-slate-400 pl-7 py-1">Belum ada kategori.</p>}
+              </div>
             </div>
           </div>
 
@@ -888,7 +915,7 @@ function FilterStokCabangModal({
                 onChange={(e) => setDraftModeDetail(e.target.checked)}
                 className="accent-indigo-600"
               />
-              Mode Detail ({kolomDetailCount} kolom per akun/gudang)
+              Mode Detail ({CABANG_SOURCES.length} kolom per akun/gudang)
             </label>
             <label className="flex items-center gap-2 py-1.5 text-sm text-slate-700">
               <input
@@ -900,6 +927,43 @@ function FilterStokCabangModal({
               Sembunyikan produk stok 0
             </label>
           </div>
+
+          {draftModeDetail && (
+            <div>
+              <div className="text-[11px] font-semibold text-slate-400 uppercase mb-2">
+                Kolom (per akun/gudang) — berlaku saat Mode Detail nyala
+              </div>
+              <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-1">
+                <label className="flex items-center gap-2 py-1.5 px-2 text-sm font-semibold text-slate-800 rounded-lg hover:bg-white">
+                  <input type="checkbox" checked={allColsChecked} onChange={(e) => toggleAllCols(e.target.checked)} className="accent-indigo-600 size-4" />
+                  Semua Kolom
+                </label>
+                <div className="mt-0.5 max-h-56 overflow-y-auto">
+                  {CABANG_SOURCES.map((s) => {
+                    const showGroupHeader = s.group !== lastGroup
+                    lastGroup = s.group
+                    return (
+                      <Fragment key={s.code}>
+                        {showGroupHeader && (
+                          <div className="pt-2.5 pb-0.5 pl-7 pr-2 text-[10px] font-bold text-slate-400 uppercase tracking-wide">{s.group}</div>
+                        )}
+                        <label className="flex items-center gap-2 py-1.5 pl-7 pr-2 text-sm text-slate-600 rounded-lg hover:bg-white">
+                          <input
+                            type="checkbox"
+                            checked={!draftHiddenCols.has(s.code)}
+                            onChange={() => toggleOneCol(s.code)}
+                            className="accent-indigo-600 size-4"
+                          />
+                          {s.label}
+                          {s.excludeTotal && <span className="text-[10px] text-slate-400">— cek saja (gak masuk Total)</span>}
+                        </label>
+                      </Fragment>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 px-5 py-4 border-t border-slate-100">
@@ -938,6 +1002,9 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
   const [selectedKategoris, setSelectedKategoris] = useState<Set<string> | null>(null)
   const [modeDetail, setModeDetail] = useState(false)
   const [hideZeroStock, setHideZeroStock] = useState(false)
+  // Kolom (source code) yang disembunyikan di Mode Detail — kosong =
+  // semua 9 kolom tampil.
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set())
   // Sheet Rincian, dibuka dari tap angka kota di Mode Simpel.
   const [rincian, setRincian] = useState<{ row: MatrixRow; group: string } | null>(null)
 
@@ -1006,6 +1073,11 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     rows.forEach((r) => { if (r.kategori) set.add(r.kategori) })
     return Array.from(set).sort()
   }, [rows])
+
+  // Kolom yang beneran ditampilkan di Mode Detail (hiddenCols cuma
+  // ngaruh ke tampilan tabel, TIDAK ngaruh ke perhitungan Total/cityTotal
+  // di atas — itu tetap ngitung semua sumber yang bukan excludeTotal).
+  const visibleSources = useMemo(() => CABANG_SOURCES.filter((s) => !hiddenCols.has(s.code)), [hiddenCols])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -1101,7 +1173,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
         <button onClick={() => setShowFilter(true)} className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}>
           <SlidersHorizontal size={14} />
           Filter
-          {(selectedKategoris || hideZeroStock || modeDetail) && (
+          {(selectedKategoris || hideZeroStock || modeDetail || hiddenCols.size > 0) && (
             <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
           )}
         </button>
@@ -1151,15 +1223,19 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                     <tr className="border-b border-slate-100 text-left text-[10px] text-slate-400 uppercase tracking-wide">
                       <th className="p-3" rowSpan={2}><SortHeader label="Kategori" sortKeyName="kategori" /></th>
                       <th className="p-3" rowSpan={2}><SortHeader label="Nama Produk" sortKeyName="name" /></th>
-                      {CITY_GROUPS.map((g) => (
-                        <th key={g} className="p-2 text-center bg-indigo-50 text-indigo-600 font-semibold" colSpan={sourcesInGroup(g).length}>
-                          {g}
-                        </th>
-                      ))}
+                      {CITY_GROUPS.map((g) => {
+                        const count = visibleSources.filter((s) => s.group === g).length
+                        if (count === 0) return null
+                        return (
+                          <th key={g} className="p-2 text-center bg-indigo-50 text-indigo-600 font-semibold" colSpan={count}>
+                            {g}
+                          </th>
+                        )
+                      })}
                       <th className="p-3" rowSpan={2}><SortHeader label="Total" sortKeyName="total" /></th>
                     </tr>
                     <tr className="border-b border-slate-100 text-center text-[10px] text-slate-400 uppercase tracking-wide">
-                      {CABANG_SOURCES.map((s) => (
+                      {visibleSources.map((s) => (
                         <th key={s.code} className={`p-2 ${s.excludeTotal ? 'bg-slate-50' : ''}`}>
                           <SortHeader label={s.label} sortKeyName={s.code} />
                         </th>
@@ -1174,7 +1250,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                           <div className="font-medium text-slate-800">{r.name}</div>
                           {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
                         </td>
-                        {CABANG_SOURCES.map((s) => (
+                        {visibleSources.map((s) => (
                           <td key={s.code} className={`p-3 text-center ${s.excludeTotal ? 'bg-slate-50/60' : ''}`}>
                             <CellQty cell={r.sources[s.code]} />
                           </td>
@@ -1184,7 +1260,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                     ))}
                     {visibleRows.length === 0 && (
                       <tr>
-                        <td colSpan={CABANG_SOURCES.length + 3} className="p-8 text-center text-slate-400">
+                        <td colSpan={visibleSources.length + 3} className="p-8 text-center text-slate-400">
                           {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
                         </td>
                       </tr>
@@ -1244,7 +1320,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                 {r.subjenis && <div className="text-xs text-slate-400 mb-2">{r.subjenis}</div>}
                 <div className="flex flex-wrap gap-3 mt-2">
                   {modeDetail
-                    ? CABANG_SOURCES.map((s) => (
+                    ? visibleSources.map((s) => (
                         <div key={s.code} className="text-center">
                           <div className="text-[10px] text-slate-400 uppercase">{s.label}</div>
                           <div><CellQty cell={r.sources[s.code]} /></div>
@@ -1294,7 +1370,8 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           onChangeModeDetail={setModeDetail}
           hideZeroStock={hideZeroStock}
           onChangeHideZeroStock={setHideZeroStock}
-          kolomDetailCount={CABANG_SOURCES.length}
+          hiddenCols={hiddenCols}
+          onChangeHiddenCols={setHiddenCols}
           onClose={() => setShowFilter(false)}
         />
       )}
