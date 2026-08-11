@@ -17,6 +17,7 @@ export type SyncLogRow = {
   itemsUpdated: number
   itemsSkipped: number
   errorMessage: string | null
+  branchName: string | null
 }
 
 // Ambil stok per cabang, lewat paging (jumlah produk sudah pernah lebih
@@ -51,7 +52,7 @@ export async function loadSyncLog(branchId: string, limit = 20): Promise<SyncLog
   const supabase = createClient()
   const { data, error } = await supabase
     .from('stock_sync_log')
-    .select('*')
+    .select('*, branches(name)')
     .eq('branch_id', branchId)
     .order('started_at', { ascending: false })
     .limit(limit)
@@ -66,6 +67,7 @@ export async function loadSyncLog(branchId: string, limit = 20): Promise<SyncLog
     itemsUpdated: r.items_updated,
     itemsSkipped: r.items_skipped,
     errorMessage: r.error_message,
+    branchName: r.branches?.name || null,
   }))
 }
 
@@ -85,7 +87,7 @@ export const BRANCH_STOCK_SOURCE: Record<string, 'zoho' | 'accurate' | null> = {
   'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3': 'zoho', // Solo
   '9b4c7834-2e20-4416-8163-2faff97294c0': 'zoho', // Bali
   '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2': 'accurate', // Jakarta
-  // '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612': 'accurate', // Purwokerto (aktifkan nanti)
+  '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612': 'accurate', // Purwokerto
 }
 
 export function stockSourceForBranch(branchId: string | null): 'zoho' | 'accurate' | null {
@@ -776,7 +778,7 @@ export async function loadSyncLogAll(limit = 30): Promise<SyncLogRow[]> {
   const supabase = createClient()
   const { data, error } = await supabase
     .from('stock_sync_log')
-    .select('*')
+    .select('*, branches(name)')
     .order('started_at', { ascending: false })
     .limit(limit)
   if (error) throw new Error(error.message)
@@ -790,6 +792,7 @@ export async function loadSyncLogAll(limit = 30): Promise<SyncLogRow[]> {
     itemsUpdated: r.items_updated,
     itemsSkipped: r.items_skipped,
     errorMessage: r.error_message,
+    branchName: r.branches?.name || null,
   }))
 }
 
