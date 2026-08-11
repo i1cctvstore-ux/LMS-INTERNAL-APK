@@ -214,7 +214,9 @@ function RiwayatModal({
               return (
                 <div key={`sync-${log.id}`} className="border border-slate-200 rounded-2xl p-3 text-sm">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-medium text-slate-700 capitalize">Sync {log.source}</span>
+                    <span className="font-medium text-slate-700 capitalize">
+                      Sync {log.source}{log.branchName ? ` — ${log.branchName}` : ''}
+                    </span>
                     <SyncStatusBadge status={log.status} />
                   </div>
                   <div className="text-xs text-slate-400 mb-1">
