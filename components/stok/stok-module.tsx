@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   Search, RefreshCw, Clock, CheckCircle2, XCircle, Loader2, Upload, X, PackageSearch,
-  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap, Plus, SlidersHorizontal, RotateCcw, Check,
+  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap, Plus, SlidersHorizontal, RotateCcw, Check, Download,
 } from 'lucide-react'
 import {
   loadAllBranches,
@@ -49,6 +49,7 @@ import {
 } from '@/lib/stok/parse-supplier-file'
 import { TransferStokButton } from './transfer-stok-modal'
 import { loadTransferBalanceMatrix } from '@/lib/stok/transfer-api'
+import * as XLSX from 'xlsx'
 
 type StokModuleProps = {
   currentUserRole: string
@@ -1104,6 +1105,33 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     else { setSortKey(key); setSortDir('asc') }
   }
 
+  // Ekspor SEMUA produk yang lolos filter saat ini (bukan cuma yang
+  // sudah dimuat/visibleRows) ke .xlsx — kolomnya ngikutin mode yang
+  // lagi aktif: Mode Simpel = 4 kota + Total, Mode Detail = 9 sumber
+  // yang keliatan aja (ngikutin hiddenCols) + Total. Diproses di
+  // browser (paket `xlsx` yang sama dipakai buat baca file Stok
+  // Supplier), gak ada request ke server.
+  function exportToExcel() {
+    const headerRow = modeDetail
+      ? ['Kategori', 'Nama Produk', 'Subjenis', ...visibleSources.map((s) => s.label), 'Total']
+      : ['Kategori', 'Nama Produk', 'Subjenis', ...CITY_GROUPS.map((g) => CITY_SHORT[g]), 'Total']
+    const dataRows = filtered.map((r) => {
+      const base = [r.kategori || '', r.name, r.subjenis || '']
+      const cols = modeDetail
+        ? visibleSources.map((s) => r.sources[s.code]?.qty ?? 0)
+        : CITY_GROUPS.map((g) => r.cityTotal[g] ?? 0)
+      return [...base, ...cols, r.total]
+    })
+    const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows])
+    // Lebar kolom biar gak kepotong pas dibuka — nama produk dilebarin,
+    // sisanya secukupnya.
+    ws['!cols'] = [{ wch: 14 }, { wch: 40 }, { wch: 22 }, ...headerRow.slice(3).map(() => ({ wch: 12 }))]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Stok Cabang')
+    const dateStr = new Date().toISOString().slice(0, 10)
+    XLSX.writeFile(wb, `cek-stok-cabang-${dateStr}.xlsx`)
+  }
+
   async function handleSyncBranch(branchId: string) {
     setSyncingBranch(branchId)
     setMessage(null)
@@ -1180,6 +1208,13 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           )}
         </button>
         <TransferStokButton onSaved={loadAll} />
+        <button
+          onClick={exportToExcel}
+          disabled={filtered.length === 0}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls} disabled:opacity-40`}
+        >
+          <Download size={14} /> Ekspor Excel
+        </button>
         <button
           onClick={handleSyncAll}
           disabled={syncingAll || !!syncingBranch}
