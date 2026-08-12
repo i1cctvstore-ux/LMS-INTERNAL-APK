@@ -144,7 +144,7 @@ export async function connectToAccurateBranch(config: AccurateBranchConfig): Pro
 // ini — dari hasil diagnostik sebelumnya cuma dapat {id, modifierName}.
 // Jadi di sini CUMA ambil id-nya aja; SKU & stok dua-duanya diambil
 // bareng dari item/detail.do (lihat fetchItemDetail di bawah).
-async function fetchAllItemIds(conn: AccurateConnection): Promise<number[]> {
+export async function fetchAllItemIds(conn: AccurateConnection): Promise<number[]> {
   const ids: number[] = []
   const PAGE_SIZE = 100
   let page = 1
@@ -169,7 +169,7 @@ async function fetchAllItemIds(conn: AccurateConnection): Promise<number[]> {
 // Ambil SKU ("no") + nama + stok ("balance") sekaligus dari SATU item
 // lewat item/detail.do — ini satu-satunya endpoint yang beneran ngasih
 // field-field itu di akun ini.
-async function fetchItemDetail(conn: AccurateConnection, itemId: number): Promise<{ no: string; name: string; balance: number } | null> {
+export async function fetchItemDetail(conn: AccurateConnection, itemId: number): Promise<{ no: string; name: string; balance: number } | null> {
   const params = new URLSearchParams({ id: String(itemId) })
   const res = await fetch(`${conn.host}/accurate/api/item/detail.do?${params.toString()}`, {
     headers: { Authorization: `Bearer ${conn.accessToken}`, 'X-Session-ID': conn.session },
@@ -195,7 +195,7 @@ function normalizeSku(s: string): string {
 // produk dasar & ditulis ke product_stock_konsi, bukan bikin produk
 // baru sendiri.
 const KONSI_SUFFIX_PATTERN = /[\s\-]*\(k\)\s*$/i
-function stripKonsiSuffix(s: string): { base: string; isKonsi: boolean } {
+export function stripKonsiSuffix(s: string): { base: string; isKonsi: boolean } {
   if (!KONSI_SUFFIX_PATTERN.test(s)) return { base: s, isKonsi: false }
   return { base: s.replace(KONSI_SUFFIX_PATTERN, '').trim(), isKonsi: true }
 }
