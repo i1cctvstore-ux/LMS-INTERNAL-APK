@@ -248,6 +248,111 @@ async function createNewProductsAndRefreshCatalog(
   return toInsert.length
 }
 
+// Normalisasi nama produk buat pencocokan "apakah SKU baru ini
+// sebenarnya produk yang SAMA dengan yang udah ada, cuma beda kode
+// SKU" — pakai aturan PERSIS SAMA dengan yang dipakai di 3 migration
+// gabung-duplikat manual (2026-08-11/12): buang kata "CAMERA" di
+// depan, samain kapital & tanda baca (dash/spasi/koma dianggap setara).
+export function normalizeNameForMatch(s: string): string {
+  return (s || '')
+    .toUpperCase()
+    .trim()
+    .replace(/^CAMERA\s+/, '')
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim()
+}
+
+// Dipakai bareng oleh accurate-sync.ts & zoho-sync.ts SEBELUM manggil
+// createNewProductsAndRefreshCatalog — biar SKU yang "kelihatan baru"
+// (belum ada di katalog) TAPI sebenarnya cuma varian penulisan SKU
+// lain dari produk yang UDAH ADA (dikenali lewat nama yang cocok
+// setelah dinormalisasi, ATAU lewat alias yang udah pernah dicatat
+// sebelumnya) TIDAK bikin produk duplikat baru — disambungkan ke
+// produk yang sudah ada, dan alias-nya diingat permanen di
+// product_sku_aliases biar sync BERIKUTNYA lebih cepat (gak perlu
+// cocokin nama lagi, tinggal exact-match ke tabel alias).
+//
+// `candidates` = daftar {sku, name} yang SKU-nya BELUM ketemu exact
+// match di productIdBySku (pengecekan awal tetap tanggung jawab
+// caller, sama seperti sebelumnya).
+export async function resolveNewProductSkus(
+  supabase: ReturnType<typeof createAdminClient>,
+  productIdBySku: Map<string, string>,
+  candidates: { sku: string; name: string }[],
+): Promise<{ newProductsCreated: number; aliasesLinked: number }> {
+  if (candidates.length === 0) return { newProductsCreated: 0, aliasesLinked: 0 }
+
+  // 1) Alias yang udah pernah tercatat dari sync-sync sebelumnya.
+  const aliasBySkuKey = new Map<string, string>()
+  {
+    let from = 0
+    const PAGE_SIZE = 1000
+    while (true) {
+      const { data, error } = await supabase.from('product_sku_aliases').select('alias_sku_key, product_id').range(from, from + PAGE_SIZE - 1)
+      if (error) throw new Error(`Gagal ambil daftar alias SKU: ${error.message}`)
+      ;(data || []).forEach((r: any) => aliasBySkuKey.set(r.alias_sku_key, r.product_id))
+      if (!data || data.length < PAGE_SIZE) break
+      from += PAGE_SIZE
+    }
+  }
+
+  // 2) Nama produk yang udah ada di katalog, buat fallback pencocokan
+  // by-nama (kalau SKU-nya beda tapi namanya sama).
+  const productIdByNormName = new Map<string, string>()
+  {
+    let from = 0
+    const PAGE_SIZE = 1000
+    while (true) {
+      const { data, error } = await supabase.from('service_products').select('id, name').range(from, from + PAGE_SIZE - 1)
+      if (error) throw new Error(`Gagal ambil katalog produk (nama): ${error.message}`)
+      ;(data || []).forEach((p: any) => {
+        const key = normalizeNameForMatch(p.name)
+        if (key && !productIdByNormName.has(key)) productIdByNormName.set(key, p.id)
+      })
+      if (!data || data.length < PAGE_SIZE) break
+      from += PAGE_SIZE
+    }
+  }
+
+  const toInsert: { id: string; sku: string; name: string; source: string }[] = []
+  const newAliases: { product_id: string; alias_sku_key: string }[] = []
+  const seenKey = new Set<string>()
+
+  candidates.forEach((c) => {
+    const key = normalizeSku(c.sku)
+    if (!key || seenKey.has(key) || productIdBySku.has(key)) return
+    seenKey.add(key)
+
+    const aliasHit = aliasBySkuKey.get(key)
+    if (aliasHit) {
+      productIdBySku.set(key, aliasHit)
+      return
+    }
+
+    const nameHit = productIdByNormName.get(normalizeNameForMatch(c.name))
+    if (nameHit) {
+      productIdBySku.set(key, nameHit)
+      newAliases.push({ product_id: nameHit, alias_sku_key: key })
+      return
+    }
+
+    toInsert.push({ id: crypto.randomUUID(), sku: c.sku, name: c.name, source: 'cabang' })
+  })
+
+  const newProductsCreated = await createNewProductsAndRefreshCatalog(supabase, toInsert, productIdBySku)
+
+  if (newAliases.length) {
+    const CHUNK = 300
+    for (let i = 0; i < newAliases.length; i += CHUNK) {
+      const chunk = newAliases.slice(i, i + CHUNK)
+      const { error } = await supabase.from('product_sku_aliases').upsert(chunk, { onConflict: 'alias_sku_key', ignoreDuplicates: true })
+      if (error) throw new Error(`Gagal simpan alias SKU: ${error.message}`)
+    }
+  }
+
+  return { newProductsCreated, aliasesLinked: newAliases.length }
+}
+
 export type SyncResult = { branchName: string; itemsUpdated: number; itemsSkipped: number }
 
 export async function syncAccurateForBranch(
@@ -346,22 +451,18 @@ export async function syncAccurateForBranch(
       }
     })
 
-    // FASE 2: cari SKU DASAR yang belum ada di katalog produk kita,
-    // otomatis bikinin sebagai produk baru (pola sama kayak "Tambah
-    // semua sebagai produk baru & mapping" di Stok Supplier). Dedupe
-    // dulu berdasarkan SKU dasar yang sudah di-normalize — item normal
-    // & item (K) dengan SKU dasar sama CUMA bikin 1 produk.
-    const seenNewSku = new Set<string>()
-    const toInsert: { id: string; sku: string; name: string; source: string }[] = []
-    resolvedDetails.forEach((d) => {
-      const key = normalizeSku(d.matchSku)
-      if (!key || productIdBySku.has(key) || seenNewSku.has(key)) return
-      seenNewSku.add(key)
-      toInsert.push({ id: crypto.randomUUID(), sku: d.matchSku, name: d.matchName, source: 'cabang' })
-    })
-    if (toInsert.length) {
-      newProductsCreated = await createNewProductsAndRefreshCatalog(supabase, toInsert, productIdBySku)
-    }
+    // FASE 2: cari SKU DASAR yang belum ada di katalog produk kita.
+    // SEBELUM bikin produk baru, cek dulu apakah ini sebenarnya SKU
+    // lain dari produk yang UDAH ADA (lewat alias yang pernah tercatat,
+    // atau lewat kecocokan nama) — biar SKU yang dulu pernah digabung
+    // manual (migration 2026-08-11/12) TIDAK bikin duplikat baru lagi
+    // tiap kali sync ulang nemu SKU lama itu di Accurate.
+    const { newProductsCreated: created } = await resolveNewProductSkus(
+      supabase,
+      productIdBySku,
+      resolvedDetails.map((d) => ({ sku: d.matchSku, name: d.matchName })),
+    )
+    newProductsCreated = created
 
     // FASE 3: tulis stoknya — item normal ke product_stock (kolom
     // utama), item KONSI (K) ke product_stock_konsi (jadi angka "-K"
@@ -547,18 +648,11 @@ export async function syncAccurateSoloMultiGudang(
       }
     }
 
-    const seenNewSku = new Set<string>()
-    const toInsert: { id: string; sku: string; name: string; source: string }[] = []
-    allDetails.forEach((d) => {
-      const key = normalizeSku(d.no)
-      if (!key || productIdBySku.has(key) || seenNewSku.has(key)) return
-      seenNewSku.add(key)
-      toInsert.push({ id: crypto.randomUUID(), sku: d.no, name: d.name, source: 'cabang' })
-    })
-    let newProductsCreated = 0
-    if (toInsert.length) {
-      newProductsCreated = await createNewProductsAndRefreshCatalog(supabase, toInsert, productIdBySku)
-    }
+    const { newProductsCreated } = await resolveNewProductSkus(
+      supabase,
+      productIdBySku,
+      allDetails.map((d) => ({ sku: d.no, name: d.name })),
+    )
 
     // Rutekan tiap baris gudang ke cabang yang sesuai, tulis ke
     // product_stock_konsi (BUKAN product_stock).
