@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { resolveNewProductSkus } from './accurate-sync'
 
 // =====================================================
 // Sinkronisasi stok dari ZOHO BOOKS (bukan Zoho Inventory) ke tabel
@@ -188,46 +189,10 @@ function normalizeSku(s: string): string {
     .toLowerCase()
 }
 
-// Bikin produk baru — dulu pakai upsert(onConflict:'sku_key',
-// ignoreDuplicates:true), TAPI itu ternyata gak bisa jalan: unique
-// index `service_products_sku_key_uidx` adalah PARTIAL index (WHERE
-// sku_key IS NOT NULL AND sku_key <> ''), sementara Supabase-js/
-// PostgREST cuma bisa generate `ON CONFLICT (sku_key) DO NOTHING`
-// POLOS tanpa klausa WHERE — Postgres nolak itu ("there is no unique
-// or exclusion constraint matching the ON CONFLICT specification").
-// Bug ini baru kena begitu ada SKU baru yang perlu di-insert, jadi
-// sync sebelumnya bisa "Sukses" berkali-kali sebelum akhirnya gagal.
-// Sama persis dengan bug yang diperbaiki di lib/stok/accurate-sync.ts.
-//
-// Perbaikan: panggil RPC `insert_new_products_ignore_dup` (migration
-// 20260811010000_fix_sku_key_conflict.sql) yang jalanin INSERT ...
-// ON CONFLICT (sku_key) WHERE (...) DO NOTHING mentah lewat SQL,
-// match persis predicate index partial-nya. sku_key sendiri GENERATED
-// ALWAYS AS (lower(btrim(sku))) — otomatis, gak perlu dikirim di sini.
-async function createNewProductsAndRefreshCatalog(
-  supabase: ReturnType<typeof createAdminClient>,
-  toInsert: { id: string; sku: string; name: string; source: string }[],
-  productIdBySku: Map<string, string>,
-): Promise<number> {
-  if (toInsert.length === 0) return 0
-  const CHUNK = 300
-  for (let i = 0; i < toInsert.length; i += CHUNK) {
-    const chunk = toInsert.slice(i, i + CHUNK)
-    const { error } = await supabase.rpc('insert_new_products_ignore_dup', { new_products: chunk })
-    if (error) throw new Error(`Gagal bikin produk baru dari Zoho: ${error.message}`)
-  }
-  productIdBySku.clear()
-  let from = 0
-  const PAGE_SIZE = 1000
-  while (true) {
-    const { data, error } = await supabase.from('service_products').select('id, sku').range(from, from + PAGE_SIZE - 1)
-    if (error) throw new Error(error.message)
-    ;(data || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
-    if (!data || data.length < PAGE_SIZE) break
-    from += PAGE_SIZE
-  }
-  return toInsert.length
-}
+// createNewProductsAndRefreshCatalog & pencocokan alias/nama sekarang
+// dipakai bareng lewat resolveNewProductSkus() yang di-import dari
+// lib/stok/accurate-sync.ts (biar logic-nya cuma di 1 tempat, gak perlu
+// dobel maintenance kayak sebelumnya).
 
 export type SyncResult = {
   branchName: string
@@ -275,23 +240,18 @@ export async function syncZohoForBranch(
     }
 
     let itemsSkipped = 0
-    let newProductsCreated = 0
 
-    // Sebelum nyocokin stok, cari dulu SKU Zoho yang BELUM ada di
-    // katalog produk kita, otomatis bikinin sebagai produk baru (pola
-    // sama kayak yang udah jalan di sync Accurate) — SKU & nama dari
-    // Zoho langsung. Dedupe dulu biar SKU yang sama gak dobel-insert.
-    const seenNewSku = new Set<string>()
-    const toInsert: { id: string; sku: string; name: string; source: string }[] = []
-    zohoItems.forEach((item) => {
-      const key = normalizeSku(item.sku)
-      if (!key || productIdBySku.has(key) || seenNewSku.has(key)) return
-      seenNewSku.add(key)
-      toInsert.push({ id: crypto.randomUUID(), sku: item.sku, name: item.name, source: 'cabang' })
-    })
-    if (toInsert.length) {
-      newProductsCreated = await createNewProductsAndRefreshCatalog(supabase, toInsert, productIdBySku)
-    }
+    // Sebelum bikin produk baru buat SKU Zoho yang belum ketemu di
+    // katalog, cek dulu apakah ini sebenarnya SKU lain dari produk yang
+    // UDAH ADA (lewat alias yang pernah tercatat, atau lewat kecocokan
+    // nama, sama persis dengan pola di lib/stok/accurate-sync.ts) —
+    // biar SKU yang dulu pernah digabung manual gak bikin duplikat baru
+    // lagi tiap kali sync ulang.
+    const { newProductsCreated } = await resolveNewProductSkus(
+      supabase,
+      productIdBySku,
+      zohoItems.map((item) => ({ sku: item.sku, name: item.name })),
+    )
 
     // Kunci pakai product_id (bukan array biasa) supaya kalau ada 2+ item
     // Zoho dengan SKU berbeda tapi ke-normalisasi jadi sama & mengarah ke
