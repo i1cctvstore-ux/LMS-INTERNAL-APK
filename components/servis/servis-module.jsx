@@ -5810,7 +5810,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
                 <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{p.kategori}</span>
               )}
               <span className={`shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded ${p.sku ? "bg-slate-100 text-slate-500" : "bg-red-100 text-red-600"}`}>
-                {p.sku || "SKU KOSONG"}
+                SKU: {p.sku || "KOSONG"}
               </span>
               <span
                 className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${
