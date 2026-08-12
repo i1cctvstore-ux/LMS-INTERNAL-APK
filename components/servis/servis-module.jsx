@@ -6309,7 +6309,7 @@ function PrintModalShell({ onClose, children, onDownloadPdf, orientation, onChan
 function CompanyHeader({ branchInfo, skipName }) {
   if (!branchInfo || (!branchInfo.address && !branchInfo.phone)) return null;
   return (
-    <div className="mb-4 pb-4 border-b border-slate-200 text-center">
+    <div className={skipName ? "mb-4 text-center" : "mb-4 pb-4 border-b border-slate-200 text-center"}>
       {!skipName && <div className="font-bold text-slate-800">i1 CCTV</div>}
       {branchInfo.address && <div className="text-xs text-slate-500 mt-0.5">{branchInfo.address}</div>}
       {branchInfo.phone && <div className="text-xs text-slate-500">No. HP: {branchInfo.phone}</div>}
@@ -6385,9 +6385,9 @@ function PrintSuratJalanReceipt({ batch, items, branchInfo, onClose }) {
       onChangeOrientation={setOrientation}
       onDownloadPdf={() => generateSuratJalanPDF(batch, items, branchInfo, orientation)}
     >
-      <CompanyHeader branchInfo={branchInfo} skipName />
       <h2 className="text-lg font-bold text-center mb-1">I1 CCTV - SURAT JALAN KE SUPPLIER</h2>
-      <p className="text-center text-xs text-slate-500 mb-6">{batch.kodeBatch}</p>
+      <p className="text-center text-xs text-slate-500 mb-1">{batch.kodeBatch}</p>
+      <CompanyHeader branchInfo={branchInfo} skipName />
       <div className="text-sm mb-4">
         <div><strong>Supplier:</strong> {batch.supplier}</div>
         <div><strong>Tanggal Kirim:</strong> {fmtDate(batch.tanggalKirim)}</div>
@@ -6814,9 +6814,9 @@ function InvoiceReceipt({ data, claims, branchInfo, onClose }) {
       onChangeOrientation={setOrientation}
       onDownloadPdf={() => generateInvoicePDF(data, branchInfo, orientation)}
     >
-      <CompanyHeader branchInfo={branchInfo} skipName />
       <h2 className="text-lg font-bold text-center mb-1">I1 CCTV - INVOICE</h2>
-      <p className="text-center text-xs text-slate-500 mb-6">{data.invoiceNo} · {fmtDate(data.date)}</p>
+      <p className="text-center text-xs text-slate-500 mb-1">{data.invoiceNo} · {fmtDate(data.date)}</p>
+      <CompanyHeader branchInfo={branchInfo} skipName />
       <div className="text-sm mb-4">
         <div><strong>Nama:</strong> {data.customerName}</div>
         <div><strong>No HP:</strong> {data.customerPhone}</div>
