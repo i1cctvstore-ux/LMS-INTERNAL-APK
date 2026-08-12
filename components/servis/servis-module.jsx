@@ -6385,8 +6385,8 @@ function PrintSuratJalanReceipt({ batch, items, branchInfo, onClose }) {
       onChangeOrientation={setOrientation}
       onDownloadPdf={() => generateSuratJalanPDF(batch, items, branchInfo, orientation)}
     >
-      <CompanyHeader branchInfo={branchInfo} />
-      <h2 className="text-lg font-bold text-center mb-1">SURAT JALAN KE SUPPLIER</h2>
+      <CompanyHeader branchInfo={branchInfo} skipName />
+      <h2 className="text-lg font-bold text-center mb-1">I1 CCTV - SURAT JALAN KE SUPPLIER</h2>
       <p className="text-center text-xs text-slate-500 mb-6">{batch.kodeBatch}</p>
       <div className="text-sm mb-4">
         <div><strong>Supplier:</strong> {batch.supplier}</div>
