@@ -6310,7 +6310,7 @@ function CompanyHeader({ branchInfo }) {
   if (!branchInfo || (!branchInfo.address && !branchInfo.phone)) return null;
   return (
     <div className="mb-4 pb-4 border-b border-slate-200 text-center">
-      <div className="font-bold text-slate-800">{branchInfo.name}</div>
+      <div className="font-bold text-slate-800">i1 CCTV</div>
       {branchInfo.address && <div className="text-xs text-slate-500 mt-0.5">{branchInfo.address}</div>}
       {branchInfo.phone && <div className="text-xs text-slate-500">No. HP: {branchInfo.phone}</div>}
     </div>
