@@ -6,7 +6,7 @@ import {
   PackageCheck, PackagePlus, ChevronDown, ChevronRight, ChevronLeft, Lock, Sparkles, Layers,
   ArrowRight, ReceiptText, Menu, PackageMinus, Camera, ClipboardList, MoreVertical,
   ChevronUp, ChevronsUpDown, Smartphone, Monitor, Clock, FileText, Wallet, BadgeCheck,
-  Users, MapPin,
+  Users, MapPin, RefreshCw,
 } from "lucide-react";
 import { loadServiceData, persistServiceData, uploadServiceFile, loadBranchTrackedProductIds } from "@/lib/service/api";
 import { generateTandaTerimaPDF, generateSuratJalanPDF, generatePickupPDF, generateInvoicePDF } from "@/lib/service/receipt-pdf";
@@ -5722,12 +5722,108 @@ function SupplierFormModal({ title, initial, onClose, onSave }) {
   );
 }
 
+// Modal buat nampilin hasil "Cek SKU vs Accurate" — narik data LANGSUNG
+// dari Accurate (read-only, gak nulis apa-apa) terus dibandingin ke
+// katalog produk kita. 3 kategori: cocok SKU (aman), cocok nama tapi
+// SKU beda (kandidat perlu dikoreksi manual), sama sekali gak ketemu
+// (harusnya kosong kalau sync udah pernah jalan sukses).
+function CekSkuAccurateModal({ onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [results, setResults] = useState([]);
+  const [activeBranch, setActiveBranch] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/servis/check-sku-accurate")
+      .then((res) => res.json())
+      .then((body) => {
+        if (body.error) { setError(body.error); return; }
+        setResults(body.results || []);
+      })
+      .catch((e) => setError(String(e?.message || e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const branch = results[activeBranch];
+
+  return (
+    <Modal title="Cek SKU vs Accurate" onClose={onClose} wide>
+      {loading && (
+        <div className="py-10 text-center text-sm text-slate-400 flex items-center justify-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Menarik data langsung dari Accurate, mohon tunggu...
+        </div>
+      )}
+      {error && (
+        <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700">{error}</div>
+      )}
+      {!loading && !error && results.length > 0 && (
+        <>
+          <div className="flex gap-1.5 mb-3 flex-wrap">
+            {results.map((r, i) => (
+              <button
+                key={r.branchId}
+                onClick={() => setActiveBranch(i)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium ${activeBranch === i ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}
+              >
+                {r.branchName} ({r.totalItemAccurate})
+              </button>
+            ))}
+          </div>
+          {branch && (
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-100 text-sm text-emerald-800">
+                <strong>{branch.cocokSkuCount}</strong> item SKU-nya cocok persis dengan katalog kita. Aman.
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-amber-700 mb-1.5">
+                  Nama cocok, tapi SKU beda ({branch.cocokNamaBedaSku.length}) — kandidat perlu dikoreksi manual
+                </div>
+                <div className="border border-amber-200 rounded-xl divide-y divide-amber-50 max-h-52 overflow-y-auto">
+                  {branch.cocokNamaBedaSku.map((it, i) => (
+                    <div key={i} className="px-3 py-2 text-xs">
+                      <div className="font-medium text-slate-700">{it.nama}</div>
+                      <div className="text-slate-400 mt-0.5">
+                        Accurate: <span className="font-mono">{it.accurateSku}</span> · Katalog kita: <span className="font-mono">{it.katalogSku}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {branch.cocokNamaBedaSku.length === 0 && <div className="px-3 py-4 text-center text-xs text-slate-400">Tidak ada.</div>}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-red-700 mb-1.5">
+                  Sama sekali gak ketemu di katalog kita ({branch.gakKetemuSamaSekali.length}) — harusnya kosong kalau sync udah pernah sukses
+                </div>
+                <div className="border border-red-200 rounded-xl divide-y divide-red-50 max-h-52 overflow-y-auto">
+                  {branch.gakKetemuSamaSekali.map((it, i) => (
+                    <div key={i} className="px-3 py-2 text-xs">
+                      <span className="font-medium text-slate-700">{it.nama}</span>{" "}
+                      <span className="text-slate-400 font-mono">({it.sku})</span>
+                    </div>
+                  ))}
+                  {branch.gakKetemuSamaSekali.length === 0 && <div className="px-3 py-4 text-center text-xs text-slate-400">Tidak ada — semua item Accurate udah ada di katalog.</div>}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      {!loading && !error && results.length === 0 && (
+        <div className="py-10 text-center text-sm text-slate-400">Tidak ada cabang Accurate yang siap dicek.</div>
+      )}
+    </Modal>
+  );
+}
+
 function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdateProduct, onRemoveProduct, onImportProducts }) {
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [showSkuCheck, setShowSkuCheck] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("semua"); // 'semua' | 'cabang' | 'supplier' | 'manual'
   const canManage = role === "pusat";
   const allList = settings.products || [];
@@ -5769,6 +5865,11 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
           <button onClick={() => setShowImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50">
             <Upload size={13} /> Import
           </button>
+          {canManage && (
+            <button onClick={() => setShowSkuCheck(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-indigo-200 text-indigo-600 hover:bg-indigo-50">
+              <RefreshCw size={13} /> Cek SKU vs Accurate
+            </button>
+          )}
           <button onClick={() => setAddOpen(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${btnPrimaryCls}`}>
             <Plus size={13} /> Tambah Produk
           </button>
@@ -5883,6 +5984,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
           onImport={onImportProducts}
         />
       )}
+      {showSkuCheck && <CekSkuAccurateModal onClose={() => setShowSkuCheck(false)} />}
     </div>
   );
 }
