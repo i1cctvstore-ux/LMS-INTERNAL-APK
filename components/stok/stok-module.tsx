@@ -47,7 +47,6 @@ import {
   type ParsedSupplierRow,
   type GudangColumnChoice,
 } from '@/lib/stok/parse-supplier-file'
-import { TransferStokButton } from './transfer-stok-modal'
 import { loadTransferBalanceMatrix } from '@/lib/stok/transfer-api'
 import * as XLSX from 'xlsx'
 
@@ -1207,7 +1206,6 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
             <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
           )}
         </button>
-        <TransferStokButton onSaved={loadAll} />
         <button
           onClick={exportToExcel}
           disabled={filtered.length === 0}
@@ -1256,10 +1254,10 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
             <table className="w-full text-sm">
               {modeDetail ? (
                 <>
-                  <thead>
-                    <tr className="border-b border-slate-100 text-left text-[10px] text-slate-400 uppercase tracking-wide">
-                      <th className="p-3" rowSpan={2}><SortHeader label="Kategori" sortKeyName="kategori" /></th>
-                      <th className="p-3" rowSpan={2}><SortHeader label="Nama Produk" sortKeyName="name" /></th>
+                  <thead className="sticky top-0 z-20 bg-white">
+                    <tr className="border-b border-slate-100 text-left text-[10px] text-slate-400 uppercase tracking-wide bg-white">
+                      <th className="p-3 bg-white" rowSpan={2}><SortHeader label="Kategori" sortKeyName="kategori" /></th>
+                      <th className="p-3 bg-white" rowSpan={2}><SortHeader label="Nama Produk" sortKeyName="name" /></th>
                       {CITY_GROUPS.map((g) => {
                         const count = visibleSources.filter((s) => s.group === g).length
                         if (count === 0) return null
@@ -1269,11 +1267,11 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                           </th>
                         )
                       })}
-                      <th className="p-3" rowSpan={2}><SortHeader label="Total" sortKeyName="total" /></th>
+                      <th className="p-3 bg-white" rowSpan={2}><SortHeader label="Total" sortKeyName="total" /></th>
                     </tr>
                     <tr className="border-b border-slate-100 text-center text-[10px] text-slate-400 uppercase tracking-wide">
                       {visibleSources.map((s) => (
-                        <th key={s.code} className={`p-2 ${s.excludeTotal ? 'bg-slate-50' : ''}`}>
+                        <th key={s.code} className={`p-2 ${s.excludeTotal ? 'bg-slate-50' : 'bg-white'}`}>
                           <SortHeader label={s.label} sortKeyName={s.code} />
                         </th>
                       ))}
@@ -1306,14 +1304,14 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                 </>
               ) : (
                 <>
-                  <thead>
-                    <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide">
-                      <th className="p-3"><SortHeader label="Kategori" sortKeyName="kategori" /></th>
-                      <th className="p-3"><SortHeader label="Nama Produk" sortKeyName="name" /></th>
+                  <thead className="sticky top-0 z-20 bg-white">
+                    <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide bg-white">
+                      <th className="p-3 bg-white"><SortHeader label="Kategori" sortKeyName="kategori" /></th>
+                      <th className="p-3 bg-white"><SortHeader label="Nama Produk" sortKeyName="name" /></th>
                       {CITY_GROUPS.map((g) => (
-                        <th key={g} className="p-3 text-center"><SortHeader label={CITY_SHORT[g]} sortKeyName={g} /></th>
+                        <th key={g} className="p-3 text-center bg-white"><SortHeader label={CITY_SHORT[g]} sortKeyName={g} /></th>
                       ))}
-                      <th className="p-3"><SortHeader label="Total" sortKeyName="total" /></th>
+                      <th className="p-3 bg-white"><SortHeader label="Total" sortKeyName="total" /></th>
                     </tr>
                   </thead>
                   <tbody>
