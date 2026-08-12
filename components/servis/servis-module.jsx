@@ -2252,6 +2252,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
         <InvoiceReceipt
           data={invoiceData}
           claims={claims}
+          branchInfo={branchInfo}
           onClose={() => {
             const backToClaimId = (invoiceData.claimIds || [])[0];
             setInvoiceData(null);
@@ -6784,15 +6785,16 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
   );
 }
 
-function InvoiceReceipt({ data, claims, onClose }) {
+function InvoiceReceipt({ data, claims, branchInfo, onClose }) {
   const [orientation, setOrientation] = useState("landscape");
   return (
     <PrintModalShell
       onClose={onClose}
       orientation={orientation}
       onChangeOrientation={setOrientation}
-      onDownloadPdf={() => generateInvoicePDF(data, orientation)}
+      onDownloadPdf={() => generateInvoicePDF(data, branchInfo, orientation)}
     >
+      <CompanyHeader branchInfo={branchInfo} />
       <h2 className="text-lg font-bold text-center mb-1">INVOICE</h2>
       <p className="text-center text-xs text-slate-500 mb-6">{data.invoiceNo} · {fmtDate(data.date)}</p>
       <div className="text-sm mb-4">
