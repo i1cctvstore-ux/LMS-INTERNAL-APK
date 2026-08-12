@@ -4561,31 +4561,51 @@ function heldStockRows(claims) {
 }
 
 function HeldStockDesktopTable({ rows }) {
+  // Kelompokin per Kategori (kondisi: di toko / nunggu dari supplier /
+  // di supplier buat servis) DULU, baru di dalam tiap kategori
+  // kelompokin lagi per Brand+Produk (pakai groupByProduct yang sama
+  // dengan versi Mobile) -- biar unit yang tipe & kondisinya sama
+  // kelihatan sebagai 1 kelompok, bukan baris satu-satu per customer.
+  const byKategori = ["Ganti Baru — Stok Kita", "Menunggu Barang Pengganti", "Servis — Barang Customer"]
+    .map((kat) => ({ kat, groups: groupByProduct(rows.filter((r) => r.kategori === kat)) }))
+    .filter((k) => k.groups.length > 0);
+  const kategoriBadgeCls = (kat) =>
+    kat === "Ganti Baru — Stok Kita" ? "bg-indigo-100 text-indigo-700" : kat === "Menunggu Barang Pengganti" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700";
+
   return (
     <div className="bg-white rounded-3xl border border-slate-200 overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide">
-            <th className="p-3">Kategori</th>
             <th className="p-3">Customer</th>
-            <th className="p-3">Brand / Produk</th>
             <th className="p-3">SN</th>
             <th className="p-3">Keterangan</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((c) => (
-            <tr key={c.id} className="border-b border-slate-50">
-              <td className="p-3 whitespace-nowrap">
-                <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${c.kategori === "Ganti Baru — Stok Kita" ? "bg-indigo-100 text-indigo-700" : c.kategori === "Menunggu Barang Pengganti" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"}`}>{c.kategori}</span>
-              </td>
-              <td className="p-3 whitespace-nowrap">{c.customerName}</td>
-              <td className="p-3 whitespace-nowrap">{c.brand} {c.produk}</td>
-              <td className="p-3 font-mono text-xs whitespace-nowrap">{c.snDiterima}</td>
-              <td className="p-3 text-slate-500">{c.ket}</td>
-            </tr>
+          {byKategori.map(({ kat, groups }) => (
+            <React.Fragment key={kat}>
+              {groups.map((g) => (
+                <React.Fragment key={`${kat}||${g.brand}||${g.produk}`}>
+                  <tr className="border-b border-slate-100 bg-slate-50">
+                    <td colSpan={3} className="p-2.5">
+                      <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium mr-2 ${kategoriBadgeCls(kat)}`}>{kat}</span>
+                      <span className="font-medium text-slate-700">{g.brand} {g.produk}</span>
+                      <span className="text-xs text-slate-400 ml-1.5">({g.items.length} unit)</span>
+                    </td>
+                  </tr>
+                  {g.items.map((c) => (
+                    <tr key={c.id} className="border-b border-slate-50">
+                      <td className="p-3 pl-6 whitespace-nowrap">{c.customerName}</td>
+                      <td className="p-3 font-mono text-xs whitespace-nowrap">{c.snDiterima}</td>
+                      <td className="p-3 text-slate-500">{c.ket}</td>
+                    </tr>
+                  ))}
+                </React.Fragment>
+              ))}
+            </React.Fragment>
           ))}
-          {rows.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">Tidak ada barang tertahan.</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-slate-400">Tidak ada barang tertahan.</td></tr>}
         </tbody>
       </table>
     </div>
