@@ -535,7 +535,7 @@ export async function bulkCreateProductsAndMap(
     }
 
     const id = crypto.randomUUID()
-    toInsert.push({ id, sku: r.sku.trim(), name: (r.namaBarang || r.sku).trim(), source: 'supplier' })
+    toInsert.push({ id, sku: r.sku.trim(), name: (r.namaBarang || r.sku).trim().toUpperCase(), source: 'supplier' })
     skuToNewId.set(r.sku, id)
   })
 
