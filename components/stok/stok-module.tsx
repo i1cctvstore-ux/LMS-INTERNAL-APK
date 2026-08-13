@@ -1644,7 +1644,7 @@ function SupplierProductCard({ result }: { result: SupplierStockProductResult })
           ) : null}
         </div>
         <span className={`shrink-0 font-semibold ${result.totalQty <= 0 ? 'text-red-600' : 'text-slate-800'}`}>
-          {result.totalQty <= LOW_STOCK_THRESHOLD ? '~' : ''}{result.totalQty}
+          {result.totalQty}
         </span>
       </div>
       <div className="mt-2 space-y-2">
