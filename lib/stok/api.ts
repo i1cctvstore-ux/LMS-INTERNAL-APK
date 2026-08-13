@@ -431,32 +431,109 @@ export async function bulkCreateProductsAndMap(
 
   // Cek dulu SKU mana yang udah ada di katalog (biar gak duplikat/kena
   // unique constraint) — pola yang sama kayak pengecekan import produk
-  // massal di lib/service/api.ts.
+  // massal di lib/service/api.ts. Sekalian ambil NAMA-nya juga (bukan
+  // cuma SKU) buat pencocokan by-nama di bawah.
   const existingSkuSet = new Set<string>()
+  const catalogForNameMatch: { id: string; name: string }[] = []
   {
     const PAGE = 1000
     let from = 0
     while (true) {
-      const { data, error } = await supabase.from('service_products').select('sku').range(from, from + PAGE - 1)
+      const { data, error } = await supabase.from('service_products').select('id, sku, name').range(from, from + PAGE - 1)
       if (error) throw new Error(error.message)
-      ;(data || []).forEach((p: any) => existingSkuSet.add(normalizeSku(p.sku)))
+      ;(data || []).forEach((p: any) => {
+        existingSkuSet.add(normalizeSku(p.sku))
+        catalogForNameMatch.push({ id: p.id, name: p.name })
+      })
       if (!data || data.length < PAGE) break
       from += PAGE
     }
   }
 
+  // Alias yang udah pernah tercatat dari sync Accurate/Zoho ATAU dari
+  // upload Stok Supplier sebelumnya (tabel yang sama dipakai bareng —
+  // lihat lib/stok/accurate-sync.ts::resolveNewProductSkus).
+  const aliasBySkuKey = new Map<string, string>()
+  {
+    const PAGE = 1000
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase.from('product_sku_aliases').select('alias_sku_key, product_id').range(from, from + PAGE - 1)
+      if (error) throw new Error(error.message)
+      ;(data || []).forEach((r: any) => aliasBySkuKey.set(r.alias_sku_key, r.product_id))
+      if (!data || data.length < PAGE) break
+      from += PAGE
+    }
+  }
+
+  // Pencocokan by-nama — normalisasi PERSIS SAMA dengan yang dipakai di
+  // migration gabung-duplikat (buang "CAMERA"/"DVR"/"NVR" di depan,
+  // buang SEMUA tanda baca/spasi). PENGAMAN: "DVR ..." dan "NVR ..."
+  // dengan kode model yang sama TETAP dianggap produk BEDA (DVR buat
+  // kamera analog, NVR buat kamera IP — dua alat yang beda biar kode
+  // modelnya kebetulan sama), jadi TIDAK dicocokkan silang.
+  function deviceType(nameUpper: string): 'DVR' | 'NVR' | null {
+    if (nameUpper.startsWith('DVR ')) return 'DVR'
+    if (nameUpper.startsWith('NVR ')) return 'NVR'
+    return null
+  }
+  function normalizeNameForMatch(s: string): string {
+    return (s || '')
+      .toUpperCase()
+      .trim()
+      .replace(/^(CAMERA|DVR|NVR)\s+/, '')
+      .replace(/[^A-Z0-9]+/g, '')
+  }
+  const productIdByNormName = new Map<string, { id: string; type: 'DVR' | 'NVR' | null }[]>()
+  catalogForNameMatch.forEach((p) => {
+    const key = normalizeNameForMatch(p.name)
+    if (!key) return
+    const list = productIdByNormName.get(key) || []
+    list.push({ id: p.id, type: deviceType((p.name || '').toUpperCase().trim()) })
+    productIdByNormName.set(key, list)
+  })
+  function findNameMatch(name: string): string | null {
+    const key = normalizeNameForMatch(name)
+    const candidates = productIdByNormName.get(key)
+    if (!candidates || candidates.length === 0) return null
+    const wantType = deviceType((name || '').toUpperCase().trim())
+    // Kalau ada campuran DVR/NVR di antara kandidat & yang dicari juga
+    // punya tipe, cuma terima yang tipenya SAMA (atau yang gak
+    // bertipe). Kalau nggak ada yang cocok tipenya, dianggap gak ketemu
+    // — lebih aman bikin produk baru daripada salah gabung DVR<->NVR.
+    const match = candidates.find((c) => !wantType || !c.type || c.type === wantType)
+    return match ? match.id : null
+  }
+
   const seenInBatch = new Set<string>()
-  const toInsert: { id: string; sku: string; name: string }[] = []
+  const toInsert: { id: string; sku: string; name: string; source: string }[] = []
+  const newAliases: { product_id: string; alias_sku_key: string }[] = []
   const skuToNewId = new Map<string, string>()
   let skipped = 0
 
   rows.forEach((r) => {
     const key = normalizeSku(r.sku)
-    if (!r.sku.trim() || !key || existingSkuSet.has(key) || seenInBatch.has(key)) {
+    if (!r.sku.trim() || !key || seenInBatch.has(key)) {
       skipped += 1
       return
     }
     seenInBatch.add(key)
+
+    if (existingSkuSet.has(key)) return // udah ada persis, biarin jalur mapping normal yang urus
+
+    const aliasHit = aliasBySkuKey.get(key)
+    if (aliasHit) {
+      skuToNewId.set(r.sku, aliasHit)
+      return
+    }
+
+    const nameHit = findNameMatch(r.namaBarang || r.sku)
+    if (nameHit) {
+      skuToNewId.set(r.sku, nameHit)
+      newAliases.push({ product_id: nameHit, alias_sku_key: key })
+      return
+    }
+
     const id = crypto.randomUUID()
     toInsert.push({ id, sku: r.sku.trim(), name: (r.namaBarang || r.sku).trim(), source: 'supplier' })
     skuToNewId.set(r.sku, id)
@@ -468,6 +545,15 @@ export async function bulkCreateProductsAndMap(
       const chunk = toInsert.slice(i, i + CHUNK)
       const { error } = await supabase.from('service_products').insert(chunk)
       if (error) throw new Error(error.message)
+    }
+  }
+
+  if (newAliases.length) {
+    const CHUNK = 300
+    for (let i = 0; i < newAliases.length; i += CHUNK) {
+      const chunk = newAliases.slice(i, i + CHUNK)
+      const { error } = await supabase.from('product_sku_aliases').upsert(chunk, { onConflict: 'alias_sku_key', ignoreDuplicates: true })
+      if (error) throw new Error(`Gagal simpan alias SKU: ${error.message}`)
     }
   }
 
