@@ -27,6 +27,8 @@ import {
   saveSupplierSkuMapping,
   bulkCreateProductsAndMap,
   normalizeSku,
+  loadDestyListedSkus,
+  replaceDestyListedSkus,
   type BranchOption,
   type StockMatrixData,
   type SyncLogRow,
@@ -107,6 +109,17 @@ const CABANG_SOURCES: CabangSource[] = [
 
 const CITY_GROUPS = ['Jakarta', 'Solo', 'Bali', 'Purwokerto'] as const
 const CITY_SHORT: Record<string, string> = { Jakarta: 'JKT', Solo: 'SOLO', Bali: 'BALI', Purwokerto: 'PWT' }
+
+// ID Gudang di Desty per kota — dari sheet "Warehouse_List" template
+// resmi Desty (Bulk_Update_OnHandStock_Template.xlsx). "Solo" di sini
+// = gudang "Solo Sukoharjo" (ada 1 lagi "Solo Kota (Fiktif)" di Desty
+// yang sengaja diabaikan, kemungkinan gudang dummy yang gak dipakai).
+const DESTY_GUDANG_ID: Record<string, string> = {
+  Jakarta: '2037758943426125440',
+  Solo: '2037758620070665856',
+  Bali: '2037757213368213120',
+  Purwokerto: '2037758773581979264',
+}
 
 function sourcesInGroup(group: string): CabangSource[] {
   return CABANG_SOURCES.filter((s) => s.group === group)
@@ -981,6 +994,110 @@ function FilterStokCabangModal({
   )
 }
 
+// Modal upload daftar SKU Desty — parse file Excel apa aja yang punya
+// kolom mengandung kata "SKU" (fleksibel, gak harus persis "SKU Master"
+// kayak nama kolom di template Desty), ambil semua nilai di bawah
+// header itu. Upload ini MENGGANTI TOTAL daftar lama (lihat komentar
+// di replaceDestyListedSkus).
+function DestyUploadModal({
+  onClose,
+  onUploaded,
+}: {
+  onClose: () => void
+  onUploaded: (count: number) => void
+}) {
+  const [skus, setSkus] = useState<string[] | null>(null)
+  const [fileName, setFileName] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function handleFile(f: File) {
+    setFileName(f.name)
+    setSkus(null)
+    setError(null)
+    try {
+      const buf = await f.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array' })
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+      let headerRowIdx = -1
+      let colIdx = -1
+      for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const idx = (rows[i] || []).findIndex((c: any) => typeof c === 'string' && /sku/i.test(c))
+        if (idx >= 0) { headerRowIdx = i; colIdx = idx; break }
+      }
+      if (colIdx === -1) {
+        setError('Nggak ketemu kolom yang namanya mengandung "SKU" di file ini.')
+        return
+      }
+      const found: string[] = []
+      for (let i = headerRowIdx + 1; i < rows.length; i++) {
+        const v = String((rows[i] || [])[colIdx] ?? '').trim()
+        // Baris kayak "(Wajib)"/"(Opsional)" (metadata template Desty)
+        // sengaja dilewatin, bukan SKU beneran.
+        if (!v || v.startsWith('(')) continue
+        found.push(v)
+      }
+      setSkus(Array.from(new Set(found)))
+    } catch (e: any) {
+      setError(`Gagal baca file: ${e?.message || e}`)
+    }
+  }
+
+  async function handleSubmit() {
+    if (!skus) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const { count } = await replaceDestyListedSkus(skus)
+      onUploaded(count)
+      onClose()
+    } catch (e: any) {
+      setError(String(e?.message || e))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={submitting ? undefined : onClose}>
+      <div className="bg-white rounded-3xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <p className="font-semibold text-slate-800">Upload List SKU Desty</p>
+          <button onClick={onClose} disabled={submitting} className="text-slate-400 hover:text-slate-700 disabled:opacity-30">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="p-3 rounded-2xl bg-amber-50 border border-amber-100 text-xs text-amber-800">
+            File ini akan <strong>MENGGANTI TOTAL</strong> daftar SKU Desty yang lama. SKU yang gak ada lagi di file ini otomatis dianggap sudah tidak terdaftar/delisting.
+          </div>
+          <label className="flex flex-col items-center justify-center gap-1.5 border-2 border-dashed border-slate-200 rounded-2xl py-8 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30">
+            <Upload size={22} className="text-slate-300" />
+            <span className="text-sm text-slate-500">Tap untuk pilih file dari Desty</span>
+            <span className="text-[11px] text-slate-400">Excel (.xlsx, .xls) — cari kolom yang ada kata "SKU"</span>
+            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
+          </label>
+          {fileName && <p className="text-xs text-slate-400">{fileName}</p>}
+          {skus && <p className="text-sm text-emerald-700 font-medium">{skus.length} SKU ketemu, siap disimpan.</p>}
+          {error && <p className="text-xs text-rose-600 font-medium">{error}</p>}
+        </div>
+        <div className="px-5 py-4 border-t border-slate-100 flex gap-2">
+          <button onClick={onClose} disabled={submitting} className={`flex-1 px-4 py-2.5 text-sm ${btnSecondaryCls}`}>Batal</button>
+          <button
+            disabled={!skus || skus.length === 0 || submitting}
+            onClick={handleSubmit}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm ${btnPrimaryCls}`}
+          >
+            {submitting && <Loader2 size={14} className="animate-spin" />}
+            {submitting ? 'Menyimpan...' : `Simpan (${skus?.length ?? 0} SKU)`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: boolean; myBranchId: string | null }) {
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [matrix, setMatrix] = useState<StockMatrixData>({ products: [], physical: {}, held: {} })
@@ -1009,6 +1126,11 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set())
   // Sheet Rincian, dibuka dari tap angka kota di Mode Simpel.
   const [rincian, setRincian] = useState<{ row: MatrixRow; group: string } | null>(null)
+  // Daftar SKU yang lagi terdaftar di Desty (buat filter tombol Ekspor
+  // Desty) — di-normalize jadi Set biar gampang dicocokin ke r.sku.
+  const [destySkuSet, setDestySkuSet] = useState<Set<string>>(new Set())
+  const [destyCount, setDestyCount] = useState(0)
+  const [showDestyUpload, setShowDestyUpload] = useState(false)
 
   async function loadAll() {
     setLoading(true)
@@ -1034,8 +1156,22 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     }
   }
 
+  // Terpisah dari loadAll — kalau migration tabel Desty belum sempat
+  // dijalanin, ini gak boleh sampai numbangin seluruh halaman Cek Stok.
+  async function loadDestyList() {
+    try {
+      const skus = await loadDestyListedSkus()
+      setDestySkuSet(new Set(skus.map((s) => normalizeSku(s))))
+      setDestyCount(skus.length)
+    } catch {
+      setDestySkuSet(new Set())
+      setDestyCount(0)
+    }
+  }
+
   useEffect(() => {
     loadAll()
+    loadDestyList()
   }, [])
 
   // Bangun 9 sumber (jkt/jkt_k/jkt_k_solo/solo_z/solo_cv/bali_z/bali_k/
@@ -1131,6 +1267,61 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     XLSX.writeFile(wb, `cek-stok-cabang-${dateStr}.xlsx`)
   }
 
+  // Ekspor format "Bulk Update On-Hand Stock" Desty — cuma produk yang
+  // SKU-nya ada di daftar destySkuSet (hasil upload "List SKU Desty"),
+  // TERMASUK yang stoknya 0 (biar Desty tau itemnya emang habis, bukan
+  // gak ke-export). Dikelompokkan per kota (blok Jakarta dulu, baru
+  // Solo, Bali, Purwokerto — BUKAN diselang-seling), semua di 1 sheet,
+  // header & merge cell dibikin match persis template resmi Desty biar
+  // bisa langsung diimport balik.
+  function exportToDesty() {
+    const listedRows = rows.filter((r) => r.sku && destySkuSet.has(normalizeSku(r.sku)))
+    if (listedRows.length === 0) {
+      setMessage('Belum ada produk yang cocok dengan daftar SKU Desty — upload daftarnya dulu lewat tombol "Upload List SKU Desty".')
+      return
+    }
+    const header1 = ['Nama Produk', 'SKU Master', 'ID Gudang', 'Nama Gudang', 'ID Slot', 'Nama Slot', 'Stok Fisik', '']
+    const header2 = ['', '', '', '', '', '', 'Ubah Stok Final', 'Tambah atau Kurangi Stok']
+    const header3 = ['(Opsional)', '(Wajib)', '(Wajib)', '(Opsional)', '(Opsional)', '(Opsional)', '(Wajib)', '']
+    const header4 = [
+      '(Hanya untuk referensi, tidak wajib karena tidak digunakan untuk identifikasi produk)',
+      '(Kode SKU Produk Master, diperlukan untuk mengidentifikasi perubahan stok setiap produk)',
+      '(ID Gudang, diperlukan untuk mengidentifikasi gudang produk; data dapat diperoleh di file unduh Pengaturan Inventori Dengan Format)',
+      '(Hanya untuk referensi, tidak wajib karena tidak digunakan untuk identifikasi gudang produk)',
+      '(Masukkan ID Slot apabila produk sudah dialokasikan di Manajemen Rak; Jika dikosongkan, stok akan dialokasikan ke Slot Default)',
+      '(Hanya untuk referensi, tidak wajib karena tidak digunakan untuk identifikasi slot gudang)',
+      '(Masukkan stok final baru untuk SKU pada gudang atau slot terkait; kolom ini akan memiliki prioritas lebih tinggi dibanding kolom "Tambah atau Kurangi Stok" jika keduanya diisi',
+      '(Masukkan stok perubahan berupa penambahan atau pengurangan SKU pada gudang atau slot terkait; Jika ada simbol positif maka stok akan bertambah; Jika ada simbol negatif maka stok akan dikurangi)',
+    ]
+
+    const dataRows: (string | number)[][] = []
+    CITY_GROUPS.forEach((group) => {
+      listedRows.forEach((r) => {
+        dataRows.push([r.name, r.sku, DESTY_GUDANG_ID[group], group, '', '', r.cityTotal[group] ?? 0, ''])
+      })
+    })
+
+    const aoa = [header1, header2, header3, header4, ...dataRows]
+    const ws = XLSX.utils.aoa_to_sheet(aoa)
+    // Merge cell persis kayak template asli Desty (A1:A2, B1:B2, ...,
+    // G1:H1 "Stok Fisik", G3:H3 "(Wajib)").
+    ws['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },
+      { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } },
+      { s: { r: 0, c: 2 }, e: { r: 1, c: 2 } },
+      { s: { r: 0, c: 3 }, e: { r: 1, c: 3 } },
+      { s: { r: 0, c: 4 }, e: { r: 1, c: 4 } },
+      { s: { r: 0, c: 5 }, e: { r: 1, c: 5 } },
+      { s: { r: 0, c: 6 }, e: { r: 0, c: 7 } },
+      { s: { r: 2, c: 6 }, e: { r: 2, c: 7 } },
+    ]
+    ws['!cols'] = [{ wch: 28 }, { wch: 20 }, { wch: 22 }, { wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 18 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'IND_Update_OnHandStock')
+    const dateStr = new Date().toISOString().slice(0, 10)
+    XLSX.writeFile(wb, `desty-update-stok-${dateStr}.xlsx`)
+  }
+
   async function handleSyncBranch(branchId: string) {
     setSyncingBranch(branchId)
     setMessage(null)
@@ -1212,6 +1403,21 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls} disabled:opacity-40`}
         >
           <Download size={14} /> Ekspor Excel
+        </button>
+        <button
+          onClick={() => setShowDestyUpload(true)}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}
+          title="Upload daftar SKU yang terdaftar di Desty"
+        >
+          <Upload size={14} /> List SKU Desty{destyCount > 0 ? ` (${destyCount})` : ''}
+        </button>
+        <button
+          onClick={exportToDesty}
+          disabled={destyCount === 0}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls} disabled:opacity-40`}
+          title="Ekspor format Bulk Update On-Hand Stock Desty"
+        >
+          <Download size={14} /> Ekspor Desty
         </button>
         <button
           onClick={handleSyncAll}
@@ -1412,6 +1618,12 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
       )}
 
       {rincian && <RincianSheet row={rincian.row} group={rincian.group} onClose={() => setRincian(null)} />}
+      {showDestyUpload && (
+        <DestyUploadModal
+          onClose={() => setShowDestyUpload(false)}
+          onUploaded={(count) => { setDestyCount(count); loadDestyList() }}
+        />
+      )}
     </div>
   )
 }
