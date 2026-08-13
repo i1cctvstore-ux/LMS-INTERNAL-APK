@@ -473,6 +473,15 @@ export async function syncAccurateForBranch(
     // FASE 3: tulis stoknya — item normal ke product_stock (kolom
     // utama), item KONSI (K) ke product_stock_konsi (jadi angka "-K"
     // di UI, DIGABUNG sama transfer manual yang udah ada).
+    //
+    // PENTING: syncTimestamp diambil SEKALI di sini, dipakai sebagai
+    // updated_at buat SEMUA baris yang ditulis sync ini (bukan panggil
+    // new Date() lagi per baris) — biar bisa jadi "batas" yang pasti
+    // buat cleanup di bawah (baris dengan updated_at LEBIH LAMA dari
+    // ini = gak ke-sentuh sync kali ini = basi). Ini gantiin pendekatan
+    // lama (NOT IN daftar ribuan ID) yang bikin request-nya kepanjangan
+    // & kena "Bad Request" pas cabangnya punya banyak produk.
+    const syncTimestamp = new Date().toISOString()
     const upsertKonsiByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number; source: string }>()
     resolvedDetails.forEach((detail) => {
       const productId = productIdBySku.get(normalizeSku(detail.matchSku))
@@ -485,7 +494,7 @@ export async function syncAccurateForBranch(
     })
 
     if (upsertKonsiByProductId.size) {
-      const konsiRows = Array.from(upsertKonsiByProductId.values()).map((r) => ({ ...r, updated_at: new Date().toISOString() }))
+      const konsiRows = Array.from(upsertKonsiByProductId.values()).map((r) => ({ ...r, updated_at: syncTimestamp }))
       const CHUNK = 300
       for (let i = 0; i < konsiRows.length; i += CHUNK) {
         const chunk = konsiRows.slice(i, i + CHUNK)
@@ -495,25 +504,25 @@ export async function syncAccurateForBranch(
     }
 
     // Bersih-bersih: hapus baris product_stock_konsi (source='own',
-    // cabang ini) yang item "(K)"-nya udah nggak ketemu lagi di sync
-    // KALI INI — biar gak numpuk jadi data basi selamanya kayak yang
-    // ketemu manual kemarin (54 baris nyangkut sampai 5 hari). HANYA
-    // jalan kalau sync ini beneran lengkap (gak ada item yang gagal
-    // diambil detailnya) — kalau ada kegagalan sebagian, item yang
-    // "kelihatan hilang" itu bisa jadi cuma gagal fetch sesaat, BUKAN
-    // beneran udah gak ada — jadi jangan sampai kehapus gara-gara itu.
+    // cabang ini) yang updated_at-nya LEBIH LAMA dari syncTimestamp di
+    // atas — artinya item "(K)"-nya udah nggak ketemu lagi di sync KALI
+    // INI, biar gak numpuk jadi data basi selamanya kayak yang ketemu
+    // manual kemarin (54 baris nyangkut sampai 5 hari). HANYA jalan
+    // kalau sync ini beneran lengkap (gak ada item yang gagal diambil
+    // detailnya) — kalau ada kegagalan sebagian, item yang "kelihatan
+    // hilang" itu bisa jadi cuma gagal fetch sesaat, BUKAN beneran udah
+    // gak ada — jadi jangan sampai kehapus gara-gara itu.
     if (detailFetchFailed === 0) {
-      const currentKonsiIds = Array.from(upsertKonsiByProductId.keys())
       const { error: cleanupErr } = await supabase
         .from('product_stock_konsi')
         .delete()
         .eq('branch_id', config.branchId)
         .eq('source', 'own')
-        .not('product_id', 'in', currentKonsiIds.length ? `(${currentKonsiIds.join(',')})` : '(00000000-0000-0000-0000-000000000000)')
+        .lt('updated_at', syncTimestamp)
       if (cleanupErr) throw new Error(`Gagal bersihin konsi basi: ${cleanupErr.message}`)
     }
 
-    const upsertRows = Array.from(upsertRowsByProductId.values()).map((r) => ({ ...r, updated_at: new Date().toISOString() }))
+    const upsertRows = Array.from(upsertRowsByProductId.values()).map((r) => ({ ...r, updated_at: syncTimestamp }))
     const itemsUpdated = upsertRows.length
 
     if (upsertRows.length) {
@@ -525,17 +534,14 @@ export async function syncAccurateForBranch(
       }
     }
 
-    // Bersih-bersih basi buat stok UTAMA juga (bukan cuma "-K") — item
-    // non-konsi yang dulu ke-sync tapi sekarang udah nggak ketemu lagi
-    // di Accurate cabang ini. Sama-sama digate sama detailFetchFailed
-    // === 0 kayak cleanup konsi di atas.
+    // Bersih-bersih basi buat stok UTAMA juga (bukan cuma "-K"), pola
+    // sama persis (bandingin ke syncTimestamp, bukan daftar ID).
     if (detailFetchFailed === 0) {
-      const currentIds = upsertRows.map((r) => r.product_id)
       const { error: cleanupErr } = await supabase
         .from('product_stock')
         .delete()
         .eq('branch_id', config.branchId)
-        .not('product_id', 'in', currentIds.length ? `(${currentIds.join(',')})` : '(00000000-0000-0000-0000-000000000000)')
+        .lt('updated_at', syncTimestamp)
       if (cleanupErr) throw new Error(`Gagal bersihin stok utama basi: ${cleanupErr.message}`)
     }
 
@@ -709,7 +715,8 @@ export async function syncAccurateSoloMultiGudang(
       })
     })
 
-    const rows = Array.from(konsiRows.values()).map((r) => ({ ...r, updated_at: new Date().toISOString() }))
+    const syncTimestamp = new Date().toISOString()
+    const rows = Array.from(konsiRows.values()).map((r) => ({ ...r, updated_at: syncTimestamp }))
     if (rows.length) {
       const CHUNK = 300
       for (let i = 0; i < rows.length; i += CHUNK) {
@@ -719,18 +726,13 @@ export async function syncAccurateSoloMultiGudang(
       }
     }
 
-    // Bersih-bersih basi — sama kayak di syncAccurateForBranch, tapi di
-    // sini datanya nyebar ke beberapa cabang+source sekaligus (Jakarta/
-    // Bali/Purwokerto = source 'solo', Solo sendiri = source 'own').
-    // Cuma jalan kalau sync ini lengkap (gak ada item gagal fetch).
+    // Bersih-bersih basi — sama kayak di syncAccurateForBranch (bandingin
+    // updated_at ke syncTimestamp, BUKAN daftar ID — daftar ID bisa
+    // ribuan baris & bikin request kepanjangan/"Bad Request"). Di sini
+    // datanya nyebar ke beberapa cabang+source sekaligus (Jakarta/Bali/
+    // Purwokerto = source 'solo', Solo sendiri = source 'own'). Cuma
+    // jalan kalau sync ini lengkap (gak ada item gagal fetch).
     if (detailFetchFailed === 0) {
-      const currentByBranchSource = new Map<string, string[]>()
-      rows.forEach((r) => {
-        const key = `${r.branch_id}|${r.source}`
-        const list = currentByBranchSource.get(key) || []
-        list.push(r.product_id)
-        currentByBranchSource.set(key, list)
-      })
       const managedCombos = new Set<string>()
       Object.entries(SOLO_WAREHOUSE_TO_BRANCH).forEach(([wh, branchId]) => {
         const source = SOLO_WAREHOUSE_SOURCE_LABEL[wh] || 'solo'
@@ -738,13 +740,12 @@ export async function syncAccurateSoloMultiGudang(
       })
       for (const combo of managedCombos) {
         const [branchId, source] = combo.split('|')
-        const currentIds = currentByBranchSource.get(combo) || []
         const { error: cleanupErr } = await supabase
           .from('product_stock_konsi')
           .delete()
           .eq('branch_id', branchId)
           .eq('source', source)
-          .not('product_id', 'in', currentIds.length ? `(${currentIds.join(',')})` : '(00000000-0000-0000-0000-000000000000)')
+          .lt('updated_at', syncTimestamp)
         if (cleanupErr) throw new Error(`Gagal bersihin konsi basi (Solo multi-gudang): ${cleanupErr.message}`)
       }
     }
