@@ -721,6 +721,20 @@ function Field({ label, children, className = "" }) {
     </div>
   );
 }
+// Nama toko yang ditampilkan di cetakan itu BEDA per cabang (bukan
+// disamain semua) — di-hardcode by branch UUID (sama kayak
+// lib/service/receipt-pdf.js) karena kolom branches.name di database
+// gak konsisten/rapi buat ditampilin apa adanya.
+const BRANCH_DISPLAY_NAME = {
+  "5ad7239f-a7dd-47be-9ba2-c5667a3f76b2": "I1 CCTV", // Jakarta
+  "ff24cbd3-f11a-4f12-b658-88ff40b1a8e3": "SOLO CCTV", // Solo
+  "9b4c7834-2e20-4416-8163-2faff97294c0": "SOLO CCTV - CABANG BALI", // Bali
+  "4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612": "NGAPAK CCTV", // Purwokerto
+};
+function branchDisplayName(branchInfo) {
+  return (branchInfo && BRANCH_DISPLAY_NAME[branchInfo.id]) || "I1 CCTV";
+}
+
 const inputCls = "w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400";
 const flexInputCls = "border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 flex-1 min-w-0";
 // Primary CTA (indigo-600 solid) selalu pill (rounded-full) sesuai referensi desain v0.
@@ -6310,7 +6324,7 @@ function CompanyHeader({ branchInfo, skipName }) {
   if (!branchInfo || (!branchInfo.address && !branchInfo.phone)) return null;
   return (
     <div className={skipName ? "mb-4 text-center" : "mb-4 pb-4 border-b border-slate-200 text-center"}>
-      {!skipName && <div className="font-bold text-slate-800">i1 CCTV</div>}
+      {!skipName && <div className="font-bold text-slate-800">{branchDisplayName(branchInfo)}</div>}
       {branchInfo.address && <div className="text-xs text-slate-500 mt-0.5">{branchInfo.address}</div>}
       {branchInfo.phone && <div className="text-xs text-slate-500">No. HP: {branchInfo.phone}</div>}
     </div>
@@ -6385,7 +6399,7 @@ function PrintSuratJalanReceipt({ batch, items, branchInfo, onClose }) {
       onChangeOrientation={setOrientation}
       onDownloadPdf={() => generateSuratJalanPDF(batch, items, branchInfo, orientation)}
     >
-      <h2 className="text-lg font-bold text-center mb-1">I1 CCTV - SURAT JALAN KE SUPPLIER</h2>
+      <h2 className="text-lg font-bold text-center mb-1">{branchDisplayName(branchInfo)} - SURAT JALAN KE SUPPLIER</h2>
       <p className="text-center text-xs text-slate-500 mb-1">{batch.kodeBatch}</p>
       <CompanyHeader branchInfo={branchInfo} skipName />
       <div className="text-sm mb-4">
@@ -6814,7 +6828,7 @@ function InvoiceReceipt({ data, claims, branchInfo, onClose }) {
       onChangeOrientation={setOrientation}
       onDownloadPdf={() => generateInvoicePDF(data, branchInfo, orientation)}
     >
-      <h2 className="text-lg font-bold text-center mb-1">I1 CCTV - INVOICE</h2>
+      <h2 className="text-lg font-bold text-center mb-1">{branchDisplayName(branchInfo)} - INVOICE</h2>
       <p className="text-center text-xs text-slate-500 mb-1">{data.invoiceNo} · {fmtDate(data.date)}</p>
       <CompanyHeader branchInfo={branchInfo} skipName />
       <div className="text-sm mb-4">
