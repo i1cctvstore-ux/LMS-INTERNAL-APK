@@ -301,13 +301,17 @@ export async function syncZohoForBranch(
     // fungsi ini all-or-nothing (gagal = seluruh sync dianggap error,
     // gak nyampe ke titik ini), jadi aman langsung bersihin tanpa perlu
     // gate "kalau ada yang gagal sebagian" kayak di Accurate.
+    //
+    // Bandingin ke `now` (timestamp yang sama dipakai buat updated_at
+    // pas upsert di atas), BUKAN daftar ID — daftar ID bisa ribuan
+    // baris & bikin request kepanjangan/"Bad Request" (kejadian nyata
+    // di cabang yang produknya banyak).
     {
-      const currentIds = upsertRows.map((r) => r.product_id)
       const { error: cleanupErr } = await supabase
         .from('product_stock')
         .delete()
         .eq('branch_id', branchId)
-        .not('product_id', 'in', currentIds.length ? `(${currentIds.join(',')})` : '(00000000-0000-0000-0000-000000000000)')
+        .lt('updated_at', now)
       if (cleanupErr) throw new Error(`Gagal bersihin stok basi: ${cleanupErr.message}`)
     }
 
