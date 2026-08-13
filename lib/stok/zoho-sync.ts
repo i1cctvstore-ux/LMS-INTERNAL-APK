@@ -258,8 +258,9 @@ export async function syncZohoForBranch(
     // produk internal yang sama, kita cuma simpan SATU baris per produk —
     // Postgres upsert bakal error "cannot affect row a second time" kalau
     // dalam 1 batch ada baris (branch_id, product_id) yang duplikat.
-    const upsertRowsByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number }>()
+    const upsertRowsByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number; updated_at: string }>()
     let duplicateSkuCount = 0
+    const now = new Date().toISOString()
 
     zohoItems.forEach((item) => {
       const productId = productIdBySku.get(normalizeSku(item.sku))
@@ -274,6 +275,7 @@ export async function syncZohoForBranch(
         branch_id: branchId,
         product_id: productId,
         qty_on_hand: Math.round(item.available_stock),
+        updated_at: now,
       })
     })
 
@@ -289,6 +291,24 @@ export async function syncZohoForBranch(
           .upsert(chunk, { onConflict: 'branch_id,product_id' })
         if (error) throw new Error(error.message)
       }
+    }
+
+    // Bersih-bersih basi — item yang dulu pernah ke-sync dari Zoho tapi
+    // sekarang udah nggak ketemu lagi (dihapus/di-nonaktifkan Track
+    // Inventory-nya di Zoho Books) dihapus dari product_stock, biar gak
+    // numpuk jadi angka basi selamanya (bug yang sama kayak yang
+    // ditemukan & diperbaiki di product_stock_konsi). Fetch Zoho di
+    // fungsi ini all-or-nothing (gagal = seluruh sync dianggap error,
+    // gak nyampe ke titik ini), jadi aman langsung bersihin tanpa perlu
+    // gate "kalau ada yang gagal sebagian" kayak di Accurate.
+    {
+      const currentIds = upsertRows.map((r) => r.product_id)
+      const { error: cleanupErr } = await supabase
+        .from('product_stock')
+        .delete()
+        .eq('branch_id', branchId)
+        .not('product_id', 'in', currentIds.length ? `(${currentIds.join(',')})` : '(00000000-0000-0000-0000-000000000000)')
+      if (cleanupErr) throw new Error(`Gagal bersihin stok basi: ${cleanupErr.message}`)
     }
 
     // itemsSkipped di log gabungan dari: SKU gak ketemu di katalog KITA,
