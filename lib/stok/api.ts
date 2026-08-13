@@ -184,7 +184,14 @@ export async function searchSupplierStock(query: string): Promise<SupplierStockP
       group.totalQty += Number(r.qty) || 0
       bySupplier.set(supplierName, group)
     })
-    const suppliers = Array.from(bySupplier.values()).sort((a, b) => b.totalQty - a.totalQty)
+    // Supplier yang stoknya 0 sengaja DISEMBUNYIIN dari hasil — kalau 1
+    // produk ada di beberapa supplier dan salah satunya lagi kosong,
+    // yang ditampilin cuma supplier yang beneran ada stoknya. totalQty
+    // produk gak berubah (supplier yang 0 emang gak nyumbang apa-apa
+    // ke total), cuma baris supplier-nya aja yang gak dimunculin.
+    const suppliers = Array.from(bySupplier.values())
+      .filter((s) => s.totalQty > 0)
+      .sort((a, b) => b.totalQty - a.totalQty)
     const totalQty = suppliers.reduce((sum, s) => sum + s.totalQty, 0)
     return {
       productId: p.id,
@@ -197,7 +204,9 @@ export async function searchSupplierStock(query: string): Promise<SupplierStockP
     }
   })
 
-  return results.sort((a, b) => b.totalQty - a.totalQty)
+  // Produk yang SEMUA supplier-nya kebetulan 0 (abis di-filter di atas)
+  // gak ada gunanya ditampilin sebagai kartu kosong — dilewatin aja.
+  return results.filter((r) => r.suppliers.length > 0).sort((a, b) => b.totalQty - a.totalQty)
 }
 
 export type PasteResult = { itemsUpdated: number; itemsSkipped: number }
