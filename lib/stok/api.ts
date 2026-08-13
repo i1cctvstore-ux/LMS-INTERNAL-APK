@@ -813,3 +813,58 @@ export async function loadSupplierUploadLog(limit = 30): Promise<UploadLogRow[]>
     itemsSkipped: r.items_skipped,
   }))
 }
+
+// =====================================================
+// Desty — daftar SKU yang lagi "terdaftar/dilistingkan" di Desty,
+// dipakai buat nyaring produk mana aja yang muncul pas ekspor format
+// Bulk Update On-Hand Stock. Diisi lewat upload manual (ganti total,
+// bukan nambah — lihat komentar di migration 20260813020000).
+// =====================================================
+
+export async function loadDestyListedSkus(): Promise<string[]> {
+  const supabase = createClient()
+  const rows: string[] = []
+  const PAGE = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase.from('desty_listed_skus').select('sku').range(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    ;(data || []).forEach((r: any) => rows.push(r.sku))
+    if (!data || data.length < PAGE) break
+    from += PAGE
+  }
+  return rows
+}
+
+// Ganti TOTAL isi daftar SKU Desty — upload baru = sumber kebenaran
+// baru. SKU yang gak ada lagi di upload terbaru otomatis dianggap
+// sudah "delisting" (dihapus dari tabel ini, TIDAK ngaruh ke katalog
+// produk utama sama sekali, cuma ke daftar referensi Desty ini).
+export async function replaceDestyListedSkus(skus: string[]): Promise<{ count: number }> {
+  const supabase = createClient()
+  const uniqueBySkuKey = new Map<string, string>()
+  skus.forEach((s) => {
+    const key = normalizeSku(s)
+    if (key) uniqueBySkuKey.set(key, s.trim())
+  })
+  const rows = Array.from(uniqueBySkuKey.entries()).map(([sku_key, sku]) => ({
+    sku_key,
+    sku,
+    updated_at: new Date().toISOString(),
+  }))
+
+  // Tabel ini kecil (cuma daftar SKU referensi, bukan data transaksi) —
+  // hapus semua dulu baru insert ulang, simpel & pasti bersih.
+  const { error: delErr } = await supabase.from('desty_listed_skus').delete().neq('sku_key', '__never_matches__')
+  if (delErr) throw new Error(delErr.message)
+
+  if (rows.length) {
+    const CHUNK = 500
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK)
+      const { error } = await supabase.from('desty_listed_skus').insert(chunk)
+      if (error) throw new Error(error.message)
+    }
+  }
+  return { count: rows.length }
+}
