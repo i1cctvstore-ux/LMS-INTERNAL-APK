@@ -235,7 +235,13 @@ async function createNewProductsAndRefreshCatalog(
     const { error } = await supabase.rpc('insert_new_products_ignore_dup', { new_products: chunk })
     if (error) throw new Error(`Gagal bikin produk baru: ${error.message}`)
   }
-  productIdBySku.clear()
+  // PENTING: jangan clear() peta-nya — cuma di-timpa (set ulang) pakai
+  // SKU asli di database. Kalau di-clear dulu, semua hasil pencocokan
+  // ALIAS/NAMA yang udah di-set duluan (buat SKU yang secara harfiah
+  // gak ada sebagai baris tersendiri lagi, karena udah digabung ke
+  // produk lain) ikut kehapus, terus bikin FASE 3 nganggep item itu
+  // "gak ketemu" padahal harusnya udah ketemu. Bug ini yang bikin sync
+  // gagal/skip pas ada campuran produk baru + alias di 1 sync yang sama.
   let from = 0
   const PAGE_SIZE = 1000
   while (true) {
