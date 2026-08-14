@@ -7,6 +7,10 @@
     {
       "path": "/api/stok/sync-accurate",
       "schedule": "0 20 * * *"
+    },
+    {
+      "path": "/api/stok/sync-accurate-solo-konsi",
+      "schedule": "0 21 * * *"
     }
   ]
 }
