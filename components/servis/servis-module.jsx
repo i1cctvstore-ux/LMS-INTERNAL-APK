@@ -9,6 +9,7 @@ import {
   Users, MapPin, RefreshCw,
 } from "lucide-react";
 import { loadServiceData, persistServiceData, uploadServiceFile, loadBranchTrackedProductIds } from "@/lib/service/api";
+import { findDuplicateProductGroups, mergeDuplicateProducts } from "@/lib/stok/api";
 import { generateTandaTerimaPDF, generateSuratJalanPDF, generatePickupPDF, generateInvoicePDF } from "@/lib/service/receipt-pdf";
 
 // ---------- helpers ----------
@@ -5852,6 +5853,112 @@ function CekSkuAccurateModal({ onClose }) {
   );
 }
 
+// Modal "Cek Duplikat Produk" — cari produk yang namanya sama setelah
+// dinormalisasi (buang kata CAMERA/DVR/NVR di depan, buang semua tanda
+// baca/spasi — aturan PERSIS SAMA dengan migration SQL manual yang
+// udah beberapa kali dijalanin). Beda dari Cek SKU vs Accurate: ini
+// nyari duplikat di DALAM katalog kita sendiri, bukan bandingin ke
+// Accurate. Grup yang isinya campuran "DVR ..." dan "NVR ..." (device
+// beda meski kode model sama) ditandai merah, TOMBOL GABUNG-nya
+// otomatis dimatiin — pelajaran dari kasus iDS-7204HUHI-M1/E dkk.
+function CekDuplikatProdukModal({ onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [groups, setGroups] = useState([]);
+  const [mergingKey, setMergingKey] = useState(null);
+  const [doneKeys, setDoneKeys] = useState(new Set());
+
+  function load() {
+    setLoading(true);
+    setError(null);
+    findDuplicateProductGroups()
+      .then(setGroups)
+      .catch((e) => setError(String(e?.message || e)))
+      .finally(() => setLoading(false));
+  }
+  useEffect(() => { load(); }, []);
+
+  async function handleMerge(group) {
+    const [winner, ...losers] = group.products;
+    setMergingKey(group.nameKey);
+    setError(null);
+    try {
+      await mergeDuplicateProducts(winner.id, losers.map((l) => l.id));
+      setDoneKeys((prev) => new Set(prev).add(group.nameKey));
+    } catch (e) {
+      setError(`Gagal gabung "${winner.name}": ${e?.message || e}`);
+    } finally {
+      setMergingKey(null);
+    }
+  }
+
+  const pending = groups.filter((g) => !doneKeys.has(g.nameKey));
+
+  return (
+    <Modal title="Cek Duplikat Produk" subtitle="Produk dengan nama sama (setelah dirapikan) tapi kesimpen jadi beberapa baris terpisah" onClose={onClose} wide>
+      {loading && (
+        <div className="py-10 text-center text-sm text-slate-400 flex items-center justify-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Memeriksa seluruh katalog produk...
+        </div>
+      )}
+      {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700 mb-3">{error}</div>}
+      {!loading && (
+        <>
+          <div className="mb-3 text-xs text-slate-500">
+            {pending.length} grup duplikat ketemu{doneKeys.size > 0 ? ` · ${doneKeys.size} udah digabung barusan` : ""}.
+          </div>
+          <div className="space-y-3 max-h-[65vh] overflow-y-auto">
+            {pending.map((g) => {
+              const [winner, ...losers] = g.products;
+              return (
+                <div key={g.nameKey} className={`border rounded-2xl p-3 ${g.hasTypeConflict ? "border-red-200 bg-red-50/40" : "border-slate-200"}`}>
+                  {g.hasTypeConflict && (
+                    <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-red-700">
+                      <AlertTriangle size={13} /> Campuran DVR &amp; NVR — kode model sama tapi tipe device BEDA, jangan digabung
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="text-sm font-medium text-slate-800 truncate">{winner.name}</div>
+                    <button
+                      onClick={() => handleMerge(g)}
+                      disabled={g.hasTypeConflict || mergingKey === g.nameKey}
+                      className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${
+                        g.hasTypeConflict ? "bg-slate-100 text-slate-300 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                      }`}
+                    >
+                      {mergingKey === g.nameKey && <Loader2 size={12} className="animate-spin" />}
+                      {mergingKey === g.nameKey ? "Menggabungkan..." : `Gabung (${g.products.length})`}
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {g.products.map((p, i) => (
+                      <div key={p.id} className="flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded-lg bg-slate-50">
+                        <div className="min-w-0 flex items-center gap-1.5">
+                          {i === 0 && !g.hasTypeConflict && (
+                            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Dipertahankan</span>
+                          )}
+                          <span className="truncate text-slate-700">{p.name}</span>
+                          <span className="shrink-0 font-mono text-slate-400">{p.sku || "(kosong)"}</span>
+                        </div>
+                        <span className="shrink-0 font-medium text-slate-600">stok {p.totalStock}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {pending.length === 0 && (
+              <div className="py-10 text-center text-sm text-slate-400">
+                {doneKeys.size > 0 ? "Semua grup yang ketemu udah digabung." : "Tidak ada duplikat yang ketemu. Katalog sudah bersih."}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdateProduct, onRemoveProduct, onImportProducts }) {
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
@@ -5859,6 +5966,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showImport, setShowImport] = useState(false);
   const [showSkuCheck, setShowSkuCheck] = useState(false);
+  const [showDupCheck, setShowDupCheck] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("semua"); // 'semua' | 'cabang' | 'supplier' | 'manual'
   const canManage = role === "pusat";
   const allList = settings.products || [];
@@ -5903,6 +6011,11 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
           {canManage && (
             <button onClick={() => setShowSkuCheck(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-indigo-200 text-indigo-600 hover:bg-indigo-50">
               <RefreshCw size={13} /> Cek SKU vs Accurate
+            </button>
+          )}
+          {canManage && (
+            <button onClick={() => setShowDupCheck(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-amber-200 text-amber-700 hover:bg-amber-50">
+              <AlertTriangle size={13} /> Cek Duplikat Produk
             </button>
           )}
           <button onClick={() => setAddOpen(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${btnPrimaryCls}`}>
@@ -6020,6 +6133,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
         />
       )}
       {showSkuCheck && <CekSkuAccurateModal onClose={() => setShowSkuCheck(false)} />}
+      {showDupCheck && <CekDuplikatProdukModal onClose={() => setShowDupCheck(false)} />}
     </div>
   );
 }
