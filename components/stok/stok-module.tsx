@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   Search, RefreshCw, Clock, CheckCircle2, XCircle, Loader2, Upload, X, PackageSearch,
-  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap, Plus, SlidersHorizontal, RotateCcw, Check, Download,
+  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap, Plus, SlidersHorizontal, RotateCcw, Check, Download, Eye, EyeOff,
 } from 'lucide-react'
 import {
   loadAllBranches,
@@ -1130,6 +1130,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
   // Desty) — di-normalize jadi Set biar gampang dicocokin ke r.sku.
   const [destySkuSet, setDestySkuSet] = useState<Set<string>>(new Set())
   const [destyCount, setDestyCount] = useState(0)
+  const [showSkuColumn, setShowSkuColumn] = useState(false)
   const [showDestyUpload, setShowDestyUpload] = useState(false)
 
   async function loadAll() {
@@ -1226,6 +1227,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
       let av: number | string, bv: number | string
       if (sortKey === 'name') { av = a.name.toLowerCase(); bv = b.name.toLowerCase() }
       else if (sortKey === 'kategori') { av = a.kategori.toLowerCase(); bv = b.kategori.toLowerCase() }
+      else if (sortKey === 'sku') { av = (a.sku || '').toLowerCase(); bv = (b.sku || '').toLowerCase() }
       else if (sortKey === 'total') { av = a.total; bv = b.total }
       else if ((CITY_GROUPS as readonly string[]).includes(sortKey)) { av = a.cityTotal[sortKey] ?? 0; bv = b.cityTotal[sortKey] ?? 0 }
       else { av = a.sources[sortKey]?.qty ?? 0; bv = b.sources[sortKey]?.qty ?? 0 }
@@ -1398,6 +1400,12 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           )}
         </button>
         <button
+          onClick={() => setShowSkuColumn((v) => !v)}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm ${showSkuColumn ? 'rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 font-medium' : btnSecondaryCls}`}
+        >
+          {showSkuColumn ? <Eye size={14} /> : <EyeOff size={14} />} SKU
+        </button>
+        <button
           onClick={exportToExcel}
           disabled={filtered.length === 0}
           className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls} disabled:opacity-40`}
@@ -1464,6 +1472,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                     <tr className="border-b border-slate-100 text-left text-[10px] text-slate-400 uppercase tracking-wide bg-white">
                       <th className="p-3 bg-white" rowSpan={2}><SortHeader label="Kategori" sortKeyName="kategori" /></th>
                       <th className="p-3 bg-white" rowSpan={2}><SortHeader label="Nama Produk" sortKeyName="name" /></th>
+                      {showSkuColumn && <th className="p-3 bg-white" rowSpan={2}><SortHeader label="SKU" sortKeyName="sku" /></th>}
                       {CITY_GROUPS.map((g) => {
                         const count = visibleSources.filter((s) => s.group === g).length
                         if (count === 0) return null
@@ -1491,6 +1500,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                           <div className="font-medium text-slate-800">{r.name}</div>
                           {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
                         </td>
+                        {showSkuColumn && <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{r.sku || '-'}</td>}
                         {visibleSources.map((s) => (
                           <td key={s.code} className={`p-3 text-center ${s.excludeTotal ? 'bg-slate-50/60' : ''}`}>
                             <CellQty cell={r.sources[s.code]} />
@@ -1501,7 +1511,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                     ))}
                     {visibleRows.length === 0 && (
                       <tr>
-                        <td colSpan={visibleSources.length + 3} className="p-8 text-center text-slate-400">
+                        <td colSpan={visibleSources.length + (showSkuColumn ? 4 : 3)} className="p-8 text-center text-slate-400">
                           {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
                         </td>
                       </tr>
@@ -1514,6 +1524,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                     <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide bg-white">
                       <th className="p-3 bg-white"><SortHeader label="Kategori" sortKeyName="kategori" /></th>
                       <th className="p-3 bg-white"><SortHeader label="Nama Produk" sortKeyName="name" /></th>
+                      {showSkuColumn && <th className="p-3 bg-white"><SortHeader label="SKU" sortKeyName="sku" /></th>}
                       {CITY_GROUPS.map((g) => (
                         <th key={g} className="p-3 text-center bg-white"><SortHeader label={CITY_SHORT[g]} sortKeyName={g} /></th>
                       ))}
@@ -1528,6 +1539,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                           <div className="font-medium text-slate-800">{r.name}</div>
                           {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
                         </td>
+                        {showSkuColumn && <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{r.sku || '-'}</td>}
                         {CITY_GROUPS.map((g) => (
                           <td key={g} className="p-3 text-center">
                             <button onClick={() => setRincian({ row: r, group: g })} className="w-full hover:text-indigo-600">
@@ -1542,7 +1554,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                     ))}
                     {visibleRows.length === 0 && (
                       <tr>
-                        <td colSpan={CITY_GROUPS.length + 3} className="p-8 text-center text-slate-400">
+                        <td colSpan={CITY_GROUPS.length + (showSkuColumn ? 4 : 3)} className="p-8 text-center text-slate-400">
                           {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
                         </td>
                       </tr>
@@ -1636,11 +1648,11 @@ function SupplierProductCard({ result }: { result: SupplierStockProductResult })
     <div className="bg-white rounded-2xl border border-slate-200 p-4">
       <div className="flex items-start justify-between gap-2 mb-1">
         <div className="min-w-0">
-          <div className="font-medium text-slate-800 truncate">{result.productName}</div>
+          <div className="font-medium text-slate-800 break-words">{result.productName}</div>
           {result.subjenis ? (
-            <div className="text-xs text-slate-400 truncate">{result.subjenis}</div>
+            <div className="text-xs text-slate-400 break-words">{result.subjenis}</div>
           ) : result.kategori ? (
-            <div className="text-xs text-slate-400 truncate">{result.kategori}</div>
+            <div className="text-xs text-slate-400 break-words">{result.kategori}</div>
           ) : null}
         </div>
         <span className={`shrink-0 font-semibold ${result.totalQty <= 0 ? 'text-red-600' : 'text-slate-800'}`}>
@@ -1779,9 +1791,22 @@ function StokSupplierTab() {
   )
 }
 
+// Deteksi otomatis lebar layar buat nentuin tampilan desktop/mobile —
+// gantiin toggle manual "Mode Pratinjau" (itu cuma buat testing frontend
+// dulu, sekarang beneran ngikutin device asli).
+function useViewportIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 640 : true))
+  useEffect(() => {
+    function onResize() { setIsDesktop(window.innerWidth >= 640) }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  return isDesktop
+}
+
 export default function StokModule({ currentUserBranchId }: StokModuleProps) {
   const [activeTab, setActiveTab] = useState<'cabang' | 'supplier'>('cabang')
-  const [viewMode, setViewMode] = useState<'mobile' | 'desktop'>('desktop')
+  const isDesktopLayout = useViewportIsDesktop()
   const [showRiwayat, setShowRiwayat] = useState(false)
   const [syncLogs, setSyncLogs] = useState<SyncLogRow[]>([])
   const [uploadLogs, setUploadLogs] = useState<UploadLogRow[]>([])
@@ -1800,22 +1825,6 @@ export default function StokModule({ currentUserBranchId }: StokModuleProps) {
           <h1 className="font-semibold text-lg text-slate-800">Cek Stok</h1>
           <p className="text-xs text-slate-400 mt-0.5">Stok cabang & supplier — i1 CCTV</p>
         </div>
-      </div>
-
-      <div className="flex items-center gap-1 mb-4">
-        <span className="text-[11px] text-slate-400 mr-1">Mode Pratinjau:</span>
-        <button
-          onClick={() => setViewMode('mobile')}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${viewMode === 'mobile' ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-200 text-slate-500'}`}
-        >
-          <Smartphone size={11} /> Mobile
-        </button>
-        <button
-          onClick={() => setViewMode('desktop')}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${viewMode === 'desktop' ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-200 text-slate-500'}`}
-        >
-          <Monitor size={11} /> Desktop
-        </button>
       </div>
 
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -1838,7 +1847,7 @@ export default function StokModule({ currentUserBranchId }: StokModuleProps) {
         </button>
       </div>
 
-      {activeTab === 'cabang' ? <StokCabangMatrix isDesktopLayout={viewMode === 'desktop'} myBranchId={currentUserBranchId} /> : <StokSupplierTab />}
+      {activeTab === 'cabang' ? <StokCabangMatrix isDesktopLayout={isDesktopLayout} myBranchId={currentUserBranchId} /> : <StokSupplierTab />}
 
       {showRiwayat && <RiwayatModal syncLogs={syncLogs} uploadLogs={uploadLogs} onClose={() => setShowRiwayat(false)} />}
     </div>
