@@ -145,6 +145,16 @@ export type SupplierStockProductResult = {
   suppliers: SupplierStockSupplierGroup[]
 }
 
+// Normalisasi buat PENCARIAN — buang SEMUA spasi & tanda baca, biar
+// "76 d0t" bisa ketemu produk yang namanya "76d0t" (atau sebaliknya).
+// Supabase ILIKE gak bisa nyamain ini langsung dari server (gak bisa
+// manggil regexp_replace ke kolom lewat filter biasa), jadi pencarian
+// di bawah ini FILTER-nya dipindah ke sisi aplikasi (fetch semua
+// produk yang punya data supplier, baru dicocokin di sini).
+function normalizeForSearch(s: string): string {
+  return (s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '')
+}
+
 // Cari produk (lewat nama atau SKU) lalu tampilkan ketersediaannya di
 // semua supplier yang pernah di-upload datanya, DIKELOMPOKKAN per
 // produk -> per supplier -> per gudang (kalau supplier itu ngasih
@@ -154,26 +164,33 @@ export async function searchSupplierStock(query: string): Promise<SupplierStockP
   const q = query.trim()
   if (!q) return []
   const supabase = createClient()
+  const qNorm = normalizeForSearch(q)
 
   // PENTING: pakai supplier_stock!inner biar query ini CUMA nyari di
   // antara produk yang BENERAN punya data supplier (bukan seluruh
-  // katalog service_products). Sebelumnya urutannya kebalik -- cari
-  // 100 produk yang namanya cocok dulu (dari SEMUA produk, termasuk
-  // yang nggak punya data supplier sama sekali), baru dicek belakangan
-  // mana yang punya stok. Kalau kata kuncinya umum, 100 kuota itu bisa
-  // abis duluan sama produk yang gak relevan, jadi produk yang
-  // beneran ada datanya (dari supplier manapun) malah ketutupan/gak
-  // pernah ke-cek. Dengan !inner, 100 kuota itu sekarang isinya
-  // produk yang beneran ada datanya semua.
-  const { data: rows, error } = await supabase
-    .from('service_products')
-    .select(
-      'id, sku, name, kategori, subjenis, supplier_stock!inner(gudang, qty, updated_at, service_suppliers(name))',
-    )
-    .or(`name.ilike.%${q}%,sku.ilike.%${q}%`)
-    .limit(100)
-  if (error) throw new Error(error.message)
-  if (!rows || rows.length === 0) return []
+  // katalog service_products) — set ini jauh lebih kecil dari seluruh
+  // katalog, jadi aman di-fetch semua (paging) lalu difilter di sisi
+  // aplikasi, biar pencarian gak sensitif beda spasi/tanda baca.
+  const allRows: any[] = []
+  {
+    const PAGE = 1000
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from('service_products')
+        .select('id, sku, name, kategori, subjenis, supplier_stock!inner(gudang, qty, updated_at, service_suppliers(name))')
+        .range(from, from + PAGE - 1)
+      if (error) throw new Error(error.message)
+      allRows.push(...(data || []))
+      if (!data || data.length < PAGE) break
+      from += PAGE
+    }
+  }
+
+  const rows = allRows
+    .filter((p) => normalizeForSearch(p.name).includes(qNorm) || normalizeForSearch(p.sku).includes(qNorm))
+    .slice(0, 100)
+  if (rows.length === 0) return []
 
   const results: SupplierStockProductResult[] = rows.map((p: any) => {
     const bySupplier = new Map<string, SupplierStockSupplierGroup>()
