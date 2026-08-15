@@ -963,3 +963,186 @@ export async function replaceDestyListedSkus(skus: string[]): Promise<{ count: n
   }
   return { count: rows.length }
 }
+
+// =====================================================
+// Cek & gabung produk duplikat — versi UI dari migration manual yang
+// selama ini dijalanin lewat SQL Editor. Aturan pencocokan PERSIS SAMA
+// kayak migration terakhir: buang kata "CAMERA"/"DVR"/"NVR" di depan,
+// buang SEMUA tanda baca/spasi. PENGAMAN: grup yang isinya campuran
+// "DVR ..." dan "NVR ..." (dua tipe device beda meski kode model
+// kebetulan sama) ditandai `hasTypeConflict` dan TIDAK BOLEH digabung
+// otomatis — pelajaran dari kasus iDS-7204HUHI-M1/E dkk.
+// =====================================================
+
+function normalizeNameForDupCheck(s: string): string {
+  return (s || '')
+    .toUpperCase()
+    .trim()
+    .replace(/^(CAMERA|DVR|NVR)\s+/, '')
+    .replace(/\s+(OUTDOOR|INDOOR)\b/g, '')
+    .replace(/[^A-Z0-9]+/g, '')
+}
+function deviceTypeTag(nameUpper: string): 'DVR' | 'NVR' | null {
+  if (nameUpper.startsWith('DVR ')) return 'DVR'
+  if (nameUpper.startsWith('NVR ')) return 'NVR'
+  return null
+}
+
+export type DuplicateProductItem = { id: string; sku: string; name: string; kategori: string | null; totalStock: number }
+export type DuplicateProductGroup = { nameKey: string; products: DuplicateProductItem[]; hasTypeConflict: boolean }
+
+export async function findDuplicateProductGroups(): Promise<DuplicateProductGroup[]> {
+  const supabase = createClient()
+
+  const products: { id: string; sku: string; name: string; kategori: string | null }[] = []
+  {
+    const PAGE = 1000
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase.from('service_products').select('id, sku, name, kategori').range(from, from + PAGE - 1)
+      if (error) throw new Error(error.message)
+      ;(data || []).forEach((p: any) => products.push({ id: p.id, sku: p.sku || '', name: p.name, kategori: p.kategori }))
+      if (!data || data.length < PAGE) break
+      from += PAGE
+    }
+  }
+
+  const stockByProduct = new Map<string, number>()
+  {
+    const PAGE = 1000
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase.from('product_stock').select('product_id, qty_on_hand').range(from, from + PAGE - 1)
+      if (error) throw new Error(error.message)
+      ;(data || []).forEach((r: any) => stockByProduct.set(r.product_id, (stockByProduct.get(r.product_id) || 0) + (Number(r.qty_on_hand) || 0)))
+      if (!data || data.length < PAGE) break
+      from += PAGE
+    }
+  }
+
+  const groups = new Map<string, typeof products>()
+  products.forEach((p) => {
+    const key = normalizeNameForDupCheck(p.name)
+    if (!key) return
+    const list = groups.get(key) || []
+    list.push(p)
+    groups.set(key, list)
+  })
+
+  const result: DuplicateProductGroup[] = []
+  groups.forEach((list, key) => {
+    if (list.length < 2) return
+    const types = new Set(list.map((p) => deviceTypeTag((p.name || '').toUpperCase().trim())).filter(Boolean))
+    const withStock = list
+      .map((p) => ({ ...p, totalStock: stockByProduct.get(p.id) || 0 }))
+      .sort((a, b) => b.totalStock - a.totalStock || (a.kategori ? -1 : 1))
+    result.push({ nameKey: key, products: withStock, hasTypeConflict: types.size > 1 })
+  })
+
+  return result.sort((a, b) => b.products.length - a.products.length)
+}
+
+// Gabung 1 grup duplikat: winnerId = produk yang dipertahankan (biasanya
+// yang stoknya paling banyak, dipilih dari UI), loserIds = sisanya yang
+// bakal dilebur ke situ lalu dihapus. Mindahin semua data terkait dulu
+// (jumlahin qty per kombinasi kunci yang sama, bukan ditimpa) sebelum
+// beneran hapus baris produknya — persis pola yang dipakai di
+// migration-migration manual sebelumnya, cuma sekarang lewat kode biar
+// bisa dipicu dari tombol di UI.
+export async function mergeDuplicateProducts(winnerId: string, loserIds: string[]): Promise<void> {
+  const supabase = createClient()
+  if (loserIds.length === 0) return
+  const allIds = [winnerId, ...loserIds]
+
+  // 1) product_stock — jumlahin per branch_id
+  {
+    const { data, error } = await supabase.from('product_stock').select('branch_id, qty_on_hand').in('product_id', allIds)
+    if (error) throw new Error(error.message)
+    const byBranch = new Map<string, number>()
+    ;(data || []).forEach((r: any) => byBranch.set(r.branch_id, (byBranch.get(r.branch_id) || 0) + (Number(r.qty_on_hand) || 0)))
+    if (byBranch.size) {
+      const now = new Date().toISOString()
+      const upserts = Array.from(byBranch.entries()).map(([branch_id, qty_on_hand]) => ({ branch_id, product_id: winnerId, qty_on_hand, updated_at: now }))
+      const { error: upErr } = await supabase.from('product_stock').upsert(upserts, { onConflict: 'branch_id,product_id' })
+      if (upErr) throw new Error(upErr.message)
+    }
+    const { error: delErr } = await supabase.from('product_stock').delete().in('product_id', loserIds)
+    if (delErr) throw new Error(delErr.message)
+  }
+
+  // 2) product_stock_konsi — jumlahin per (branch_id, source)
+  {
+    const { data, error } = await supabase.from('product_stock_konsi').select('branch_id, source, qty_on_hand').in('product_id', allIds)
+    if (error) throw new Error(error.message)
+    const byKey = new Map<string, number>()
+    ;(data || []).forEach((r: any) => {
+      const k = `${r.branch_id}|${r.source}`
+      byKey.set(k, (byKey.get(k) || 0) + (Number(r.qty_on_hand) || 0))
+    })
+    if (byKey.size) {
+      const now = new Date().toISOString()
+      const upserts = Array.from(byKey.entries()).map(([k, qty_on_hand]) => {
+        const [branch_id, source] = k.split('|')
+        return { branch_id, product_id: winnerId, source, qty_on_hand, updated_at: now }
+      })
+      const { error: upErr } = await supabase.from('product_stock_konsi').upsert(upserts, { onConflict: 'branch_id,product_id,source' })
+      if (upErr) throw new Error(upErr.message)
+    }
+    const { error: delErr } = await supabase.from('product_stock_konsi').delete().in('product_id', loserIds)
+    if (delErr) throw new Error(delErr.message)
+  }
+
+  // 3) supplier_stock — jumlahin per (supplier_id, gudang)
+  {
+    const { data, error } = await supabase.from('supplier_stock').select('supplier_id, gudang, qty').in('product_id', allIds)
+    if (error) throw new Error(error.message)
+    const byKey = new Map<string, number>()
+    ;(data || []).forEach((r: any) => {
+      const k = `${r.supplier_id}|${r.gudang || ''}`
+      byKey.set(k, (byKey.get(k) || 0) + (Number(r.qty) || 0))
+    })
+    if (byKey.size) {
+      const now = new Date().toISOString()
+      const upserts = Array.from(byKey.entries()).map(([k, qty]) => {
+        const [supplier_id, gudang] = k.split('|')
+        return { supplier_id, product_id: winnerId, gudang, qty, updated_at: now }
+      })
+      const { error: upErr } = await supabase.from('supplier_stock').upsert(upserts, { onConflict: 'supplier_id,product_id,gudang' })
+      if (upErr) throw new Error(upErr.message)
+    }
+    const { error: delErr } = await supabase.from('supplier_stock').delete().in('product_id', loserIds)
+    if (delErr) throw new Error(delErr.message)
+  }
+
+  // 4) supplier_sku_mapping — pindahin product_id-nya aja
+  {
+    const { error } = await supabase.from('supplier_sku_mapping').update({ product_id: winnerId }).in('product_id', loserIds)
+    if (error) throw new Error(error.message)
+  }
+
+  // 5) stock_transfers — pindahin product_id-nya aja
+  {
+    const { error } = await supabase.from('stock_transfers').update({ product_id: winnerId }).in('product_id', loserIds)
+    if (error) throw new Error(error.message)
+  }
+
+  // 6) service_claims.produk_sku (teks, bukan FK) — update ke SKU
+  // produk yang dipertahankan, biar klaim aktif tetap kehitung "ditahan"
+  {
+    const { data: winnerRow, error: wErr } = await supabase.from('service_products').select('sku').eq('id', winnerId).single()
+    if (wErr) throw new Error(wErr.message)
+    const { data: loserRows, error: lErr } = await supabase.from('service_products').select('sku').in('id', loserIds)
+    if (lErr) throw new Error(lErr.message)
+    for (const lp of loserRows || []) {
+      if (!lp.sku || !lp.sku.trim()) continue
+      const { error } = await supabase.from('service_claims').update({ produk_sku: winnerRow.sku }).ilike('produk_sku', lp.sku.trim())
+      if (error) throw new Error(error.message)
+    }
+  }
+
+  // 7) terakhir, hapus baris produk duplikatnya
+  {
+    const { error } = await supabase.from('service_products').delete().in('id', loserIds)
+    if (error) throw new Error(error.message)
+  }
+}
