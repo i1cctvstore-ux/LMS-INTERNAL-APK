@@ -629,13 +629,22 @@ export async function uploadSupplierStockFile(
 ): Promise<PasteResult> {
   const supabase = createClient()
 
-  // Snapshot angka LAMA punya supplier ini, sebelum ditimpa.
+  // Snapshot angka LAMA punya supplier ini, sebelum ditimpa (buat riwayat).
   const { data: oldRows, error: oldErr } = await supabase
     .from('supplier_stock')
     .select('product_id, gudang, qty')
     .eq('supplier_id', supplierId)
   if (oldErr) throw new Error(oldErr.message)
 
+  // syncTimestamp diambil SEKALI, dipakai jadi updated_at SEMUA baris
+  // yang ditulis upload ini — biar bisa jadi "batas" buat cleanup di
+  // bawah (baris yang updated_at-nya LEBIH LAMA dari ini = produk itu
+  // udah gak ada lagi di file terbaru supplier = basi, dihapus). Pola
+  // yang sama kayak fix stale-data di lib/stok/accurate-sync.ts &
+  // zoho-sync.ts — sebelumnya bug ini juga ada di sini: upload cuma
+  // upsert, gak pernah bersihin produk yang ilang dari file supplier,
+  // jadi bisa nyangkut basi selamanya kayak yang ketemu di sync
+  // Accurate/Zoho kemarin.
   const now = new Date().toISOString()
   const upsertRows = resolvedRows.map((r) => ({
     supplier_id: supplierId,
@@ -654,6 +663,21 @@ export async function uploadSupplierStockFile(
     }
   }
 
+  // Bersih-bersih basi: hapus baris supplier_stock punya supplier ini
+  // yang gak ke-sentuh upload kali ini (produk yang gak ada lagi di
+  // file terbaru). Dijalankan HANYA kalau ada baris yang beneran
+  // di-upload (upsertRows.length > 0) -- kalau file-nya kosong total
+  // (0 baris), lebih aman DIAM daripada ngosongin semua stok supplier
+  // ini gara-gara kemungkinan file salah/kosong ke-upload gak sengaja.
+  if (upsertRows.length > 0) {
+    const { error: cleanupErr } = await supabase
+      .from('supplier_stock')
+      .delete()
+      .eq('supplier_id', supplierId)
+      .lt('updated_at', now)
+    if (cleanupErr) throw new Error(`Gagal bersihin stok supplier basi: ${cleanupErr.message}`)
+  }
+
   const itemsUpdated = resolvedRows.length
   const itemsSkipped = skippedCount
 
@@ -666,7 +690,6 @@ export async function uploadSupplierStockFile(
     snapshot: oldRows || [],
   })
   if (logErr) throw new Error(logErr.message)
-
 
   return { itemsUpdated, itemsSkipped }
 }
