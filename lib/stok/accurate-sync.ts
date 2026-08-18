@@ -169,7 +169,7 @@ export async function fetchAllItemIds(conn: AccurateConnection): Promise<number[
 // Ambil SKU ("no") + nama + stok ("balance") sekaligus dari SATU item
 // lewat item/detail.do — ini satu-satunya endpoint yang beneran ngasih
 // field-field itu di akun ini.
-export async function fetchItemDetail(conn: AccurateConnection, itemId: number): Promise<{ no: string; name: string; balance: number } | null> {
+export async function fetchItemDetail(conn: AccurateConnection, itemId: number): Promise<{ no: string; name: string; balance: number; kategori: string | null } | null> {
   const params = new URLSearchParams({ id: String(itemId) })
   const res = await fetch(`${conn.host}/accurate/api/item/detail.do?${params.toString()}`, {
     headers: { Authorization: `Bearer ${conn.accessToken}`, 'X-Session-ID': conn.session },
@@ -180,7 +180,21 @@ export async function fetchItemDetail(conn: AccurateConnection, itemId: number):
   const name = body.d?.name
   const balance = body.d?.balance
   if (!no || typeof balance !== 'number') return null
-  return { no, name: name || no, balance }
+  // Kategori barang dari Accurate — field PERSISNYA di API belum sempat
+  // dites langsung ke server beneran (belum ada akses live buat
+  // verifikasi struktur respons), jadi dicoba beberapa kemungkinan nama
+  // field yang umum dipakai Accurate Online. Kalau ternyata semuanya
+  // kosong terus padahal di Accurate kategorinya keisi, berarti nama
+  // field aslinya beda dari yang dicoba di sini — perlu dicek ulang
+  // pakai contoh respons API asli.
+  const kategoriRaw =
+    body.d?.itemCategory?.name ||
+    body.d?.itemCategoryName ||
+    body.d?.category?.name ||
+    body.d?.categoryName ||
+    null
+  const kategori = kategoriRaw ? String(kategoriRaw).trim() : null
+  return { no, name: name || no, balance, kategori: kategori || null }
 }
 
 function normalizeSku(s: string): string {
@@ -421,7 +435,7 @@ export async function syncAccurateForBranch(
     // batch 15 (bukan 1-per-1) — dengan 1.200+ produk, panggilan
     // berurutan bisa makan waktu puluhan menit dan kena timeout server.
     const CONCURRENCY = 15
-    const allDetails: { no: string; name: string; balance: number }[] = []
+    const allDetails: { no: string; name: string; balance: number; kategori: string | null }[] = []
     let failedIds: number[] = itemIds
     // Coba sampai 3x total (1 percobaan awal + 2 retry) — kegagalan
     // ambil detail sering cuma sementara (rate limit sesaat, koneksi
@@ -445,7 +459,7 @@ export async function syncAccurateForBranch(
 
     // Pisahkan dulu: item KONSI (K) dipetakan ke SKU/nama DASARNYA
     // (suffix dibuang), item normal tetap pakai SKU aslinya.
-    type ResolvedDetail = { matchSku: string; matchName: string; balance: number; isKonsi: boolean }
+    type ResolvedDetail = { matchSku: string; matchName: string; balance: number; isKonsi: boolean; kategori: string | null }
     const resolvedDetails: ResolvedDetail[] = allDetails.map((d) => {
       const skuResult = stripKonsiSuffix(d.no)
       const nameResult = stripKonsiSuffix(d.name)
@@ -454,6 +468,7 @@ export async function syncAccurateForBranch(
         matchName: nameResult.base || skuResult.base,
         balance: d.balance,
         isKonsi: skuResult.isKonsi,
+        kategori: d.kategori,
       }
     })
 
@@ -543,6 +558,38 @@ export async function syncAccurateForBranch(
         .eq('branch_id', config.branchId)
         .lt('updated_at', syncTimestamp)
       if (cleanupErr) throw new Error(`Gagal bersihin stok utama basi: ${cleanupErr.message}`)
+    }
+
+    // Kategori produk sekarang IKUT Accurate, BUKAN input manual lagi —
+    // tiap sync, kategori produk yang match ke item di sini ditimpa
+    // pakai kategori dari Accurate (kalau Accurate gak punya kategori
+    // buat item itu, dipakein "-"). Ini SENGAJA nimpa kategori manual
+    // yang mungkin udah pernah diisi staff — dikonfirmasi user.
+    {
+      const kategoriByProductId = new Map<string, string>()
+      resolvedDetails.forEach((detail) => {
+        const productId = productIdBySku.get(normalizeSku(detail.matchSku))
+        if (!productId) return
+        // Item KONSI (K) & item normal SKU dasar yang sama nunjuk ke
+        // produk yang sama -- kalau salah satunya punya kategori,
+        // dipakai (gak masalah ke-timpa 2x kalau dua-duanya punya,
+        // hasilnya tetap salah satu yang valid).
+        if (detail.kategori) kategoriByProductId.set(productId, detail.kategori)
+        else if (!kategoriByProductId.has(productId)) kategoriByProductId.set(productId, '-')
+      })
+      // Upsert (bukan update satu-satu) -- ribuan produk kalau di-loop
+      // satu-satu bakal lambat banget/beresiko timeout. Payload cuma
+      // isi id+kategori, jadi kolom lain (sku, name, dst) TIDAK ikut
+      // ketimpa, aman.
+      const rows = Array.from(kategoriByProductId.entries()).map(([id, kategori]) => ({ id, kategori }))
+      if (rows.length) {
+        const CHUNK = 300
+        for (let i = 0; i < rows.length; i += CHUNK) {
+          const chunk = rows.slice(i, i + CHUNK)
+          const { error: catErr } = await supabase.from('service_products').upsert(chunk, { onConflict: 'id' })
+          if (catErr) throw new Error(`Gagal update kategori: ${catErr.message}`)
+        }
+      }
     }
 
     const totalSkipped = itemsSkipped + detailFetchFailed
