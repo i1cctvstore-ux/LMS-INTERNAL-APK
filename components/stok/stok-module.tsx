@@ -1269,21 +1269,27 @@ function StokCabangMatrix({ myBranchId }: { myBranchId: string | null }) {
   // yang keliatan aja (ngikutin hiddenCols) + Total. Diproses di
   // browser (paket `xlsx` yang sama dipakai buat baca file Stok
   // Supplier), gak ada request ke server.
+  // Ekspor Excel sekarang SELALU lengkap (gak lagi ngikutin toggle Mode
+  // Detail/Simpel di layar) — SKU, 9 kolom detail per akun/gudang, 4
+  // kolom subtotal per kota, DAN kolom Total akhir, semuanya sekaligus
+  // dalam 1 file.
   function exportToExcel() {
-    const headerRow = modeDetail
-      ? ['Kategori', 'Nama Produk', 'Subjenis', ...visibleSources.map((s) => s.label), 'Total']
-      : ['Kategori', 'Nama Produk', 'Subjenis', ...CITY_GROUPS.map((g) => CITY_SHORT[g]), 'Total']
+    const headerRow = [
+      'Kategori', 'Nama Produk', 'SKU', 'Subjenis',
+      ...CABANG_SOURCES.map((s) => s.label),
+      ...CITY_GROUPS.map((g) => `Total ${CITY_SHORT[g]}`),
+      'Total',
+    ]
     const dataRows = filtered.map((r) => {
-      const base = [r.kategori || '', r.name, r.subjenis || '']
-      const cols = modeDetail
-        ? visibleSources.map((s) => r.sources[s.code]?.qty ?? 0)
-        : CITY_GROUPS.map((g) => r.cityTotal[g] ?? 0)
-      return [...base, ...cols, r.total]
+      const base = [r.kategori || '', r.name, r.sku || '', r.subjenis || '']
+      const detailCols = CABANG_SOURCES.map((s) => r.sources[s.code]?.qty ?? 0)
+      const cityCols = CITY_GROUPS.map((g) => r.cityTotal[g] ?? 0)
+      return [...base, ...detailCols, ...cityCols, r.total]
     })
     const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows])
-    // Lebar kolom biar gak kepotong pas dibuka — nama produk dilebarin,
-    // sisanya secukupnya.
-    ws['!cols'] = [{ wch: 14 }, { wch: 40 }, { wch: 22 }, ...headerRow.slice(3).map(() => ({ wch: 12 }))]
+    // Lebar kolom biar gak kepotong pas dibuka — nama produk & SKU
+    // dilebarin, sisanya secukupnya.
+    ws['!cols'] = [{ wch: 14 }, { wch: 40 }, { wch: 20 }, { wch: 22 }, ...headerRow.slice(4).map(() => ({ wch: 12 }))]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Stok Cabang')
     const dateStr = new Date().toISOString().slice(0, 10)
