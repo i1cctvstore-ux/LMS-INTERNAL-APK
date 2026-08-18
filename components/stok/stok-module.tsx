@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   Search, RefreshCw, Clock, CheckCircle2, XCircle, Loader2, Upload, X, PackageSearch,
-  ChevronUp, ChevronDown, ChevronsUpDown, Smartphone, Monitor, FileSpreadsheet, Zap, Plus, SlidersHorizontal, RotateCcw, Check, Download, Eye, EyeOff,
+  ChevronUp, ChevronDown, ChevronsUpDown, FileSpreadsheet, Zap, Plus, SlidersHorizontal, RotateCcw, Check, Download,
 } from 'lucide-react'
 import {
   loadAllBranches,
@@ -815,6 +815,10 @@ function FilterStokCabangModal({
   onChangeHideZeroStock,
   hiddenCols,
   onChangeHiddenCols,
+  showSkuColumn,
+  onChangeShowSkuColumn,
+  showSelisihJktK,
+  onChangeShowSelisihJktK,
   onClose,
 }: {
   allKategoris: string[]
@@ -826,6 +830,10 @@ function FilterStokCabangModal({
   onChangeHideZeroStock: (v: boolean) => void
   hiddenCols: Set<string>
   onChangeHiddenCols: (v: Set<string>) => void
+  showSkuColumn: boolean
+  onChangeShowSkuColumn: (v: boolean) => void
+  showSelisihJktK: boolean
+  onChangeShowSelisihJktK: (v: boolean) => void
   onClose: () => void
 }) {
   // Draft lokal biar perubahan cuma keterapkan pas klik "Terapkan"
@@ -835,6 +843,8 @@ function FilterStokCabangModal({
   const [draftModeDetail, setDraftModeDetail] = useState(modeDetail)
   const [draftHideZero, setDraftHideZero] = useState(hideZeroStock)
   const [draftHiddenCols, setDraftHiddenCols] = useState<Set<string>>(new Set(hiddenCols))
+  const [draftShowSku, setDraftShowSku] = useState(showSkuColumn)
+  const [draftShowSelisih, setDraftShowSelisih] = useState(showSelisihJktK)
 
   const allChecked = draftKategoris === null
   function toggleAll() {
@@ -869,6 +879,8 @@ function FilterStokCabangModal({
     setDraftModeDetail(false)
     setDraftHideZero(false)
     setDraftHiddenCols(new Set())
+    setDraftShowSku(false)
+    setDraftShowSelisih(false)
   }
 
   function handleTerapkan() {
@@ -876,6 +888,8 @@ function FilterStokCabangModal({
     onChangeModeDetail(draftModeDetail)
     onChangeHideZeroStock(draftHideZero)
     onChangeHiddenCols(draftHiddenCols)
+    onChangeShowSkuColumn(draftShowSku)
+    onChangeShowSelisihJktK(draftShowSelisih)
     onClose()
   }
 
@@ -940,6 +954,24 @@ function FilterStokCabangModal({
                 className="accent-indigo-600"
               />
               Sembunyikan produk stok 0
+            </label>
+            <label className="flex items-center gap-2 py-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={draftShowSku}
+                onChange={(e) => setDraftShowSku(e.target.checked)}
+                className="accent-indigo-600"
+              />
+              Tampilkan kolom SKU
+            </label>
+            <label className="flex items-center gap-2 py-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={draftShowSelisih}
+                onChange={(e) => setDraftShowSelisih(e.target.checked)}
+                className="accent-indigo-600"
+              />
+              Tampilkan kolom Selisih JKT-K vs JKT-K-SOLO
             </label>
           </div>
 
@@ -1098,51 +1130,26 @@ function DestyUploadModal({
   )
 }
 
-function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: boolean; myBranchId: string | null }) {
+// Data & perhitungan Stok Cabang yang dipakai BARENG oleh tab "Stok
+// Cabang" dan tab "Desty" (biar 2 tempat itu selalu lihat angka yang
+// sama persis, gak ada logic keitung dobel/beda tempat).
+function useStokCabangRows() {
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [matrix, setMatrix] = useState<StockMatrixData>({ products: [], physical: {}, held: {} })
-  // Saldo "-K": barang konsinyasi/transfer manual antar cabang (dari
-  // tabel stock_transfers, BUKAN dari sync Zoho/Accurate). Map<branchId,
-  // Map<productId, qty>>.
   const [transferMatrix, setTransferMatrix] = useState<Map<string, Map<string, number>>>(new Map())
   const [soloTransferMatrix, setSoloTransferMatrix] = useState<Map<string, Map<string, number>>>(new Map())
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [query, setQuery] = useState('')
-  const [visibleCount, setVisibleCount] = useState(25)
-  const [sortKey, setSortKey] = useState<string>('name')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const [syncingBranch, setSyncingBranch] = useState<string | null>(null)
-  const [syncingAll, setSyncingAll] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
-  const [showFilter, setShowFilter] = useState(false)
-  // null = "Semua Kategori" (belum ada filter aktif). Kalau diisi, cuma
-  // kategori yang ada di dalam Set ini yang ditampilkan.
-  const [selectedKategoris, setSelectedKategoris] = useState<Set<string> | null>(null)
-  const [modeDetail, setModeDetail] = useState(false)
-  const [hideZeroStock, setHideZeroStock] = useState(false)
-  // Kolom (source code) yang disembunyikan di Mode Detail — kosong =
-  // semua 9 kolom tampil.
-  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set())
-  // Sheet Rincian, dibuka dari tap angka kota di Mode Simpel.
-  const [rincian, setRincian] = useState<{ row: MatrixRow; group: string } | null>(null)
-  // Daftar SKU yang lagi terdaftar di Desty (buat filter tombol Ekspor
-  // Desty) — di-normalize jadi Set biar gampang dicocokin ke r.sku.
-  const [destySkuSet, setDestySkuSet] = useState<Set<string>>(new Set())
-  const [destyCount, setDestyCount] = useState(0)
-  const [showSkuColumn, setShowSkuColumn] = useState(false)
-  const [showDestyUpload, setShowDestyUpload] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
-  async function loadAll() {
+  async function reload() {
     setLoading(true)
+    setLoadError(null)
     try {
       const [b, m, ls, tk] = await Promise.all([
         loadAllBranches(),
         loadStockMatrix(),
         loadLastSyncFreshness(),
-        // Gak boleh sampai numbangin seluruh halaman stok utama kalau
-        // fitur transfer ini kenapa-kenapa (misal migration belum
-        // dijalanin) — jadi di-catch sendiri, fallback ke Map kosong.
         loadTransferBalanceMatrix().catch(() => ({ matrix: new Map(), soloMatrix: new Map() })),
       ])
       setBranches(b)
@@ -1151,34 +1158,14 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
       setTransferMatrix(tk.matrix)
       setSoloTransferMatrix(tk.soloMatrix)
     } catch (e: any) {
-      setMessage(`Gagal memuat data: ${e?.message || e}`)
+      setLoadError(`Gagal memuat data: ${e?.message || e}`)
     } finally {
       setLoading(false)
     }
   }
 
-  // Terpisah dari loadAll — kalau migration tabel Desty belum sempat
-  // dijalanin, ini gak boleh sampai numbangin seluruh halaman Cek Stok.
-  async function loadDestyList() {
-    try {
-      const skus = await loadDestyListedSkus()
-      setDestySkuSet(new Set(skus.map((s) => normalizeSku(s))))
-      setDestyCount(skus.length)
-    } catch {
-      setDestySkuSet(new Set())
-      setDestyCount(0)
-    }
-  }
+  useEffect(() => { reload() }, [])
 
-  useEffect(() => {
-    loadAll()
-    loadDestyList()
-  }, [])
-
-  // Bangun 9 sumber (jkt/jkt_k/jkt_k_solo/solo_z/solo_cv/bali_z/bali_k/
-  // pwt/pwt_k) per produk dari 3 data yang sudah dimuat di atas — TIDAK
-  // ada query/tabel baru. Total & Total kota mengecualikan sumber yang
-  // excludeTotal (cuma JKT-K-SOLO, dipakai buat cross-check aja).
   const rows: MatrixRow[] = useMemo(() => {
     return matrix.products.map((p) => {
       const sources: Record<string, SourceCell> = {}
@@ -1205,6 +1192,40 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
       return { productId: p.productId, sku: p.sku, name: p.name, kategori: p.kategori, subjenis: p.subjenis, sources, cityTotal, total }
     })
   }, [matrix, transferMatrix, soloTransferMatrix])
+
+  return { branches, rows, lastSync, loading, loadError, reload }
+}
+
+function StokCabangMatrix({ myBranchId }: { myBranchId: string | null }) {
+  const { branches, rows, lastSync, loading, loadError, reload } = useStokCabangRows()
+  const [query, setQuery] = useState('')
+  const [visibleCount, setVisibleCount] = useState(25)
+  const [sortKey, setSortKey] = useState<string>('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [syncingBranch, setSyncingBranch] = useState<string | null>(null)
+  const [syncingAll, setSyncingAll] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [showFilter, setShowFilter] = useState(false)
+  // null = "Semua Kategori" (belum ada filter aktif). Kalau diisi, cuma
+  // kategori yang ada di dalam Set ini yang ditampilkan.
+  const [selectedKategoris, setSelectedKategoris] = useState<Set<string> | null>(null)
+  const [modeDetail, setModeDetail] = useState(false)
+  const [hideZeroStock, setHideZeroStock] = useState(false)
+  // Kolom (source code) yang disembunyikan di Mode Detail — kosong =
+  // semua 9 kolom tampil.
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set())
+  // Sheet Rincian, dibuka dari tap angka kota di Mode Simpel.
+  const [rincian, setRincian] = useState<{ row: MatrixRow; group: string } | null>(null)
+  const [showSkuColumn, setShowSkuColumn] = useState(false)
+  // Kolom ekstra: selisih JKT-K vs JKT-K-SOLO — dua sistem beda yang
+  // SAMA-SAMA nyatet konsinyasi Jakarta (transfer manual+akun sendiri
+  // vs dititipkan lewat Accurate Solo), harusnya sinkron. Kalau beda,
+  // kemungkinan ada transfer yang kecatat di 1 sisi doang.
+  const [showSelisihJktK, setShowSelisihJktK] = useState(false)
+
+  useEffect(() => {
+    if (loadError) setMessage(loadError)
+  }, [loadError])
 
   // Daftar kategori unik dari data yang ada, buat isi checkbox filter.
   const allKategoris = useMemo(() => {
@@ -1269,61 +1290,6 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
     XLSX.writeFile(wb, `cek-stok-cabang-${dateStr}.xlsx`)
   }
 
-  // Ekspor format "Bulk Update On-Hand Stock" Desty — cuma produk yang
-  // SKU-nya ada di daftar destySkuSet (hasil upload "List SKU Desty"),
-  // TERMASUK yang stoknya 0 (biar Desty tau itemnya emang habis, bukan
-  // gak ke-export). Dikelompokkan per kota (blok Jakarta dulu, baru
-  // Solo, Bali, Purwokerto — BUKAN diselang-seling), semua di 1 sheet,
-  // header & merge cell dibikin match persis template resmi Desty biar
-  // bisa langsung diimport balik.
-  function exportToDesty() {
-    const listedRows = rows.filter((r) => r.sku && destySkuSet.has(normalizeSku(r.sku)))
-    if (listedRows.length === 0) {
-      setMessage('Belum ada produk yang cocok dengan daftar SKU Desty — upload daftarnya dulu lewat tombol "Upload List SKU Desty".')
-      return
-    }
-    const header1 = ['Nama Produk', 'SKU Master', 'ID Gudang', 'Nama Gudang', 'ID Slot', 'Nama Slot', 'Stok Fisik', '']
-    const header2 = ['', '', '', '', '', '', 'Ubah Stok Final', 'Tambah atau Kurangi Stok']
-    const header3 = ['(Opsional)', '(Wajib)', '(Wajib)', '(Opsional)', '(Opsional)', '(Opsional)', '(Wajib)', '']
-    const header4 = [
-      '(Hanya untuk referensi, tidak wajib karena tidak digunakan untuk identifikasi produk)',
-      '(Kode SKU Produk Master, diperlukan untuk mengidentifikasi perubahan stok setiap produk)',
-      '(ID Gudang, diperlukan untuk mengidentifikasi gudang produk; data dapat diperoleh di file unduh Pengaturan Inventori Dengan Format)',
-      '(Hanya untuk referensi, tidak wajib karena tidak digunakan untuk identifikasi gudang produk)',
-      '(Masukkan ID Slot apabila produk sudah dialokasikan di Manajemen Rak; Jika dikosongkan, stok akan dialokasikan ke Slot Default)',
-      '(Hanya untuk referensi, tidak wajib karena tidak digunakan untuk identifikasi slot gudang)',
-      '(Masukkan stok final baru untuk SKU pada gudang atau slot terkait; kolom ini akan memiliki prioritas lebih tinggi dibanding kolom "Tambah atau Kurangi Stok" jika keduanya diisi',
-      '(Masukkan stok perubahan berupa penambahan atau pengurangan SKU pada gudang atau slot terkait; Jika ada simbol positif maka stok akan bertambah; Jika ada simbol negatif maka stok akan dikurangi)',
-    ]
-
-    const dataRows: (string | number)[][] = []
-    CITY_GROUPS.forEach((group) => {
-      listedRows.forEach((r) => {
-        dataRows.push([r.name, r.sku, DESTY_GUDANG_ID[group], group, '', '', r.cityTotal[group] ?? 0, ''])
-      })
-    })
-
-    const aoa = [header1, header2, header3, header4, ...dataRows]
-    const ws = XLSX.utils.aoa_to_sheet(aoa)
-    // Merge cell persis kayak template asli Desty (A1:A2, B1:B2, ...,
-    // G1:H1 "Stok Fisik", G3:H3 "(Wajib)").
-    ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },
-      { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } },
-      { s: { r: 0, c: 2 }, e: { r: 1, c: 2 } },
-      { s: { r: 0, c: 3 }, e: { r: 1, c: 3 } },
-      { s: { r: 0, c: 4 }, e: { r: 1, c: 4 } },
-      { s: { r: 0, c: 5 }, e: { r: 1, c: 5 } },
-      { s: { r: 0, c: 6 }, e: { r: 0, c: 7 } },
-      { s: { r: 2, c: 6 }, e: { r: 2, c: 7 } },
-    ]
-    ws['!cols'] = [{ wch: 28 }, { wch: 20 }, { wch: 22 }, { wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 18 }]
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'IND_Update_OnHandStock')
-    const dateStr = new Date().toISOString().slice(0, 10)
-    XLSX.writeFile(wb, `desty-update-stok-${dateStr}.xlsx`)
-  }
-
   async function handleSyncBranch(branchId: string) {
     setSyncingBranch(branchId)
     setMessage(null)
@@ -1333,7 +1299,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
       const r = result.results?.[0]
       if (r?.status === 'error') setMessage(`Sync gagal: ${r.message}`)
       else if (r) setMessage(`Sync selesai — ${r.itemsUpdated} produk diperbarui${r.itemsSkipped ? `, ${r.itemsSkipped} SKU dilewati` : ''}.`)
-      await loadAll()
+      await reload()
     } catch (e: any) {
       setMessage(`Sync gagal: ${e?.message || e}`)
     } finally {
@@ -1354,7 +1320,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
       const okCount = allResults.filter((r: any) => r.status === 'success').length
       const failCount = allResults.filter((r: any) => r.status === 'error').length
       setMessage(`Sync selesai — ${okCount} cabang berhasil${failCount ? `, ${failCount} gagal` : ''}.`)
-      await loadAll()
+      await reload()
     } catch (e: any) {
       setMessage(`Sync gagal: ${e?.message || e}`)
     } finally {
@@ -1395,15 +1361,9 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
         <button onClick={() => setShowFilter(true)} className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}>
           <SlidersHorizontal size={14} />
           Filter
-          {(selectedKategoris || hideZeroStock || modeDetail || hiddenCols.size > 0) && (
+          {(selectedKategoris || hideZeroStock || modeDetail || hiddenCols.size > 0 || showSkuColumn || showSelisihJktK) && (
             <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
           )}
-        </button>
-        <button
-          onClick={() => setShowSkuColumn((v) => !v)}
-          className={`flex items-center gap-1.5 px-3 py-2 text-sm ${showSkuColumn ? 'rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 font-medium' : btnSecondaryCls}`}
-        >
-          {showSkuColumn ? <Eye size={14} /> : <EyeOff size={14} />} SKU
         </button>
         <button
           onClick={exportToExcel}
@@ -1411,21 +1371,6 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls} disabled:opacity-40`}
         >
           <Download size={14} /> Ekspor Excel
-        </button>
-        <button
-          onClick={() => setShowDestyUpload(true)}
-          className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}
-          title="Upload daftar SKU yang terdaftar di Desty"
-        >
-          <Upload size={14} /> List SKU Desty{destyCount > 0 ? ` (${destyCount})` : ''}
-        </button>
-        <button
-          onClick={exportToDesty}
-          disabled={destyCount === 0}
-          className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls} disabled:opacity-40`}
-          title="Ekspor format Bulk Update On-Hand Stock Desty"
-        >
-          <Download size={14} /> Ekspor Desty
         </button>
         <button
           onClick={handleSyncAll}
@@ -1463,7 +1408,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
 
         {loading ? (
           <div className="p-8 text-center text-slate-400"><Loader2 className="inline animate-spin mr-2" size={14} /> Memuat...</div>
-        ) : isDesktopLayout ? (
+        ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               {modeDetail ? (
@@ -1482,6 +1427,7 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                           </th>
                         )
                       })}
+                      {showSelisihJktK && <th className="p-3 bg-amber-50" rowSpan={2}>Selisih<br />JKT-K</th>}
                       <th className="p-3 bg-white" rowSpan={2}><SortHeader label="Total" sortKeyName="total" /></th>
                     </tr>
                     <tr className="border-b border-slate-100 text-center text-[10px] text-slate-400 uppercase tracking-wide">
@@ -1493,25 +1439,33 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleRows.map((r) => (
-                      <tr key={r.productId} className="border-b border-slate-50">
-                        <td className="p-3 whitespace-nowrap text-xs text-indigo-600">{r.kategori || '-'}</td>
-                        <td className="p-3">
-                          <div className="font-medium text-slate-800">{r.name}</div>
-                          {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
-                        </td>
-                        {showSkuColumn && <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{r.sku || '-'}</td>}
-                        {visibleSources.map((s) => (
-                          <td key={s.code} className={`p-3 text-center ${s.excludeTotal ? 'bg-slate-50/60' : ''}`}>
-                            <CellQty cell={r.sources[s.code]} />
+                    {visibleRows.map((r) => {
+                      const selisih = (r.sources['jkt_k']?.qty ?? 0) - (r.sources['jkt_k_solo']?.qty ?? 0)
+                      return (
+                        <tr key={r.productId} className="border-b border-slate-50">
+                          <td className="p-3 whitespace-nowrap text-xs text-indigo-600">{r.kategori || '-'}</td>
+                          <td className="p-3">
+                            <div className="font-medium text-slate-800">{r.name}</div>
+                            {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
                           </td>
-                        ))}
-                        <td className="p-3 font-semibold text-slate-800">{r.total}</td>
-                      </tr>
-                    ))}
+                          {showSkuColumn && <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{r.sku || '-'}</td>}
+                          {visibleSources.map((s) => (
+                            <td key={s.code} className={`p-3 text-center ${s.excludeTotal ? 'bg-slate-50/60' : ''}`}>
+                              <CellQty cell={r.sources[s.code]} />
+                            </td>
+                          ))}
+                          {showSelisihJktK && (
+                            <td className={`p-3 text-center font-medium ${selisih !== 0 ? 'bg-amber-50 text-amber-700' : 'text-slate-300'}`}>
+                              {selisih}
+                            </td>
+                          )}
+                          <td className="p-3 font-semibold text-slate-800">{r.total}</td>
+                        </tr>
+                      )
+                    })}
                     {visibleRows.length === 0 && (
                       <tr>
-                        <td colSpan={visibleSources.length + (showSkuColumn ? 4 : 3)} className="p-8 text-center text-slate-400">
+                        <td colSpan={visibleSources.length + (showSkuColumn ? 4 : 3) + (showSelisihJktK ? 1 : 0)} className="p-8 text-center text-slate-400">
                           {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
                         </td>
                       </tr>
@@ -1528,33 +1482,42 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                       {CITY_GROUPS.map((g) => (
                         <th key={g} className="p-3 text-center bg-white"><SortHeader label={CITY_SHORT[g]} sortKeyName={g} /></th>
                       ))}
+                      {showSelisihJktK && <th className="p-3 text-center bg-amber-50">Selisih JKT-K</th>}
                       <th className="p-3 bg-white"><SortHeader label="Total" sortKeyName="total" /></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleRows.map((r) => (
-                      <tr key={r.productId} className="border-b border-slate-50">
-                        <td className="p-3 whitespace-nowrap text-xs text-indigo-600">{r.kategori || '-'}</td>
-                        <td className="p-3">
-                          <div className="font-medium text-slate-800">{r.name}</div>
-                          {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
-                        </td>
-                        {showSkuColumn && <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{r.sku || '-'}</td>}
-                        {CITY_GROUPS.map((g) => (
-                          <td key={g} className="p-3 text-center">
-                            <button onClick={() => setRincian({ row: r, group: g })} className="w-full hover:text-indigo-600">
-                              <span className={r.cityTotal[g] < 0 ? 'text-red-600 font-medium' : r.cityTotal[g] === 0 ? 'text-slate-300' : 'text-slate-700 font-medium'}>
-                                {r.cityTotal[g]}
-                              </span>
-                            </button>
+                    {visibleRows.map((r) => {
+                      const selisih = (r.sources['jkt_k']?.qty ?? 0) - (r.sources['jkt_k_solo']?.qty ?? 0)
+                      return (
+                        <tr key={r.productId} className="border-b border-slate-50">
+                          <td className="p-3 whitespace-nowrap text-xs text-indigo-600">{r.kategori || '-'}</td>
+                          <td className="p-3">
+                            <div className="font-medium text-slate-800">{r.name}</div>
+                            {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
                           </td>
-                        ))}
-                        <td className="p-3 font-semibold text-slate-800">{r.total}</td>
-                      </tr>
-                    ))}
+                          {showSkuColumn && <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{r.sku || '-'}</td>}
+                          {CITY_GROUPS.map((g) => (
+                            <td key={g} className="p-3 text-center">
+                              <button onClick={() => setRincian({ row: r, group: g })} className="w-full hover:text-indigo-600">
+                                <span className={r.cityTotal[g] < 0 ? 'text-red-600 font-medium' : r.cityTotal[g] === 0 ? 'text-slate-300' : 'text-slate-700 font-medium'}>
+                                  {r.cityTotal[g]}
+                                </span>
+                              </button>
+                            </td>
+                          ))}
+                          {showSelisihJktK && (
+                            <td className={`p-3 text-center font-medium ${selisih !== 0 ? 'bg-amber-50 text-amber-700' : 'text-slate-300'}`}>
+                              {selisih}
+                            </td>
+                          )}
+                          <td className="p-3 font-semibold text-slate-800">{r.total}</td>
+                        </tr>
+                      )
+                    })}
                     {visibleRows.length === 0 && (
                       <tr>
-                        <td colSpan={CITY_GROUPS.length + (showSkuColumn ? 4 : 3)} className="p-8 text-center text-slate-400">
+                        <td colSpan={CITY_GROUPS.length + (showSkuColumn ? 4 : 3) + (showSelisihJktK ? 1 : 0)} className="p-8 text-center text-slate-400">
                           {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
                         </td>
                       </tr>
@@ -1563,40 +1526,6 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
                 </>
               )}
             </table>
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {visibleRows.map((r) => (
-              <div key={r.productId} className="p-4">
-                <div className="text-xs text-indigo-600 mb-0.5">{r.kategori || '-'}</div>
-                <div className="font-medium text-slate-800">{r.name}</div>
-                {r.subjenis && <div className="text-xs text-slate-400 mb-2">{r.subjenis}</div>}
-                <div className="flex flex-wrap gap-3 mt-2">
-                  {modeDetail
-                    ? visibleSources.map((s) => (
-                        <div key={s.code} className="text-center">
-                          <div className="text-[10px] text-slate-400 uppercase">{s.label}</div>
-                          <div><CellQty cell={r.sources[s.code]} /></div>
-                        </div>
-                      ))
-                    : CITY_GROUPS.map((g) => (
-                        <button key={g} onClick={() => setRincian({ row: r, group: g })} className="text-center">
-                          <div className="text-[10px] text-slate-400 uppercase">{CITY_SHORT[g]}</div>
-                          <div className={r.cityTotal[g] < 0 ? 'text-red-600 font-semibold' : 'text-slate-700 font-semibold'}>{r.cityTotal[g]}</div>
-                        </button>
-                      ))}
-                  <div className="text-center">
-                    <div className="text-[10px] text-slate-400 uppercase">Total</div>
-                    <div className="text-slate-800 font-semibold">{r.total}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {visibleRows.length === 0 && (
-              <div className="p-8 text-center text-slate-400 text-sm">
-                {rows.length === 0 ? 'Belum ada data stok — coba sync dulu.' : 'Tidak ada yang cocok dengan pencarian.'}
-              </div>
-            )}
           </div>
         )}
 
@@ -1625,11 +1554,182 @@ function StokCabangMatrix({ isDesktopLayout, myBranchId }: { isDesktopLayout: bo
           onChangeHideZeroStock={setHideZeroStock}
           hiddenCols={hiddenCols}
           onChangeHiddenCols={setHiddenCols}
+          showSkuColumn={showSkuColumn}
+          onChangeShowSkuColumn={setShowSkuColumn}
+          showSelisihJktK={showSelisihJktK}
+          onChangeShowSelisihJktK={setShowSelisihJktK}
           onClose={() => setShowFilter(false)}
         />
       )}
 
       {rincian && <RincianSheet row={rincian.row} group={rincian.group} onClose={() => setRincian(null)} />}
+    </div>
+  )
+}
+
+// ---------- Tab: Desty ----------
+function StokDestyTab() {
+  const { rows, loading } = useStokCabangRows()
+  const [destySkuSet, setDestySkuSet] = useState<Set<string>>(new Set())
+  const [destyCount, setDestyCount] = useState(0)
+  const [showDestyUpload, setShowDestyUpload] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+
+  async function loadDestyList() {
+    try {
+      const skus = await loadDestyListedSkus()
+      setDestySkuSet(new Set(skus.map((s) => normalizeSku(s))))
+      setDestyCount(skus.length)
+    } catch {
+      setDestySkuSet(new Set())
+      setDestyCount(0)
+    }
+  }
+  useEffect(() => { loadDestyList() }, [])
+
+  // Produk yang SKU-nya ada di daftar Desty — ini yang ditampilkan
+  // sebagai "list barang yang ada di Desty" di tab ini.
+  const destyRows = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    let base = rows.filter((r) => r.sku && destySkuSet.has(normalizeSku(r.sku)))
+    if (q) base = base.filter((r) => `${r.name} ${r.sku}`.toLowerCase().includes(q))
+    return base.sort((a, b) => a.name.localeCompare(b.name))
+  }, [rows, destySkuSet, query])
+
+  // Ekspor format "Bulk Update On-Hand Stock" Desty — cuma produk yang
+  // SKU-nya ada di daftar destySkuSet (hasil upload "List SKU Desty"),
+  // TERMASUK yang stoknya 0 (biar Desty tau itemnya emang habis, bukan
+  // gak ke-export). Dikelompokkan per kota (blok Jakarta dulu, baru
+  // Solo, Bali, Purwokerto — BUKAN diselang-seling), semua di 1 sheet,
+  // header & merge cell dibikin match persis template resmi Desty biar
+  // bisa langsung diimport balik.
+  function exportToDesty() {
+    if (destyRows.length === 0) {
+      setMessage('Belum ada produk yang cocok dengan daftar SKU Desty — upload daftarnya dulu lewat tombol "Upload List SKU Desty".')
+      return
+    }
+    const header1 = ['Nama Produk', 'SKU Master', 'ID Gudang', 'Nama Gudang', 'ID Slot', 'Nama Slot', 'Stok Fisik', '']
+    const header2 = ['', '', '', '', '', '', 'Ubah Stok Final', 'Tambah atau Kurangi Stok']
+    const header3 = ['(Opsional)', '(Wajib)', '(Wajib)', '(Opsional)', '(Opsional)', '(Opsional)', '(Wajib)', '']
+    const header4 = [
+      '(Hanya untuk referensi, tidak wajib karena tidak digunakan untuk identifikasi produk)',
+      '(Kode SKU Produk Master, diperlukan untuk mengidentifikasi perubahan stok setiap produk)',
+      '(ID Gudang, diperlukan untuk mengidentifikasi gudang produk; data dapat diperoleh di file unduh Pengaturan Inventori Dengan Format)',
+      '(Hanya untuk referensi, tidak wajib karena tidak digunakan untuk identifikasi gudang produk)',
+      '(Masukkan ID Slot apabila produk sudah dialokasikan di Manajemen Rak; Jika dikosongkan, stok akan dialokasikan ke Slot Default)',
+      '(Hanya untuk referensi, tidak wajib karena tidak digunakan untuk identifikasi slot gudang)',
+      '(Masukkan stok final baru untuk SKU pada gudang atau slot terkait; kolom ini akan memiliki prioritas lebih tinggi dibanding kolom "Tambah atau Kurangi Stok" jika keduanya diisi',
+      '(Masukkan stok perubahan berupa penambahan atau pengurangan SKU pada gudang atau slot terkait; Jika ada simbol positif maka stok akan bertambah; Jika ada simbol negatif maka stok akan dikurangi)',
+    ]
+
+    const dataRows: (string | number)[][] = []
+    CITY_GROUPS.forEach((group) => {
+      destyRows.forEach((r) => {
+        dataRows.push([r.name, r.sku, DESTY_GUDANG_ID[group], group, '', '', r.cityTotal[group] ?? 0, ''])
+      })
+    })
+
+    const aoa = [header1, header2, header3, header4, ...dataRows]
+    const ws = XLSX.utils.aoa_to_sheet(aoa)
+    ws['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },
+      { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } },
+      { s: { r: 0, c: 2 }, e: { r: 1, c: 2 } },
+      { s: { r: 0, c: 3 }, e: { r: 1, c: 3 } },
+      { s: { r: 0, c: 4 }, e: { r: 1, c: 4 } },
+      { s: { r: 0, c: 5 }, e: { r: 1, c: 5 } },
+      { s: { r: 0, c: 6 }, e: { r: 0, c: 7 } },
+      { s: { r: 2, c: 6 }, e: { r: 2, c: 7 } },
+    ]
+    ws['!cols'] = [{ wch: 28 }, { wch: 20 }, { wch: 22 }, { wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 18 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'IND_Update_OnHandStock')
+    const dateStr = new Date().toISOString().slice(0, 10)
+    XLSX.writeFile(wb, `desty-update-stok-${dateStr}.xlsx`)
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2 items-center mb-3">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari produk yang ada di Desty..." className={inputCls + ' pl-8'} />
+        </div>
+        <button
+          onClick={() => setShowDestyUpload(true)}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}
+          title="Upload daftar SKU yang terdaftar di Desty"
+        >
+          <Upload size={14} /> List SKU Desty{destyCount > 0 ? ` (${destyCount})` : ''}
+        </button>
+        <button
+          onClick={exportToDesty}
+          disabled={destyCount === 0}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnPrimaryCls} disabled:opacity-40`}
+          title="Ekspor format Bulk Update On-Hand Stock Desty"
+        >
+          <Download size={14} /> Ekspor Desty
+        </button>
+      </div>
+
+      {message && <div className="mb-3 p-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600">{message}</div>}
+
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
+        <div className="flex items-center gap-2.5 p-4 border-b border-slate-100">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+            <PackageSearch size={18} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-slate-800">Barang yang Ada di Desty</div>
+            <div className="text-xs text-slate-400">{destyRows.length} dari {destyCount} SKU terdaftar ketemu di katalog kita</div>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="p-8 text-center text-slate-400"><Loader2 className="inline animate-spin mr-2" size={14} /> Memuat...</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-20 bg-white">
+                <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide bg-white">
+                  <th className="p-3 bg-white">Nama Produk</th>
+                  <th className="p-3 bg-white">SKU</th>
+                  {CITY_GROUPS.map((g) => (
+                    <th key={g} className="p-3 text-center bg-white">{CITY_SHORT[g]}</th>
+                  ))}
+                  <th className="p-3 text-center bg-white">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {destyRows.map((r) => (
+                  <tr key={r.productId} className="border-b border-slate-50">
+                    <td className="p-3">
+                      <div className="font-medium text-slate-800">{r.name}</div>
+                      {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
+                    </td>
+                    <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{r.sku || '-'}</td>
+                    {CITY_GROUPS.map((g) => (
+                      <td key={g} className="p-3 text-center text-slate-700">{r.cityTotal[g]}</td>
+                    ))}
+                    <td className="p-3 text-center font-semibold text-slate-800">{r.total}</td>
+                  </tr>
+                ))}
+                {destyRows.length === 0 && (
+                  <tr>
+                    <td colSpan={CITY_GROUPS.length + 3} className="p-8 text-center text-slate-400">
+                      {destyCount === 0
+                        ? 'Belum ada daftar SKU Desty — upload dulu lewat tombol "List SKU Desty".'
+                        : 'Belum ada produk di katalog kita yang cocok sama daftar SKU Desty ini.'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {showDestyUpload && (
         <DestyUploadModal
           onClose={() => setShowDestyUpload(false)}
@@ -1791,22 +1891,8 @@ function StokSupplierTab() {
   )
 }
 
-// Deteksi otomatis lebar layar buat nentuin tampilan desktop/mobile —
-// gantiin toggle manual "Mode Pratinjau" (itu cuma buat testing frontend
-// dulu, sekarang beneran ngikutin device asli).
-function useViewportIsDesktop() {
-  const [isDesktop, setIsDesktop] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 640 : true))
-  useEffect(() => {
-    function onResize() { setIsDesktop(window.innerWidth >= 640) }
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-  return isDesktop
-}
-
 export default function StokModule({ currentUserBranchId }: StokModuleProps) {
-  const [activeTab, setActiveTab] = useState<'cabang' | 'supplier'>('cabang')
-  const isDesktopLayout = useViewportIsDesktop()
+  const [activeTab, setActiveTab] = useState<'cabang' | 'supplier' | 'desty'>('cabang')
   const [showRiwayat, setShowRiwayat] = useState(false)
   const [syncLogs, setSyncLogs] = useState<SyncLogRow[]>([])
   const [uploadLogs, setUploadLogs] = useState<UploadLogRow[]>([])
@@ -1837,9 +1923,15 @@ export default function StokModule({ currentUserBranchId }: StokModuleProps) {
           </button>
           <button
             onClick={() => setActiveTab('supplier')}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium ${activeTab === 'supplier' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium ${activeTab === 'supplier' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
           >
             Stok Supplier
+          </button>
+          <button
+            onClick={() => setActiveTab('desty')}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium ${activeTab === 'desty' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}
+          >
+            Desty
           </button>
         </div>
         <button onClick={openRiwayat} className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}>
@@ -1847,7 +1939,7 @@ export default function StokModule({ currentUserBranchId }: StokModuleProps) {
         </button>
       </div>
 
-      {activeTab === 'cabang' ? <StokCabangMatrix isDesktopLayout={isDesktopLayout} myBranchId={currentUserBranchId} /> : <StokSupplierTab />}
+      {activeTab === 'cabang' ? <StokCabangMatrix myBranchId={currentUserBranchId} /> : activeTab === 'supplier' ? <StokSupplierTab /> : <StokDestyTab />}
 
       {showRiwayat && <RiwayatModal syncLogs={syncLogs} uploadLogs={uploadLogs} onClose={() => setShowRiwayat(false)} />}
     </div>
