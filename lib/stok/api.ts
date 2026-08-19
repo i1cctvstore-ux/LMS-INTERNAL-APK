@@ -1191,9 +1191,42 @@ export async function mergeDuplicateProducts(winnerId: string, loserIds: string[
 // tool "Cek Nama vs Accurate" (typo lama yang udah dibenerin di
 // Accurate tapi belum ikut ke-update di sistem kita, karena nama cuma
 // disalin sekali pas produk pertama kali dibikin, gak pernah di-sync
-// ulang otomatis).
+// ulang otomatis). Sekalian hapus catatan mismatch-nya (udah beres).
 export async function updateProductName(productId: string, name: string): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase.from('service_products').update({ name }).eq('id', productId)
   if (error) throw new Error(error.message)
+  await supabase.from('product_name_mismatches').delete().eq('product_id', productId)
+}
+
+// =====================================================
+// Daftar mismatch nama (produk kita vs Accurate) — dibaca dari tabel
+// product_name_mismatches yang diisi OTOMATIS tiap kali sync Accurate
+// jalan (lihat lib/stok/accurate-sync.ts). TIDAK manggil Accurate live
+// sama sekali, jadi instan -- versi sebelumnya (fetch ke route yang
+// manggil Accurate real-time buat ribuan barang) bikin timeout di
+// server, makanya diganti ke pendekatan ini.
+// =====================================================
+
+export type NameMismatchRow = { productId: string; sku: string; branchName: string; namaKita: string; namaAccurate: string }
+
+export async function loadNameMismatches(): Promise<NameMismatchRow[]> {
+  const supabase = createClient()
+  const rows: NameMismatchRow[] = []
+  const PAGE = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('product_name_mismatches')
+      .select('product_id, sku, branch_name, nama_kita, nama_accurate')
+      .order('detected_at', { ascending: false })
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    ;(data || []).forEach((r: any) =>
+      rows.push({ productId: r.product_id, sku: r.sku, branchName: r.branch_name, namaKita: r.nama_kita, namaAccurate: r.nama_accurate }),
+    )
+    if (!data || data.length < PAGE) break
+    from += PAGE
+  }
+  return rows
 }
