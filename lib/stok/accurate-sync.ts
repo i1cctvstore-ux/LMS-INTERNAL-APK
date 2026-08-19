@@ -577,16 +577,19 @@ export async function syncAccurateForBranch(
         if (detail.kategori) kategoriByProductId.set(productId, detail.kategori)
         else if (!kategoriByProductId.has(productId)) kategoriByProductId.set(productId, '-')
       })
-      // Upsert (bukan update satu-satu) -- ribuan produk kalau di-loop
-      // satu-satu bakal lambat banget/beresiko timeout. Payload cuma
-      // isi id+kategori, jadi kolom lain (sku, name, dst) TIDAK ikut
-      // ketimpa, aman.
+      // Update MURNI lewat RPC (bukan .upsert()) -- ribuan produk kalau
+      // di-loop satu-satu bakal lambat banget/beresiko timeout, tapi
+      // .upsert() kena bug: Postgres tetap nyoba jalur INSERT dulu buat
+      // ON CONFLICT, dan itu gagal karena kolom "sku" NOT NULL gak ada
+      // di payload (cuma id+kategori). RPC update_products_kategori_bulk
+      // (migration 20260820010000) ngelakuin UPDATE murni, aman dari
+      // masalah itu.
       const rows = Array.from(kategoriByProductId.entries()).map(([id, kategori]) => ({ id, kategori }))
       if (rows.length) {
         const CHUNK = 300
         for (let i = 0; i < rows.length; i += CHUNK) {
           const chunk = rows.slice(i, i + CHUNK)
-          const { error: catErr } = await supabase.from('service_products').upsert(chunk, { onConflict: 'id' })
+          const { error: catErr } = await supabase.rpc('update_products_kategori_bulk', { updates: chunk })
           if (catErr) throw new Error(`Gagal update kategori: ${catErr.message}`)
         }
       }
