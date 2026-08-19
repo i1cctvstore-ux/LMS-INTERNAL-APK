@@ -9,7 +9,7 @@ import {
   Users, MapPin, RefreshCw,
 } from "lucide-react";
 import { loadServiceData, persistServiceData, uploadServiceFile, loadBranchTrackedProductIds } from "@/lib/service/api";
-import { findDuplicateProductGroups, mergeDuplicateProducts, updateProductName } from "@/lib/stok/api";
+import { findDuplicateProductGroups, mergeDuplicateProducts, updateProductName, loadNameMismatches } from "@/lib/stok/api";
 import { generateTandaTerimaPDF, generateSuratJalanPDF, generatePickupPDF, generateInvoicePDF } from "@/lib/service/receipt-pdf";
 
 // ---------- helpers ----------
@@ -5973,12 +5973,8 @@ function CekNamaAccurateModal({ onClose }) {
   const [fixedSkus, setFixedSkus] = useState(new Set());
 
   useEffect(() => {
-    fetch("/api/servis/check-nama-accurate")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) setError(data.error);
-        else setResults(data.results || []);
-      })
+    loadNameMismatches()
+      .then(setResults)
       .catch((e) => setError(String(e?.message || e)))
       .finally(() => setLoading(false));
   }, []);
@@ -5999,10 +5995,10 @@ function CekNamaAccurateModal({ onClose }) {
   const pending = results.filter((r) => !fixedSkus.has(r.sku));
 
   return (
-    <Modal title="Cek Nama vs Accurate" subtitle="Nama produk kita dibandingkan nama LIVE di Accurate sekarang — cari typo lama yang udah dibenerin di Accurate tapi belum ikut ke sistem kita" onClose={onClose} wide>
+    <Modal title="Cek Nama vs Accurate" subtitle="Daftar produk yang namanya beda dari Accurate — otomatis kecatat tiap kali sync Accurate jalan, bukan narik data live" onClose={onClose} wide>
       {loading && (
         <div className="py-10 text-center text-sm text-slate-400 flex items-center justify-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Narik data live dari Accurate & membandingkan (bisa beberapa menit)...
+          <Loader2 size={14} className="animate-spin" /> Memuat...
         </div>
       )}
       {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700 mb-3">{error}</div>}
@@ -6039,7 +6035,7 @@ function CekNamaAccurateModal({ onClose }) {
             ))}
             {pending.length === 0 && (
               <div className="py-10 text-center text-sm text-slate-400">
-                {fixedSkus.size > 0 ? "Semua beda nama yang ketemu udah diperbaiki." : "Gak ada beda nama yang ketemu — nama produk kita udah sesuai Accurate semua."}
+                {fixedSkus.size > 0 ? "Semua beda nama yang ketemu udah diperbaiki." : "Gak ada beda nama tercatat — nama produk kita udah sesuai Accurate semua (per sync terakhir)."}
               </div>
             )}
           </div>
