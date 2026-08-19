@@ -9,7 +9,7 @@ import {
   Users, MapPin, RefreshCw,
 } from "lucide-react";
 import { loadServiceData, persistServiceData, uploadServiceFile, loadBranchTrackedProductIds } from "@/lib/service/api";
-import { findDuplicateProductGroups, mergeDuplicateProducts } from "@/lib/stok/api";
+import { findDuplicateProductGroups, mergeDuplicateProducts, updateProductName } from "@/lib/stok/api";
 import { generateTandaTerimaPDF, generateSuratJalanPDF, generatePickupPDF, generateInvoicePDF } from "@/lib/service/receipt-pdf";
 
 // ---------- helpers ----------
@@ -5959,6 +5959,96 @@ function CekDuplikatProdukModal({ onClose }) {
   );
 }
 
+// Modal "Cek Nama vs Accurate" — bandingin nama produk kita vs nama
+// LIVE di Accurate SEKARANG. Beda dari sync biasa: sync cuma nulis
+// nama pas produk PERTAMA KALI dibikin, gak pernah nge-refresh lagi —
+// jadi kalau ada typo di Accurate yang udah dibenerin belakangan
+// (misal "NVR" jadi "DVR"), salinan lama yang salah tetap nyangkut di
+// sistem kita. Tool ini nyari SEMUA kasus kayak gitu sekaligus.
+function CekNamaAccurateModal({ onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [results, setResults] = useState([]);
+  const [fixingSku, setFixingSku] = useState(null);
+  const [fixedSkus, setFixedSkus] = useState(new Set());
+
+  useEffect(() => {
+    fetch("/api/servis/check-nama-accurate")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) setError(data.error);
+        else setResults(data.results || []);
+      })
+      .catch((e) => setError(String(e?.message || e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleFix(row) {
+    setFixingSku(row.sku);
+    setError(null);
+    try {
+      await updateProductName(row.productId, row.namaAccurate);
+      setFixedSkus((prev) => new Set(prev).add(row.sku));
+    } catch (e) {
+      setError(`Gagal perbaiki "${row.sku}": ${e?.message || e}`);
+    } finally {
+      setFixingSku(null);
+    }
+  }
+
+  const pending = results.filter((r) => !fixedSkus.has(r.sku));
+
+  return (
+    <Modal title="Cek Nama vs Accurate" subtitle="Nama produk kita dibandingkan nama LIVE di Accurate sekarang — cari typo lama yang udah dibenerin di Accurate tapi belum ikut ke sistem kita" onClose={onClose} wide>
+      {loading && (
+        <div className="py-10 text-center text-sm text-slate-400 flex items-center justify-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Narik data live dari Accurate & membandingkan (bisa beberapa menit)...
+        </div>
+      )}
+      {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700 mb-3">{error}</div>}
+      {!loading && (
+        <>
+          <div className="mb-3 text-xs text-slate-500">
+            {pending.length} beda nama ketemu{fixedSkus.size > 0 ? ` · ${fixedSkus.size} udah diperbaiki barusan` : ""}.
+          </div>
+          <div className="space-y-2 max-h-[65vh] overflow-y-auto">
+            {pending.map((r) => (
+              <div key={r.sku} className="border border-slate-200 rounded-2xl p-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-xs font-mono text-slate-400">{r.sku} · {r.branchName}</span>
+                  <button
+                    onClick={() => handleFix(r)}
+                    disabled={fixingSku === r.sku}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {fixingSku === r.sku && <Loader2 size={12} className="animate-spin" />}
+                    {fixingSku === r.sku ? "Memperbaiki..." : "Perbaiki"}
+                  </button>
+                </div>
+                <div className="text-xs space-y-1">
+                  <div className="flex items-start gap-1.5">
+                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-50 text-red-600 font-medium">Kita</span>
+                    <span className="text-slate-600">{r.namaKita}</span>
+                  </div>
+                  <div className="flex items-start gap-1.5">
+                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">Accurate</span>
+                    <span className="text-slate-800 font-medium">{r.namaAccurate}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {pending.length === 0 && (
+              <div className="py-10 text-center text-sm text-slate-400">
+                {fixedSkus.size > 0 ? "Semua beda nama yang ketemu udah diperbaiki." : "Gak ada beda nama yang ketemu — nama produk kita udah sesuai Accurate semua."}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdateProduct, onRemoveProduct, onImportProducts }) {
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
@@ -5967,6 +6057,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
   const [showImport, setShowImport] = useState(false);
   const [showSkuCheck, setShowSkuCheck] = useState(false);
   const [showDupCheck, setShowDupCheck] = useState(false);
+  const [showNamaCheck, setShowNamaCheck] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("semua"); // 'semua' | 'cabang' | 'supplier' | 'manual'
   const canManage = role === "pusat";
   const allList = settings.products || [];
@@ -6016,6 +6107,11 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
           {canManage && (
             <button onClick={() => setShowDupCheck(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-amber-200 text-amber-700 hover:bg-amber-50">
               <AlertTriangle size={13} /> Cek Duplikat Produk
+            </button>
+          )}
+          {canManage && (
+            <button onClick={() => setShowNamaCheck(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-purple-200 text-purple-700 hover:bg-purple-50">
+              <RefreshCw size={13} /> Cek Nama vs Accurate
             </button>
           )}
           <button onClick={() => setAddOpen(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${btnPrimaryCls}`}>
@@ -6134,6 +6230,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
       )}
       {showSkuCheck && <CekSkuAccurateModal onClose={() => setShowSkuCheck(false)} />}
       {showDupCheck && <CekDuplikatProdukModal onClose={() => setShowDupCheck(false)} />}
+      {showNamaCheck && <CekNamaAccurateModal onClose={() => setShowNamaCheck(false)} />}
     </div>
   );
 }
