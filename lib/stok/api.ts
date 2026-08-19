@@ -1186,3 +1186,14 @@ export async function mergeDuplicateProducts(winnerId: string, loserIds: string[
     if (error) throw new Error(error.message)
   }
 }
+
+// Perbaikan manual nama produk 1 baris — dipakai tombol "Perbaiki" di
+// tool "Cek Nama vs Accurate" (typo lama yang udah dibenerin di
+// Accurate tapi belum ikut ke-update di sistem kita, karena nama cuma
+// disalin sekali pas produk pertama kali dibikin, gak pernah di-sync
+// ulang otomatis).
+export async function updateProductName(productId: string, name: string): Promise<void> {
+  const supabase = createClient()
+  const { error } = await supabase.from('service_products').update({ name }).eq('id', productId)
+  if (error) throw new Error(error.message)
+}
