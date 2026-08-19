@@ -415,13 +415,19 @@ export async function syncAccurateForBranch(
     }
 
     // Ambil katalog produk internal (sku -> id), sama pola kaya zoho-sync.
+    // Nama-nya JUGA diambil (nameByProductId) -- dipakai buat deteksi
+    // mismatch nama vs Accurate di bawah (lihat komentar FASE 3).
     const productIdBySku = new Map<string, string>()
+    const nameByProductId = new Map<string, string>()
     let from = 0
     const PAGE_SIZE = 1000
     while (true) {
-      const { data, error } = await supabase.from('service_products').select('id, sku').range(from, from + PAGE_SIZE - 1)
+      const { data, error } = await supabase.from('service_products').select('id, sku, name').range(from, from + PAGE_SIZE - 1)
       if (error) throw new Error(error.message)
-      ;(data || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
+      ;(data || []).forEach((p: any) => {
+        productIdBySku.set(normalizeSku(p.sku), p.id)
+        nameByProductId.set(p.id, p.name || '')
+      })
       if (!data || data.length < PAGE_SIZE) break
       from += PAGE_SIZE
     }
@@ -591,6 +597,48 @@ export async function syncAccurateForBranch(
           const chunk = rows.slice(i, i + CHUNK)
           const { error: catErr } = await supabase.rpc('update_products_kategori_bulk', { updates: chunk })
           if (catErr) throw new Error(`Gagal update kategori: ${catErr.message}`)
+        }
+      }
+    }
+
+    // Deteksi mismatch NAMA (bukan auto-timpa kayak kategori — nama
+    // cuma dicatat buat direview manual lewat tombol "Cek Nama vs
+    // Accurate", biar staff yang putusin, bukan sistem asal ganti).
+    // Numpang di detail yang UDAH diambil buat FASE 2/3 di atas, jadi
+    // gak ada panggilan API tambahan sama sekali — beda dari versi
+    // lama yang bikin route terpisah manggil Accurate lagi dari nol
+    // tiap kali tombolnya diklik (itu yang bikin timeout kemarin).
+    if (detailFetchFailed === 0) {
+      const touchedIds = new Set<string>()
+      const mismatchRows: { product_id: string; sku: string; branch_name: string; nama_kita: string; nama_accurate: string }[] = []
+      resolvedDetails.forEach((detail) => {
+        const productId = productIdBySku.get(normalizeSku(detail.matchSku))
+        if (!productId) return
+        touchedIds.add(productId)
+        const namaKita = (nameByProductId.get(productId) || '').trim()
+        const namaAccurate = detail.matchName.trim()
+        if (namaKita && namaAccurate && namaKita !== namaAccurate) {
+          mismatchRows.push({ product_id: productId, sku: detail.matchSku, branch_name: config.branchName, nama_kita: namaKita, nama_accurate: namaAccurate })
+        }
+      })
+      const touchedIdList = Array.from(touchedIds)
+      if (touchedIdList.length) {
+        const CHUNK = 300
+        for (let i = 0; i < touchedIdList.length; i += CHUNK) {
+          const chunk = touchedIdList.slice(i, i + CHUNK)
+          // Hapus dulu baris lama punya produk-produk yang disentuh sync
+          // ini (kalau sebelumnya mismatch tapi sekarang udah sama, baris
+          // lamanya harus hilang), baru insert ulang yang masih mismatch.
+          const { error: delErr } = await supabase.from('product_name_mismatches').delete().in('product_id', chunk)
+          if (delErr) throw new Error(`Gagal bersihin catatan mismatch nama lama: ${delErr.message}`)
+        }
+      }
+      if (mismatchRows.length) {
+        const CHUNK = 300
+        for (let i = 0; i < mismatchRows.length; i += CHUNK) {
+          const chunk = mismatchRows.slice(i, i + CHUNK)
+          const { error: insErr } = await supabase.from('product_name_mismatches').upsert(chunk, { onConflict: 'product_id' })
+          if (insErr) throw new Error(`Gagal catat mismatch nama: ${insErr.message}`)
         }
       }
     }
