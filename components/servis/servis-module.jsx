@@ -6058,6 +6058,7 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
   const [showSkuCheck, setShowSkuCheck] = useState(false);
   const [showDupCheck, setShowDupCheck] = useState(false);
   const [showNamaCheck, setShowNamaCheck] = useState(false);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("semua"); // 'semua' | 'cabang' | 'supplier' | 'manual'
   const canManage = role === "pusat";
   const allList = settings.products || [];
@@ -6100,19 +6101,39 @@ function ProdukSettingsPanel({ settings, claims, role, onAddProduct, onUpdatePro
             <Upload size={13} /> Import
           </button>
           {canManage && (
-            <button onClick={() => setShowSkuCheck(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-indigo-200 text-indigo-600 hover:bg-indigo-50">
-              <RefreshCw size={13} /> Cek SKU vs Accurate
-            </button>
-          )}
-          {canManage && (
-            <button onClick={() => setShowDupCheck(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-amber-200 text-amber-700 hover:bg-amber-50">
-              <AlertTriangle size={13} /> Cek Duplikat Produk
-            </button>
-          )}
-          {canManage && (
-            <button onClick={() => setShowNamaCheck(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-purple-200 text-purple-700 hover:bg-purple-50">
-              <RefreshCw size={13} /> Cek Nama vs Accurate
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowToolsMenu((v) => !v)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                <SlidersHorizontal size={13} /> Alat Bantu <ChevronDown size={12} />
+              </button>
+              {showToolsMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowToolsMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white rounded-2xl border border-slate-200 shadow-lg py-1.5 overflow-hidden">
+                    <button
+                      onClick={() => { setShowSkuCheck(true); setShowToolsMenu(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 text-left"
+                    >
+                      <RefreshCw size={13} className="text-indigo-600 shrink-0" /> Cek SKU vs Accurate
+                    </button>
+                    <button
+                      onClick={() => { setShowDupCheck(true); setShowToolsMenu(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 text-left"
+                    >
+                      <AlertTriangle size={13} className="text-amber-600 shrink-0" /> Cek Duplikat Produk
+                    </button>
+                    <button
+                      onClick={() => { setShowNamaCheck(true); setShowToolsMenu(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 text-left"
+                    >
+                      <RefreshCw size={13} className="text-purple-600 shrink-0" /> Cek Nama vs Accurate
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           )}
           <button onClick={() => setAddOpen(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${btnPrimaryCls}`}>
             <Plus size={13} /> Tambah Produk
