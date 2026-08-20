@@ -610,7 +610,12 @@ export async function syncAccurateForBranch(
     // tiap kali tombolnya diklik (itu yang bikin timeout kemarin).
     if (detailFetchFailed === 0) {
       const touchedIds = new Set<string>()
-      const mismatchRows: { product_id: string; sku: string; branch_name: string; nama_kita: string; nama_accurate: string }[] = []
+      // Map (bukan array) biar otomatis cuma 1 baris per productId --
+      // item normal & item "(K)"-nya bisa sama-sama nunjuk ke produk
+      // yang sama, kalau dua-duanya kebetulan mismatch bakal ganda
+      // dalam 1 batch upsert dan bikin Postgres error ("ON CONFLICT DO
+      // UPDATE command cannot affect row a second time").
+      const mismatchByProductId = new Map<string, { product_id: string; sku: string; branch_name: string; nama_kita: string; nama_accurate: string }>()
       resolvedDetails.forEach((detail) => {
         const productId = productIdBySku.get(normalizeSku(detail.matchSku))
         if (!productId) return
@@ -618,9 +623,10 @@ export async function syncAccurateForBranch(
         const namaKita = (nameByProductId.get(productId) || '').trim()
         const namaAccurate = detail.matchName.trim()
         if (namaKita && namaAccurate && namaKita !== namaAccurate) {
-          mismatchRows.push({ product_id: productId, sku: detail.matchSku, branch_name: config.branchName, nama_kita: namaKita, nama_accurate: namaAccurate })
+          mismatchByProductId.set(productId, { product_id: productId, sku: detail.matchSku, branch_name: config.branchName, nama_kita: namaKita, nama_accurate: namaAccurate })
         }
       })
+      const mismatchRows = Array.from(mismatchByProductId.values())
       const touchedIdList = Array.from(touchedIds)
       if (touchedIdList.length) {
         const CHUNK = 300
