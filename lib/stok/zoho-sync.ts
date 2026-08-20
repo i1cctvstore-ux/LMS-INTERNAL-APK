@@ -226,15 +226,19 @@ export async function syncZohoForBranch(
     // Ambil seluruh katalog produk (sku -> id) lewat paging, sama seperti
     // di lib/service/api.ts — jumlah produk sudah pernah lebih dari 1000.
     const productIdBySku = new Map<string, string>()
+    const nameByProductId = new Map<string, string>()
     let from = 0
     const PAGE_SIZE = 1000
     while (true) {
       const { data, error } = await supabase
         .from('service_products')
-        .select('id, sku')
+        .select('id, sku, name')
         .range(from, from + PAGE_SIZE - 1)
       if (error) throw new Error(error.message)
-      ;(data || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
+      ;(data || []).forEach((p: any) => {
+        productIdBySku.set(normalizeSku(p.sku), p.id)
+        nameByProductId.set(p.id, p.name || '')
+      })
       if (!data || data.length < PAGE_SIZE) break
       from += PAGE_SIZE
     }
@@ -252,6 +256,50 @@ export async function syncZohoForBranch(
       productIdBySku,
       zohoItems.map((item) => ({ sku: item.sku, name: item.name })),
     )
+
+    // Nyatet hasil cek nama (produk kita vs nama LIVE di Zoho) — pola
+    // sama kayak lib/stok/accurate-sync.ts, numpang di data yang udah
+    // diambil di atas, gak ada panggilan API tambahan. Nyimpen SEMUA
+    // hasil (cocok DAN beda, ditandai kolom status), bukan cuma yang
+    // beda — biar bisa lihat juga daftar yang udah sesuai per akun.
+    {
+      const touchedIds = new Set<string>()
+      const checkByProductId = new Map<string, { product_id: string; sku: string; branch_name: string; nama_kita: string; nama_accurate: string; status: string }>()
+      zohoItems.forEach((item) => {
+        const productId = productIdBySku.get(normalizeSku(item.sku))
+        if (!productId) return
+        touchedIds.add(productId)
+        const namaKita = (nameByProductId.get(productId) || '').trim()
+        const namaZoho = item.name.trim()
+        if (!namaKita || !namaZoho) return
+        checkByProductId.set(productId, {
+          product_id: productId,
+          sku: item.sku,
+          branch_name: config.branchName,
+          nama_kita: namaKita,
+          nama_accurate: namaZoho,
+          status: namaKita === namaZoho ? 'match' : 'mismatch',
+        })
+      })
+      const checkRows = Array.from(checkByProductId.values())
+      const touchedIdList = Array.from(touchedIds)
+      if (touchedIdList.length) {
+        const CHUNK = 300
+        for (let i = 0; i < touchedIdList.length; i += CHUNK) {
+          const chunk = touchedIdList.slice(i, i + CHUNK)
+          const { error: delErr } = await supabase.from('product_name_checks').delete().in('product_id', chunk)
+          if (delErr) throw new Error(`Gagal bersihin catatan cek nama lama: ${delErr.message}`)
+        }
+      }
+      if (checkRows.length) {
+        const CHUNK = 300
+        for (let i = 0; i < checkRows.length; i += CHUNK) {
+          const chunk = checkRows.slice(i, i + CHUNK)
+          const { error: insErr } = await supabase.from('product_name_checks').upsert(chunk, { onConflict: 'product_id' })
+          if (insErr) throw new Error(`Gagal catat hasil cek nama: ${insErr.message}`)
+        }
+      }
+    }
 
     // Kunci pakai product_id (bukan array biasa) supaya kalau ada 2+ item
     // Zoho dengan SKU berbeda tapi ke-normalisasi jadi sama & mengarah ke
