@@ -9,7 +9,7 @@ import {
   Users, MapPin, RefreshCw,
 } from "lucide-react";
 import { loadServiceData, persistServiceData, uploadServiceFile, loadBranchTrackedProductIds } from "@/lib/service/api";
-import { findDuplicateProductGroups, mergeDuplicateProducts, mergeAllSafeDuplicateGroups, updateProductName, loadNameMismatches, fixAllNameMismatches } from "@/lib/stok/api";
+import { findDuplicateProductGroups, mergeDuplicateProducts, mergeAllSafeDuplicateGroups, updateProductName, loadNameChecks, fixAllNameMismatches } from "@/lib/stok/api";
 import { generateTandaTerimaPDF, generateSuratJalanPDF, generatePickupPDF, generateInvoicePDF } from "@/lib/service/receipt-pdf";
 
 // ---------- helpers ----------
@@ -6017,19 +6017,23 @@ function CekDuplikatProdukModal({ onClose }) {
 function CekNamaAccurateModal({ onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [results, setResults] = useState([]);
+  const [allRows, setAllRows] = useState([]);
   const [fixingSku, setFixingSku] = useState(null);
   const [fixedSkus, setFixedSkus] = useState(new Set());
   const [fixingAll, setFixingAll] = useState(false);
-  const [allFixedDone, setAllFixedDone] = useState(false);
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState("mismatch"); // "mismatch" | "match"
+  const [branchFilter, setBranchFilter] = useState("Semua");
 
-  useEffect(() => {
-    loadNameMismatches()
-      .then(setResults)
+  function load() {
+    setLoading(true);
+    setError(null);
+    loadNameChecks()
+      .then(setAllRows)
       .catch((e) => setError(String(e?.message || e)))
       .finally(() => setLoading(false));
-  }, []);
+  }
+  useEffect(() => { load(); }, []);
 
   async function handleFix(row) {
     setFixingSku(row.sku);
@@ -6048,8 +6052,12 @@ function CekNamaAccurateModal({ onClose }) {
     setFixingAll(true);
     setError(null);
     try {
-      await fixAllNameMismatches(pending);
-      setAllFixedDone(true);
+      await fixAllNameMismatches(filtered);
+      setFixedSkus((prev) => {
+        const next = new Set(prev);
+        filtered.forEach((r) => next.add(r.sku));
+        return next;
+      });
     } catch (e) {
       setError(`Gagal perbaiki semua: ${e?.message || e}`);
     } finally {
@@ -6057,14 +6065,20 @@ function CekNamaAccurateModal({ onClose }) {
     }
   }
 
-  const notDone = allFixedDone ? [] : results.filter((r) => !fixedSkus.has(r.sku));
+  const branchOptions = ["Semua", ...Array.from(new Set(allRows.map((r) => r.branchName))).sort()];
+  const notFixed = allRows.filter((r) => !fixedSkus.has(r.sku));
+  const byTab = notFixed.filter((r) => r.status === tab);
+  const byBranch = branchFilter === "Semua" ? byTab : byTab.filter((r) => r.branchName === branchFilter);
   const q = query.trim().toLowerCase();
-  const pending = q
-    ? notDone.filter((r) => r.sku.toLowerCase().includes(q) || r.namaKita.toLowerCase().includes(q) || r.namaAccurate.toLowerCase().includes(q))
-    : notDone;
+  const filtered = q
+    ? byBranch.filter((r) => r.sku.toLowerCase().includes(q) || r.namaKita.toLowerCase().includes(q) || r.namaAccurate.toLowerCase().includes(q))
+    : byBranch;
+
+  const mismatchCount = notFixed.filter((r) => r.status === "mismatch").length;
+  const matchCount = notFixed.filter((r) => r.status === "match").length;
 
   return (
-    <Modal title="Cek Nama vs Accurate" subtitle="Daftar produk yang namanya beda dari Accurate — otomatis kecatat tiap kali sync Accurate jalan, bukan narik data live" onClose={onClose} wide>
+    <Modal title="Cek Nama vs Accurate" subtitle="Nama produk kita dibandingkan Accurate/Zoho — otomatis kecatat tiap kali sync jalan, bukan narik data live" onClose={onClose} wide>
       {loading && (
         <div className="py-10 text-center text-sm text-slate-400 flex items-center justify-center gap-2">
           <Loader2 size={14} className="animate-spin" /> Memuat...
@@ -6073,59 +6087,93 @@ function CekNamaAccurateModal({ onClose }) {
       {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700 mb-3">{error}</div>}
       {!loading && (
         <>
-          <div className="relative mb-3">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Cari nama atau SKU..."
-              className="w-full border border-slate-200 rounded-full pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-            />
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-full w-fit mb-3">
+            <button
+              onClick={() => setTab("mismatch")}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium ${tab === "mismatch" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}
+            >
+              Beda ({mismatchCount})
+            </button>
+            <button
+              onClick={() => setTab("match")}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium ${tab === "match" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}
+            >
+              Sudah Sesuai ({matchCount})
+            </button>
           </div>
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="text-xs text-slate-500">
-              {pending.length} beda nama ketemu{(fixedSkus.size > 0 || allFixedDone) ? ` · ${allFixedDone ? results.length : fixedSkus.size} udah diperbaiki barusan` : ""}.
+
+          <div className="flex gap-2 mb-3">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Cari nama atau SKU..."
+                className="w-full border border-slate-200 rounded-full pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
             </div>
-            {pending.length > 1 && (
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              className="border border-slate-200 rounded-full px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            >
+              {branchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="text-xs text-slate-500">{filtered.length} ditampilkan.</div>
+            {tab === "mismatch" && filtered.length > 1 && (
               <button
                 onClick={handleFixAll}
                 disabled={fixingAll}
                 className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
               >
                 {fixingAll && <Loader2 size={12} className="animate-spin" />}
-                {fixingAll ? "Memperbaiki semua..." : `Perbaiki Semua (${pending.length})`}
+                {fixingAll ? "Memperbaiki semua..." : `Perbaiki Semua (${filtered.length})`}
               </button>
             )}
           </div>
-          <div className="space-y-2 max-h-[65vh] overflow-y-auto">
-            {pending.map((r) => (
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            {filtered.map((r) => (
               <div key={r.sku} className="border border-slate-200 rounded-2xl p-3">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <span className="text-xs font-mono text-slate-400">{r.sku} · {r.branchName}</span>
-                  <button
-                    onClick={() => handleFix(r)}
-                    disabled={fixingSku === r.sku}
-                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    {fixingSku === r.sku && <Loader2 size={12} className="animate-spin" />}
-                    {fixingSku === r.sku ? "Memperbaiki..." : "Perbaiki"}
-                  </button>
+                  {r.status === "mismatch" && (
+                    <button
+                      onClick={() => handleFix(r)}
+                      disabled={fixingSku === r.sku}
+                      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {fixingSku === r.sku && <Loader2 size={12} className="animate-spin" />}
+                      {fixingSku === r.sku ? "Memperbaiki..." : "Perbaiki"}
+                    </button>
+                  )}
+                  {r.status === "match" && (
+                    <span className="shrink-0 flex items-center gap-1 text-xs font-medium text-emerald-700">
+                      <CheckCircle2 size={13} /> Sesuai
+                    </span>
+                  )}
                 </div>
-                <div className="text-xs space-y-1">
-                  <div className="flex items-start gap-1.5">
-                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-50 text-red-600 font-medium">Kita</span>
-                    <span className="text-slate-600">{r.namaKita}</span>
+                {r.status === "mismatch" ? (
+                  <div className="text-xs space-y-1">
+                    <div className="flex items-start gap-1.5">
+                      <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-50 text-red-600 font-medium">Kita</span>
+                      <span className="text-slate-600">{r.namaKita}</span>
+                    </div>
+                    <div className="flex items-start gap-1.5">
+                      <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">Accurate</span>
+                      <span className="text-slate-800 font-medium">{r.namaAccurate}</span>
+                    </div>
                   </div>
-                  <div className="flex items-start gap-1.5">
-                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">Accurate</span>
-                    <span className="text-slate-800 font-medium">{r.namaAccurate}</span>
-                  </div>
-                </div>
+                ) : (
+                  <div className="text-xs text-slate-700">{r.namaKita}</div>
+                )}
               </div>
             ))}
-            {pending.length === 0 && (
+            {filtered.length === 0 && (
               <div className="py-10 text-center text-sm text-slate-400">
-                {fixedSkus.size > 0 ? "Semua beda nama yang ketemu udah diperbaiki." : "Gak ada beda nama tercatat — nama produk kita udah sesuai Accurate semua (per sync terakhir)."}
+                {tab === "mismatch" ? "Gak ada beda nama tercatat." : "Belum ada yang tercatat sesuai."}
               </div>
             )}
           </div>
