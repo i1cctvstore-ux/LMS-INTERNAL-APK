@@ -1027,9 +1027,35 @@ function deviceTypeTag(nameUpper: string): 'DVR' | 'NVR' | null {
   if (nameUpper.startsWith('NVR ')) return 'NVR'
   return null
 }
+// INDOOR vs OUTDOOR = dua device beda (kayak DVR vs NVR) meski nama
+// dasarnya sama — normalizeNameForDupCheck di atas SENGAJA buang kata
+// ini biar bisa nangkep kasus lain (mis. "X OUTDOOR" vs "X" doang),
+// tapi itu artinya perlu pengecekan konflik terpisah di sini juga,
+// SAMA PERSIS pola DVR/NVR.
+function envTypeTag(nameUpper: string): 'INDOOR' | 'OUTDOOR' | null {
+  if (/\bOUTDOOR\b/.test(nameUpper)) return 'OUTDOOR'
+  if (/\bINDOOR\b/.test(nameUpper)) return 'INDOOR'
+  return null
+}
+// Normalisasi yang MEMPERTAHANKAN nilai desimal (koma jadi titik),
+// beda dari normalizeNameForDupCheck yang buang SEMUA tanda baca
+// (termasuk koma desimal) — dipakai buat deteksi kasus berbahaya kayak
+// "KABEL HDMI 1,5M" vs "KABEL HDMI 15M": dua-duanya ke-grup jadi 1
+// (sama-sama jadi "...15M" kalau tanda bacanya dibuang total), padahal
+// nilainya beda (1,5 meter vs 15 meter). Kalau versi "tetep ada
+// desimal"-nya BEDA di antara anggota grup, berarti bahaya, HARUS
+// ditandai sebagai konflik juga.
+function normalizePreserveDecimal(s: string): string {
+  return (s || '')
+    .toUpperCase()
+    .trim()
+    .replace(/^(CAMERA|DVR|NVR)\s+/, '')
+    .replace(/(\d),(\d)/g, '$1.$2')
+    .replace(/[^A-Z0-9.]+/g, '')
+}
 
 export type DuplicateProductItem = { id: string; sku: string; name: string; kategori: string | null; totalStock: number }
-export type DuplicateProductGroup = { nameKey: string; products: DuplicateProductItem[]; hasTypeConflict: boolean }
+export type DuplicateProductGroup = { nameKey: string; products: DuplicateProductItem[]; hasTypeConflict: boolean; conflictReason: string | null }
 
 export async function findDuplicateProductGroups(): Promise<DuplicateProductGroup[]> {
   const supabase = createClient()
@@ -1072,11 +1098,25 @@ export async function findDuplicateProductGroups(): Promise<DuplicateProductGrou
   const result: DuplicateProductGroup[] = []
   groups.forEach((list, key) => {
     if (list.length < 2) return
-    const types = new Set(list.map((p) => deviceTypeTag((p.name || '').toUpperCase().trim())).filter(Boolean))
+    const deviceTypes = new Set(list.map((p) => deviceTypeTag((p.name || '').toUpperCase().trim())).filter(Boolean))
+    const envTypes = new Set(list.map((p) => envTypeTag((p.name || '').toUpperCase().trim())).filter(Boolean))
+    // Kalau versi "tetep ada desimal"-nya beda-beda di antara anggota
+    // grup (bukan cuma beda gara-gara koma-vs-titik yang nilainya
+    // sama), berarti ada kemungkinan real beda ukuran/nilai.
+    const decimalVariants = new Set(list.map((p) => normalizePreserveDecimal(p.name)))
+    const hasDecimalConflict = decimalVariants.size > 1
+    const hasTypeConflict = deviceTypes.size > 1 || envTypes.size > 1 || hasDecimalConflict
+    const conflictReason = deviceTypes.size > 1
+      ? 'Campuran DVR & NVR — device beda meski kode model sama'
+      : envTypes.size > 1
+        ? 'Campuran Indoor & Outdoor — device beda meski nama dasarnya sama'
+        : hasDecimalConflict
+          ? 'Ada kemungkinan beda ukuran/nilai (mis. "1,5M" vs "15M") — tanda baca desimalnya beda'
+          : null
     const withStock = list
       .map((p) => ({ ...p, totalStock: stockByProduct.get(p.id) || 0 }))
       .sort((a, b) => b.totalStock - a.totalStock || (a.kategori ? -1 : 1))
-    result.push({ nameKey: key, products: withStock, hasTypeConflict: types.size > 1 })
+    result.push({ nameKey: key, products: withStock, hasTypeConflict, conflictReason })
   })
 
   return result.sort((a, b) => b.products.length - a.products.length)
@@ -1187,6 +1227,23 @@ export async function mergeDuplicateProducts(winnerId: string, loserIds: string[
   }
 }
 
+// Gabung SEMUA grup sekaligus — dipakai tombol "Gabung Semua". Grup
+// yang `hasTypeConflict` OTOMATIS DI-SKIP (gak ikut digabung sama
+// sekali), biar tombol ini gak mungkin salah gabung DVR/NVR, Indoor/
+// Outdoor, atau ukuran yang beda. Return jumlah grup yang beneran
+// digabung, biar UI bisa laporin ke user grup mana yang di-skip.
+export async function mergeAllSafeDuplicateGroups(groups: DuplicateProductGroup[]): Promise<{ merged: number; skipped: number }> {
+  const safeGroups = groups.filter((g) => !g.hasTypeConflict)
+  let merged = 0
+  for (const g of safeGroups) {
+    const [winner, ...losers] = g.products
+    if (losers.length === 0) continue
+    await mergeDuplicateProducts(winner.id, losers.map((l) => l.id))
+    merged += 1
+  }
+  return { merged, skipped: groups.length - safeGroups.length }
+}
+
 // Perbaikan manual nama produk 1 baris — dipakai tombol "Perbaiki" di
 // tool "Cek Nama vs Accurate" (typo lama yang udah dibenerin di
 // Accurate tapi belum ikut ke-update di sistem kita, karena nama cuma
@@ -1229,4 +1286,26 @@ export async function loadNameMismatches(): Promise<NameMismatchRow[]> {
     from += PAGE
   }
   return rows
+}
+
+// Perbaiki SEMUA mismatch sekaligus — dipakai tombol "Perbaiki Semua"
+// (biar gak perlu klik satu-satu kalau daftarnya panjang). Lewat RPC
+// (bukan .upsert()) biar aman dari bug NOT NULL kayak kejadian
+// sebelumnya di update kategori.
+export async function fixAllNameMismatches(rows: NameMismatchRow[]): Promise<void> {
+  const supabase = createClient()
+  if (rows.length === 0) return
+  const updates = rows.map((r) => ({ id: r.productId, name: r.namaAccurate }))
+  const ids = rows.map((r) => r.productId)
+  const CHUNK = 300
+  for (let i = 0; i < updates.length; i += CHUNK) {
+    const chunk = updates.slice(i, i + CHUNK)
+    const { error } = await supabase.rpc('update_products_name_bulk', { updates: chunk })
+    if (error) throw new Error(error.message)
+  }
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK)
+    const { error } = await supabase.from('product_name_mismatches').delete().in('product_id', chunk)
+    if (error) throw new Error(error.message)
+  }
 }
