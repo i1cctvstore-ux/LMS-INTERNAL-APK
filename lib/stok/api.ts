@@ -1248,39 +1248,42 @@ export async function mergeAllSafeDuplicateGroups(groups: DuplicateProductGroup[
 // tool "Cek Nama vs Accurate" (typo lama yang udah dibenerin di
 // Accurate tapi belum ikut ke-update di sistem kita, karena nama cuma
 // disalin sekali pas produk pertama kali dibikin, gak pernah di-sync
-// ulang otomatis). Sekalian hapus catatan mismatch-nya (udah beres).
+// ulang otomatis). Sekalian update catatan cek-nya jadi "match".
 export async function updateProductName(productId: string, name: string): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase.from('service_products').update({ name }).eq('id', productId)
   if (error) throw new Error(error.message)
-  await supabase.from('product_name_mismatches').delete().eq('product_id', productId)
+  await supabase.from('product_name_checks').update({ nama_kita: name, status: 'match' }).eq('product_id', productId)
 }
 
 // =====================================================
-// Daftar mismatch nama (produk kita vs Accurate) — dibaca dari tabel
-// product_name_mismatches yang diisi OTOMATIS tiap kali sync Accurate
-// jalan (lihat lib/stok/accurate-sync.ts). TIDAK manggil Accurate live
-// sama sekali, jadi instan -- versi sebelumnya (fetch ke route yang
+// Hasil cek nama (produk kita vs Accurate/Zoho) — dibaca dari tabel
+// product_name_checks yang diisi OTOMATIS tiap kali sync jalan (lihat
+// lib/stok/accurate-sync.ts & zoho-sync.ts). Nyimpen SEMUA hasil
+// (cocok DAN beda, kolom `status`), TIDAK manggil Accurate/Zoho live
+// sama sekali, jadi instan -- versi paling awal (fetch ke route yang
 // manggil Accurate real-time buat ribuan barang) bikin timeout di
-// server, makanya diganti ke pendekatan ini.
+// server, makanya diganti ke pendekatan nyimpen-di-sync ini.
 // =====================================================
 
-export type NameMismatchRow = { productId: string; sku: string; branchName: string; namaKita: string; namaAccurate: string }
+export type NameCheckRow = { productId: string; sku: string; branchName: string; namaKita: string; namaAccurate: string; status: 'match' | 'mismatch' }
 
-export async function loadNameMismatches(): Promise<NameMismatchRow[]> {
+export async function loadNameChecks(status?: 'match' | 'mismatch'): Promise<NameCheckRow[]> {
   const supabase = createClient()
-  const rows: NameMismatchRow[] = []
+  const rows: NameCheckRow[] = []
   const PAGE = 1000
   let from = 0
   while (true) {
-    const { data, error } = await supabase
-      .from('product_name_mismatches')
-      .select('product_id, sku, branch_name, nama_kita, nama_accurate')
-      .order('detected_at', { ascending: false })
+    let q = supabase
+      .from('product_name_checks')
+      .select('product_id, sku, branch_name, nama_kita, nama_accurate, status')
+      .order('checked_at', { ascending: false })
       .range(from, from + PAGE - 1)
+    if (status) q = q.eq('status', status)
+    const { data, error } = await q
     if (error) throw new Error(error.message)
     ;(data || []).forEach((r: any) =>
-      rows.push({ productId: r.product_id, sku: r.sku, branchName: r.branch_name, namaKita: r.nama_kita, namaAccurate: r.nama_accurate }),
+      rows.push({ productId: r.product_id, sku: r.sku, branchName: r.branch_name, namaKita: r.nama_kita, namaAccurate: r.nama_accurate, status: r.status }),
     )
     if (!data || data.length < PAGE) break
     from += PAGE
@@ -1292,7 +1295,7 @@ export async function loadNameMismatches(): Promise<NameMismatchRow[]> {
 // (biar gak perlu klik satu-satu kalau daftarnya panjang). Lewat RPC
 // (bukan .upsert()) biar aman dari bug NOT NULL kayak kejadian
 // sebelumnya di update kategori.
-export async function fixAllNameMismatches(rows: NameMismatchRow[]): Promise<void> {
+export async function fixAllNameMismatches(rows: NameCheckRow[]): Promise<void> {
   const supabase = createClient()
   if (rows.length === 0) return
   const updates = rows.map((r) => ({ id: r.productId, name: r.namaAccurate }))
@@ -1305,7 +1308,7 @@ export async function fixAllNameMismatches(rows: NameMismatchRow[]): Promise<voi
   }
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK)
-    const { error } = await supabase.from('product_name_mismatches').delete().in('product_id', chunk)
+    const { error } = await supabase.from('product_name_checks').update({ status: 'match' }).in('product_id', chunk)
     if (error) throw new Error(error.message)
   }
 }
