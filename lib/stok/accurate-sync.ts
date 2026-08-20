@@ -608,43 +608,51 @@ export async function syncAccurateForBranch(
     // gak ada panggilan API tambahan sama sekali — beda dari versi
     // lama yang bikin route terpisah manggil Accurate lagi dari nol
     // tiap kali tombolnya diklik (itu yang bikin timeout kemarin).
+    // SEKARANG nyimpen SEMUA hasil cek (cocok DAN beda, ditandai kolom
+    // status) — bukan cuma yang beda — biar bisa lihat juga daftar yang
+    // udah sesuai per akun, gak cuma yang bermasalah.
     if (detailFetchFailed === 0) {
       const touchedIds = new Set<string>()
       // Map (bukan array) biar otomatis cuma 1 baris per productId --
       // item normal & item "(K)"-nya bisa sama-sama nunjuk ke produk
-      // yang sama, kalau dua-duanya kebetulan mismatch bakal ganda
+      // yang sama, kalau dua-duanya kebetulan hasilnya sama bakal ganda
       // dalam 1 batch upsert dan bikin Postgres error ("ON CONFLICT DO
       // UPDATE command cannot affect row a second time").
-      const mismatchByProductId = new Map<string, { product_id: string; sku: string; branch_name: string; nama_kita: string; nama_accurate: string }>()
+      const checkByProductId = new Map<string, { product_id: string; sku: string; branch_name: string; nama_kita: string; nama_accurate: string; status: string }>()
       resolvedDetails.forEach((detail) => {
         const productId = productIdBySku.get(normalizeSku(detail.matchSku))
         if (!productId) return
         touchedIds.add(productId)
         const namaKita = (nameByProductId.get(productId) || '').trim()
         const namaAccurate = detail.matchName.trim()
-        if (namaKita && namaAccurate && namaKita !== namaAccurate) {
-          mismatchByProductId.set(productId, { product_id: productId, sku: detail.matchSku, branch_name: config.branchName, nama_kita: namaKita, nama_accurate: namaAccurate })
-        }
+        if (!namaKita || !namaAccurate) return
+        checkByProductId.set(productId, {
+          product_id: productId,
+          sku: detail.matchSku,
+          branch_name: config.branchName,
+          nama_kita: namaKita,
+          nama_accurate: namaAccurate,
+          status: namaKita === namaAccurate ? 'match' : 'mismatch',
+        })
       })
-      const mismatchRows = Array.from(mismatchByProductId.values())
+      const checkRows = Array.from(checkByProductId.values())
       const touchedIdList = Array.from(touchedIds)
       if (touchedIdList.length) {
         const CHUNK = 300
         for (let i = 0; i < touchedIdList.length; i += CHUNK) {
           const chunk = touchedIdList.slice(i, i + CHUNK)
           // Hapus dulu baris lama punya produk-produk yang disentuh sync
-          // ini (kalau sebelumnya mismatch tapi sekarang udah sama, baris
-          // lamanya harus hilang), baru insert ulang yang masih mismatch.
-          const { error: delErr } = await supabase.from('product_name_mismatches').delete().in('product_id', chunk)
-          if (delErr) throw new Error(`Gagal bersihin catatan mismatch nama lama: ${delErr.message}`)
+          // ini, baru insert ulang hasil terbaru (match atau mismatch).
+          const { error: delErr } = await supabase.from('product_name_checks').delete().in('product_id', chunk)
+          if (delErr) throw new Error(`Gagal bersihin catatan cek nama lama: ${delErr.message}`)
         }
       }
-      if (mismatchRows.length) {
+      if (checkRows.length) {
         const CHUNK = 300
-        for (let i = 0; i < mismatchRows.length; i += CHUNK) {
-          const chunk = mismatchRows.slice(i, i + CHUNK)
-          const { error: insErr } = await supabase.from('product_name_mismatches').upsert(chunk, { onConflict: 'product_id' })
-          if (insErr) throw new Error(`Gagal catat mismatch nama: ${insErr.message}`)
+        for (let i = 0; i < checkRows.length; i += CHUNK) {
+          const chunk = checkRows.slice(i, i + CHUNK)
+          const { error: insErr } = await supabase.from('product_name_checks').upsert(chunk, { onConflict: 'product_id' })
+          if (insErr) throw new Error(`Gagal catat hasil cek nama: ${insErr.message}`)
         }
       }
     }
@@ -785,13 +793,17 @@ export async function syncAccurateSoloMultiGudang(
     const detailFetchFailed = failedIds.length
 
     const productIdBySku = new Map<string, string>()
+    const nameByProductId = new Map<string, string>()
     {
       let from = 0
       const PAGE_SIZE = 1000
       while (true) {
-        const { data, error } = await supabase.from('service_products').select('id, sku').range(from, from + PAGE_SIZE - 1)
+        const { data, error } = await supabase.from('service_products').select('id, sku, name').range(from, from + PAGE_SIZE - 1)
         if (error) throw new Error(error.message)
-        ;(data || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
+        ;(data || []).forEach((p: any) => {
+          productIdBySku.set(normalizeSku(p.sku), p.id)
+          nameByProductId.set(p.id, p.name || '')
+        })
         if (!data || data.length < PAGE_SIZE) break
         from += PAGE_SIZE
       }
@@ -802,6 +814,48 @@ export async function syncAccurateSoloMultiGudang(
       productIdBySku,
       allDetails.map((d) => ({ sku: d.no, name: d.name })),
     )
+
+    // Deteksi mismatch nama — pola sama kayak syncAccurateForBranch,
+    // numpang di detail yang udah diambil di atas, gak ada panggilan
+    // API tambahan.
+    if (detailFetchFailed === 0) {
+      const touchedIds = new Set<string>()
+      const checkByProductId = new Map<string, { product_id: string; sku: string; branch_name: string; nama_kita: string; nama_accurate: string; status: string }>()
+      allDetails.forEach((d) => {
+        const productId = productIdBySku.get(normalizeSku(d.no))
+        if (!productId) return
+        touchedIds.add(productId)
+        const namaKita = (nameByProductId.get(productId) || '').trim()
+        const namaAccurate = d.name.trim()
+        if (!namaKita || !namaAccurate) return
+        checkByProductId.set(productId, {
+          product_id: productId,
+          sku: d.no,
+          branch_name: 'Accurate Solo (multi-gudang)',
+          nama_kita: namaKita,
+          nama_accurate: namaAccurate,
+          status: namaKita === namaAccurate ? 'match' : 'mismatch',
+        })
+      })
+      const checkRows = Array.from(checkByProductId.values())
+      const touchedIdList = Array.from(touchedIds)
+      if (touchedIdList.length) {
+        const CHUNK = 300
+        for (let i = 0; i < touchedIdList.length; i += CHUNK) {
+          const chunk = touchedIdList.slice(i, i + CHUNK)
+          const { error: delErr } = await supabase.from('product_name_checks').delete().in('product_id', chunk)
+          if (delErr) throw new Error(`Gagal bersihin catatan cek nama lama: ${delErr.message}`)
+        }
+      }
+      if (checkRows.length) {
+        const CHUNK = 300
+        for (let i = 0; i < checkRows.length; i += CHUNK) {
+          const chunk = checkRows.slice(i, i + CHUNK)
+          const { error: insErr } = await supabase.from('product_name_checks').upsert(chunk, { onConflict: 'product_id' })
+          if (insErr) throw new Error(`Gagal catat hasil cek nama: ${insErr.message}`)
+        }
+      }
+    }
 
     // Rutekan tiap baris gudang ke cabang yang sesuai, tulis ke
     // product_stock_konsi (BUKAN product_stock).
