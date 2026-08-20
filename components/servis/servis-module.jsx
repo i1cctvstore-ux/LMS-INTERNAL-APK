@@ -9,7 +9,7 @@ import {
   Users, MapPin, RefreshCw,
 } from "lucide-react";
 import { loadServiceData, persistServiceData, uploadServiceFile, loadBranchTrackedProductIds } from "@/lib/service/api";
-import { findDuplicateProductGroups, mergeDuplicateProducts, updateProductName, loadNameMismatches } from "@/lib/stok/api";
+import { findDuplicateProductGroups, mergeDuplicateProducts, mergeAllSafeDuplicateGroups, updateProductName, loadNameMismatches, fixAllNameMismatches } from "@/lib/stok/api";
 import { generateTandaTerimaPDF, generateSuratJalanPDF, generatePickupPDF, generateInvoicePDF } from "@/lib/service/receipt-pdf";
 
 // ---------- helpers ----------
@@ -5867,10 +5867,13 @@ function CekDuplikatProdukModal({ onClose }) {
   const [groups, setGroups] = useState([]);
   const [mergingKey, setMergingKey] = useState(null);
   const [doneKeys, setDoneKeys] = useState(new Set());
+  const [mergingAll, setMergingAll] = useState(false);
+  const [allMergeSummary, setAllMergeSummary] = useState(null);
 
   function load() {
     setLoading(true);
     setError(null);
+    setAllMergeSummary(null);
     findDuplicateProductGroups()
       .then(setGroups)
       .catch((e) => setError(String(e?.message || e)))
@@ -5892,7 +5895,26 @@ function CekDuplikatProdukModal({ onClose }) {
     }
   }
 
+  async function handleMergeAll() {
+    setMergingAll(true);
+    setError(null);
+    try {
+      const summary = await mergeAllSafeDuplicateGroups(pending);
+      setAllMergeSummary(summary);
+      setDoneKeys((prev) => {
+        const next = new Set(prev);
+        pending.forEach((g) => { if (!g.hasTypeConflict) next.add(g.nameKey); });
+        return next;
+      });
+    } catch (e) {
+      setError(`Gagal gabung semua: ${e?.message || e}`);
+    } finally {
+      setMergingAll(false);
+    }
+  }
+
   const pending = groups.filter((g) => !doneKeys.has(g.nameKey));
+  const safeCount = pending.filter((g) => !g.hasTypeConflict).length;
 
   return (
     <Modal title="Cek Duplikat Produk" subtitle="Produk dengan nama sama (setelah dirapikan) tapi kesimpen jadi beberapa baris terpisah" onClose={onClose} wide>
@@ -5904,8 +5926,21 @@ function CekDuplikatProdukModal({ onClose }) {
       {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700 mb-3">{error}</div>}
       {!loading && (
         <>
-          <div className="mb-3 text-xs text-slate-500">
-            {pending.length} grup duplikat ketemu{doneKeys.size > 0 ? ` · ${doneKeys.size} udah digabung barusan` : ""}.
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="text-xs text-slate-500">
+              {pending.length} grup duplikat ketemu{doneKeys.size > 0 ? ` · ${doneKeys.size} udah digabung barusan` : ""}.
+              {allMergeSummary?.skipped > 0 && <> {allMergeSummary.skipped} grup di-skip (perlu direview manual).</>}
+            </div>
+            {safeCount > 1 && (
+              <button
+                onClick={handleMergeAll}
+                disabled={mergingAll}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {mergingAll && <Loader2 size={12} className="animate-spin" />}
+                {mergingAll ? "Menggabungkan..." : `Gabung Semua (${safeCount})`}
+              </button>
+            )}
           </div>
           <div className="space-y-3 max-h-[65vh] overflow-y-auto">
             {pending.map((g) => {
@@ -5914,7 +5949,7 @@ function CekDuplikatProdukModal({ onClose }) {
                 <div key={g.nameKey} className={`border rounded-2xl p-3 ${g.hasTypeConflict ? "border-red-200 bg-red-50/40" : "border-slate-200"}`}>
                   {g.hasTypeConflict && (
                     <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-red-700">
-                      <AlertTriangle size={13} /> Campuran DVR &amp; NVR — kode model sama tapi tipe device BEDA, jangan digabung
+                      <AlertTriangle size={13} /> {g.conflictReason || "Ada perbedaan yang beresiko — jangan digabung otomatis"}
                     </div>
                   )}
                   <div className="flex items-center justify-between gap-2 mb-2">
@@ -5971,6 +6006,8 @@ function CekNamaAccurateModal({ onClose }) {
   const [results, setResults] = useState([]);
   const [fixingSku, setFixingSku] = useState(null);
   const [fixedSkus, setFixedSkus] = useState(new Set());
+  const [fixingAll, setFixingAll] = useState(false);
+  const [allFixedDone, setAllFixedDone] = useState(false);
 
   useEffect(() => {
     loadNameMismatches()
@@ -5992,7 +6029,20 @@ function CekNamaAccurateModal({ onClose }) {
     }
   }
 
-  const pending = results.filter((r) => !fixedSkus.has(r.sku));
+  async function handleFixAll() {
+    setFixingAll(true);
+    setError(null);
+    try {
+      await fixAllNameMismatches(pending);
+      setAllFixedDone(true);
+    } catch (e) {
+      setError(`Gagal perbaiki semua: ${e?.message || e}`);
+    } finally {
+      setFixingAll(false);
+    }
+  }
+
+  const pending = allFixedDone ? [] : results.filter((r) => !fixedSkus.has(r.sku));
 
   return (
     <Modal title="Cek Nama vs Accurate" subtitle="Daftar produk yang namanya beda dari Accurate — otomatis kecatat tiap kali sync Accurate jalan, bukan narik data live" onClose={onClose} wide>
@@ -6004,8 +6054,20 @@ function CekNamaAccurateModal({ onClose }) {
       {error && <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700 mb-3">{error}</div>}
       {!loading && (
         <>
-          <div className="mb-3 text-xs text-slate-500">
-            {pending.length} beda nama ketemu{fixedSkus.size > 0 ? ` · ${fixedSkus.size} udah diperbaiki barusan` : ""}.
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="text-xs text-slate-500">
+              {pending.length} beda nama ketemu{(fixedSkus.size > 0 || allFixedDone) ? ` · ${allFixedDone ? results.length : fixedSkus.size} udah diperbaiki barusan` : ""}.
+            </div>
+            {pending.length > 1 && (
+              <button
+                onClick={handleFixAll}
+                disabled={fixingAll}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+              >
+                {fixingAll && <Loader2 size={12} className="animate-spin" />}
+                {fixingAll ? "Memperbaiki semua..." : `Perbaiki Semua (${pending.length})`}
+              </button>
+            )}
           </div>
           <div className="space-y-2 max-h-[65vh] overflow-y-auto">
             {pending.map((r) => (
