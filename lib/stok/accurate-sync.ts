@@ -45,6 +45,13 @@ const ACCURATE_BRANCH_MAP: { envDbIdKey: string; branchId: string; branchName: s
 
 export type AccurateBranchConfig = { branchId: string; branchName: string; dbId: string }
 
+// Label singkat per akun, dipakai scopeNumericSku() di atas.
+const NUMERIC_SKU_BRANCH_TAG: Record<string, string> = {
+  '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2': 'JKT', // Jakarta
+  '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612': 'PWT', // Purwokerto
+}
+const SOLO_MULTIGUDANG_SKU_TAG = 'SOLOKONSI'
+
 export async function getAccurateBranchConfigs(): Promise<AccurateBranchConfig[]> {
   const supabase = createAdminClient()
   const { data: tokenRows } = await supabase.from('accurate_oauth_tokens').select('branch_id')
@@ -210,6 +217,28 @@ function normalizeSku(s: string): string {
     .replace(/\//g, '-')
     .trim()
     .toLowerCase()
+}
+
+// BUG PENTING yang diperbaiki (2026-08-24): SKU angka polos (kayak
+// "100020") itu nomor urut OTOMATIS yang dibikin masing-masing akun
+// Accurate/Zoho sendiri-sendiri kalau barangnya gak dikasih kode
+// manual. Karena tiap akun itu sistem TERPISAH yang mulai hitung dari
+// nol sendiri-sendiri, angka yang SAMA bisa nunjuk ke BARANG YANG
+// TOTAL BEDA antar akun (ketemu 28 kasus nyata: SKU "100020" itu
+// "AVARO LS3000 VACUUM" di sistem kita tapi "Paket Avtech 2 Mpx" di
+// Accurate Purwokerto). Kalau dianggap sama & langsung dicocokin,
+// stoknya ketuker ke produk yang salah.
+//
+// Perbaikan: SKU yang ANGKA POLOS DOANG (gak ada huruf sama sekali)
+// dikasih label akun asalnya sebelum dipakai buat pencocokan/bikin
+// produk baru -- jadi "100020" dari Purwokerto jadi "100020-PWT",
+// otomatis gak akan pernah nabrak "100020" dari akun lain lagi. SKU
+// yang udah ada hurufnya (kayak "EZVIZ-C6N-2MP") TIDAK disentuh --
+// SKU kayak gitu udah cukup spesifik, kecil kemungkinan nabrak.
+function scopeNumericSku(sku: string, branchTag: string): string {
+  const s = (sku || '').trim()
+  if (/^\d+$/.test(s)) return `${s}-${branchTag}`
+  return s
 }
 
 // Deteksi item konsinyasi Accurate — SKU/nama yang diakhiri "(K)"
@@ -475,13 +504,16 @@ export async function syncAccurateForBranch(
     detailFetchFailed = failedIds.length
 
     // Pisahkan dulu: item KONSI (K) dipetakan ke SKU/nama DASARNYA
-    // (suffix dibuang), item normal tetap pakai SKU aslinya.
+    // (suffix dibuang), item normal tetap pakai SKU aslinya. SKU angka
+    // polos (gak ada huruf) dikasih label akun (scopeNumericSku) biar
+    // gak nabrak SKU angka polos dari akun lain yang kebetulan sama.
+    const skuTag = NUMERIC_SKU_BRANCH_TAG[config.branchId] || config.branchId
     type ResolvedDetail = { matchSku: string; matchName: string; balance: number; isKonsi: boolean; kategori: string | null }
     const resolvedDetails: ResolvedDetail[] = allDetails.map((d) => {
       const skuResult = stripKonsiSuffix(d.no)
       const nameResult = stripKonsiSuffix(d.name)
       return {
-        matchSku: skuResult.base,
+        matchSku: scopeNumericSku(skuResult.base, skuTag),
         matchName: nameResult.base || skuResult.base,
         balance: d.balance,
         isKonsi: skuResult.isKonsi,
@@ -780,8 +812,12 @@ export async function syncAccurateSoloMultiGudang(
       })
       const body = await res.json()
       if (!res.ok || !body.s || !body.d?.no) return null
+      // SKU angka polos dikasih label akun (scopeNumericSku) di sini,
+      // di SUMBERNYA — biar semua pemakaian d.no di bawah (pencocokan
+      // katalog, bikin produk baru, dst) otomatis pakai versi yang
+      // udah aman dari tabrakan.
       return {
-        no: body.d.no,
+        no: scopeNumericSku(body.d.no, SOLO_MULTIGUDANG_SKU_TAG),
         name: body.d.name || body.d.no,
         warehouses: (body.d.detailWarehouseData || []).map((w: any) => ({ name: w.name, balance: Number(w.balance) || 0 })),
       }
