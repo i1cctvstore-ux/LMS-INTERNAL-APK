@@ -1248,12 +1248,22 @@ export async function mergeAllSafeDuplicateGroups(groups: DuplicateProductGroup[
 // tool "Cek Nama vs Accurate" (typo lama yang udah dibenerin di
 // Accurate tapi belum ikut ke-update di sistem kita, karena nama cuma
 // disalin sekali pas produk pertama kali dibikin, gak pernah di-sync
-// ulang otomatis). Sekalian update catatan cek-nya jadi "match".
+// ulang otomatis). Sekalian hitung ulang status SEMUA baris cek punya
+// produk ini (dari semua sumber, bukan cuma yang lagi diperbaiki) —
+// soalnya bisa aja abis diperbaiki jadi cocok ke 1 sumber tapi masih
+// beda ke sumber lain (lihat komentar di migration
+// 20260823010000_product_name_checks_composite_key.sql).
 export async function updateProductName(productId: string, name: string): Promise<void> {
   const supabase = createClient()
-  const { error } = await supabase.from('service_products').update({ name }).eq('id', productId)
+  // Lewat RPC (update_products_name_bulk, sama yang dipakai "Perbaiki
+  // Semua"), BUKAN .update() langsung ke tabel — .update() langsung
+  // ternyata bisa "berhasil tanpa error" tapi 0 baris keubah kalau ada
+  // batasan izin (RLS) yang belum kesetting, silent-fail kayak gini
+  // susah kedeteksi. RPC (security definer) selalu jalan konsisten.
+  const { error } = await supabase.rpc('update_products_name_bulk', { updates: [{ id: productId, name }] })
   if (error) throw new Error(error.message)
-  await supabase.from('product_name_checks').update({ nama_kita: name, status: 'match' }).eq('product_id', productId)
+  const { error: rpcErr } = await supabase.rpc('recompute_name_check_status', { product_ids: [productId] })
+  if (rpcErr) throw new Error(rpcErr.message)
 }
 
 // =====================================================
@@ -1263,7 +1273,10 @@ export async function updateProductName(productId: string, name: string): Promis
 // (cocok DAN beda, kolom `status`), TIDAK manggil Accurate/Zoho live
 // sama sekali, jadi instan -- versi paling awal (fetch ke route yang
 // manggil Accurate real-time buat ribuan barang) bikin timeout di
-// server, makanya diganti ke pendekatan nyimpen-di-sync ini.
+// server, makanya diganti ke pendekatan nyimpen-di-sync ini. Kunci
+// tabelnya (product_id, branch_name) — 1 produk bisa punya beberapa
+// baris kalau dicek dari beberapa sumber (Jakarta, Purwokerto,
+// Accurate Solo multi-gudang, Zoho Solo/Bali).
 // =====================================================
 
 export type NameCheckRow = { productId: string; sku: string; branchName: string; namaKita: string; namaAccurate: string; status: 'match' | 'mismatch' }
@@ -1292,14 +1305,15 @@ export async function loadNameChecks(status?: 'match' | 'mismatch'): Promise<Nam
 }
 
 // Perbaiki SEMUA mismatch sekaligus — dipakai tombol "Perbaiki Semua"
-// (biar gak perlu klik satu-satu kalau daftarnya panjang). Lewat RPC
-// (bukan .upsert()) biar aman dari bug NOT NULL kayak kejadian
-// sebelumnya di update kategori.
+// (biar gak perlu klik satu-satu kalau daftarnya panjang). Update nama
+// lewat RPC (bukan .upsert()) biar aman dari bug NOT NULL kayak
+// kejadian sebelumnya di update kategori, terus hitung ulang status
+// SEMUA baris cek punya produk-produk itu (dari semua sumber).
 export async function fixAllNameMismatches(rows: NameCheckRow[]): Promise<void> {
   const supabase = createClient()
   if (rows.length === 0) return
   const updates = rows.map((r) => ({ id: r.productId, name: r.namaAccurate }))
-  const ids = rows.map((r) => r.productId)
+  const ids = Array.from(new Set(rows.map((r) => r.productId)))
   const CHUNK = 300
   for (let i = 0; i < updates.length; i += CHUNK) {
     const chunk = updates.slice(i, i + CHUNK)
@@ -1308,7 +1322,7 @@ export async function fixAllNameMismatches(rows: NameCheckRow[]): Promise<void> 
   }
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK)
-    const { error } = await supabase.from('product_name_checks').update({ status: 'match' }).in('product_id', chunk)
+    const { error } = await supabase.rpc('recompute_name_check_status', { product_ids: chunk })
     if (error) throw new Error(error.message)
   }
 }
