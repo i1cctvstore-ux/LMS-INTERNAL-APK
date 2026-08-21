@@ -6051,7 +6051,11 @@ function CekNamaAccurateModal({ onClose }) {
     setFixingAll(true);
     setError(null);
     try {
-      await fixAllNameMismatches(filtered.filter((r) => r.branchName !== "Solo")); // baris Solo udah auto-fix pas sync, gak perlu diproses manual
+      // Skip baris "Solo" (udah auto-fix pas sync) DAN baris yang
+      // produknya juga punya baris "Solo" di manapun (biar gak sia-sia
+      // diperbaiki manual, bakal ketimpa lagi pas sync Solo berikutnya).
+      const toFix = filtered.filter((r) => r.status === "mismatch" && r.branchName !== "Solo" && !productIdsTrackedBySolo.has(r.productId));
+      await fixAllNameMismatches(toFix);
       load(); // refresh -- sama alasannya kayak handleFix
     } catch (e) {
       setError(`Gagal perbaiki semua: ${e?.message || e}`);
@@ -6062,6 +6066,12 @@ function CekNamaAccurateModal({ onClose }) {
 
   const branchOptions = ["Semua", ...Array.from(new Set(allRows.map((r) => r.branchName))).sort()];
   const notFixed = allRows;
+  // Produk yang JUGA punya baris "Solo" (di manapun statusnya) —
+  // produk ini otomatis "dikawal" Zoho Solo, jadi perbaikan manual di
+  // cabang lain buat produk yang sama itu SIA-SIA (sync Solo
+  // berikutnya bakal nimpa lagi jadi versi Solo). Tombol "Perbaiki"
+  // gak ditampilin buat baris kayak gini, digantiin keterangan.
+  const productIdsTrackedBySolo = new Set(allRows.filter((r) => r.branchName === "Solo").map((r) => r.productId));
   const byTab = notFixed.filter((r) => r.status === tab);
   const byBranch = branchFilter === "Semua" ? byTab : byTab.filter((r) => r.branchName === branchFilter);
   const q = query.trim().toLowerCase();
@@ -6071,6 +6081,9 @@ function CekNamaAccurateModal({ onClose }) {
 
   const mismatchCount = notFixed.filter((r) => r.status === "mismatch").length;
   const matchCount = notFixed.filter((r) => r.status === "match").length;
+  // Cuma baris yang produknya BENERAN gak pernah kesentuh Solo yang
+  // masuk hitungan "Perbaiki Semua" — biar gak kerja dua kali/sia-sia.
+  const fixableCount = filtered.filter((r) => r.status === "mismatch" && r.branchName !== "Solo" && !productIdsTrackedBySolo.has(r.productId)).length;
 
   return (
     <Modal title="Cek Nama vs Accurate" subtitle="Nama produk kita dibandingkan Accurate/Zoho — otomatis kecatat tiap kali sync jalan, bukan narik data live" onClose={onClose} wide>
@@ -6118,23 +6131,25 @@ function CekNamaAccurateModal({ onClose }) {
 
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="text-xs text-slate-500">{filtered.length} ditampilkan.</div>
-            {tab === "mismatch" && filtered.length > 1 && (
+            {tab === "mismatch" && fixableCount > 1 && (
               <button
                 onClick={handleFixAll}
                 disabled={fixingAll}
                 className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
               >
                 {fixingAll && <Loader2 size={12} className="animate-spin" />}
-                {fixingAll ? "Memperbaiki semua..." : `Perbaiki Semua (${filtered.length})`}
+                {fixingAll ? "Memperbaiki semua..." : `Perbaiki Semua (${fixableCount})`}
               </button>
             )}
           </div>
           <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-            {filtered.map((r) => (
+            {filtered.map((r) => {
+              const trackedBySolo = productIdsTrackedBySolo.has(r.productId);
+              return (
               <div key={r.sku + '|' + r.branchName} className="border border-slate-200 rounded-2xl p-3">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <span className="text-xs font-mono text-slate-400">{r.sku} · {r.branchName}</span>
-                  {r.status === "mismatch" && r.branchName !== "Solo" && (
+                  {r.status === "mismatch" && r.branchName !== "Solo" && !trackedBySolo && (
                     <button
                       onClick={() => handleFix(r)}
                       disabled={fixingSku === r.sku + '|' + r.branchName}
@@ -6146,6 +6161,9 @@ function CekNamaAccurateModal({ onClose }) {
                   )}
                   {r.status === "mismatch" && r.branchName === "Solo" && (
                     <span className="shrink-0 text-xs text-slate-400 italic">akan otomatis sync berikutnya</span>
+                  )}
+                  {r.status === "mismatch" && r.branchName !== "Solo" && trackedBySolo && (
+                    <span className="shrink-0 text-xs text-slate-400 italic">dikawal Zoho Solo, gak perlu manual</span>
                   )}
                   {r.status === "match" && (
                     <span className="shrink-0 flex items-center gap-1 text-xs font-medium text-emerald-700">
@@ -6168,7 +6186,7 @@ function CekNamaAccurateModal({ onClose }) {
                   <div className="text-xs text-slate-700">{r.namaKita}</div>
                 )}
               </div>
-            ))}
+            );})}
             {filtered.length === 0 && (
               <div className="py-10 text-center text-sm text-slate-400">
                 {tab === "mismatch" ? "Gak ada beda nama tercatat." : "Belum ada yang tercatat sesuai."}
