@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveNewProductSkus, resolveSkuCollisions, normalizeNameForMatch } from './accurate-sync'
+import { resolveNewProductSkus } from './accurate-sync'
 
 // =====================================================
 // Sinkronisasi stok dari ZOHO BOOKS (bukan Zoho Inventory) ke tabel
@@ -289,29 +289,6 @@ export async function syncZohoForBranch(
       zohoItems.map((item) => ({ sku: item.sku, name: item.name })),
     )
 
-    // SATPAM TABRAKAN SKU (lihat komentar panjang di
-    // lib/stok/accurate-sync.ts::resolveSkuCollisions) — CUMA dijalanin
-    // buat org NON-Solo (yaitu Bali). Zoho Solo SENGAJA dilewatin: dia
-    // kepala suku, jadi kalau SKU-nya ketemu tapi namanya beda, itu
-    // BUKAN tabrakan yang harus dialihkan ke produk lain — itu justru
-    // typo lama yang MEMANG harus dibenerin lewat auto-rename di bawah
-    // (blok `if (config.branchId === SOLO_BRANCH_ID)`), bukan dianggap
-    // "produk lain nyerempet SKU ini".
-    const skuCollision =
-      config.branchId === SOLO_BRANCH_ID
-        ? { overrides: new Map<string, string>(), collisionsFound: 0, newProductsCreated: 0 }
-        : await resolveSkuCollisions(
-            supabase,
-            productIdBySku,
-            nameByProductId,
-            config.branchName,
-            zohoItems.map((item) => ({ sku: item.sku, name: item.name })),
-          )
-    function resolveProductId(sku: string): string | undefined {
-      const key = normalizeSku(sku)
-      return skuCollision.overrides.get(key) || productIdBySku.get(key)
-    }
-
     // Nyatet hasil cek nama (produk kita vs nama LIVE di Zoho) — pola
     // sama kayak lib/stok/accurate-sync.ts, numpang di data yang udah
     // diambil di atas, gak ada panggilan API tambahan. Nyimpen SEMUA
@@ -321,7 +298,7 @@ export async function syncZohoForBranch(
       const touchedIds = new Set<string>()
       const checkByProductId = new Map<string, { product_id: string; sku: string; branch_name: string; nama_kita: string; nama_accurate: string; status: string }>()
       zohoItems.forEach((item) => {
-        const productId = resolveProductId(item.sku)
+        const productId = productIdBySku.get(normalizeSku(item.sku))
         if (!productId) return
         touchedIds.add(productId)
         const namaKita = (nameByProductId.get(productId) || '').trim()
@@ -333,14 +310,7 @@ export async function syncZohoForBranch(
           branch_name: config.branchName,
           nama_kita: namaKita,
           nama_accurate: namaZoho,
-          // Dibandingin lewat normalizeNameForMatch (bukan === mentah) —
-          // konvensi penulisan produk semua huruf kapital, tapi data
-          // mentah kadang gak konsisten (huruf kecil, spasi ganda, "-"
-          // vs "/", dst). Beda yang cuma soal PENULISAN jangan ikut
-          // kehitung "mismatch" — termasuk buat Zoho Solo, biar
-          // auto-rename gak jalan tiap sync gara-gara kapitalisasi
-          // doang, cuma buat beda kata/istilah yang beneran.
-          status: normalizeNameForMatch(namaKita) === normalizeNameForMatch(namaZoho) ? 'match' : 'mismatch',
+          status: namaKita === namaZoho ? 'match' : 'mismatch',
         })
       })
       const checkRows = Array.from(checkByProductId.values())
@@ -400,7 +370,7 @@ export async function syncZohoForBranch(
     const now = new Date().toISOString()
 
     zohoItems.forEach((item) => {
-      const productId = resolveProductId(item.sku)
+      const productId = productIdBySku.get(normalizeSku(item.sku))
       if (!productId) {
         itemsSkipped += 1 // harusnya gak kejadian lagi setelah auto-create di atas, jaga-jaga aja
         return
@@ -463,11 +433,6 @@ export async function syncZohoForBranch(
     }
     if (newProductsCreated > 0) {
       infoNotes.push(`${newProductsCreated} produk baru otomatis dibuat di katalog dari SKU Zoho yang belum ada.`)
-    }
-    if (skuCollision.collisionsFound > 0) {
-      infoNotes.push(
-        `${skuCollision.collisionsFound} SKU tabrakan terdeteksi (kode sama, produk beda dari katalog kita) — ${skuCollision.newProductsCreated} otomatis jadi produk baru (SKU berprefix cabang), sisanya ke-mapping ke produk yang namanya udah cocok di katalog. Stok TIDAK ditulis ke produk lama yang salah.`,
-      )
     }
     if (duplicateSkuCount > 0) {
       infoNotes.push(
