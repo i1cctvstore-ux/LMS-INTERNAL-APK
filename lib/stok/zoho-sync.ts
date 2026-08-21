@@ -192,10 +192,15 @@ async function fetchAllZohoItemStocks(
 // Normalisasi SKU yang sama dengan yang dipakai di modul Servis
 // (buang karakter tak kasat mata, samakan bentuk, lowercase) — biar
 // pencocokan SKU antara Zoho dan katalog produk internal konsisten.
+// PENTING: "/" dan "-" disamain jadi "-" di sini — sama alasannya
+// kayak di lib/stok/accurate-sync.ts (SKU item biasa vs item "(K)"
+// dari model yang sama kadang ditulis beda slash/dash di Accurate,
+// kalau dianggap beda stoknya nggak nyambung ke produk yang benar).
 function normalizeSku(s: string): string {
   return (s || '')
     .replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '')
     .normalize('NFKC')
+    .replace(/\//g, '-')
     .trim()
     .toLowerCase()
 }
