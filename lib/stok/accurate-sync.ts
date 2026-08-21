@@ -197,8 +197,19 @@ export async function fetchItemDetail(conn: AccurateConnection, itemId: number):
   return { no, name: name || no, balance, kategori: kategori || null }
 }
 
+// PENTING: "/" dan "-" disamain jadi "-" di sini — ternyata di
+// Accurate, SKU item biasa vs SKU item "(K)"-nya dari model YANG SAMA
+// PERSIS kadang ditulis beda (mis. "...M1-T" vs "...M1/T-(K)", staff
+// yang input beda orang/beda kebiasaan). Kalau slash vs dash dianggap
+// beda, stok "(K)" itu nggak akan pernah nyambung ke produk dasarnya
+// (nyangkut sebagai match gagal, stoknya ilang dari hitungan).
 function normalizeSku(s: string): string {
-  return (s || '').replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '').normalize('NFKC').trim().toLowerCase()
+  return (s || '')
+    .replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '')
+    .normalize('NFKC')
+    .replace(/\//g, '-')
+    .trim()
+    .toLowerCase()
 }
 
 // Deteksi item konsinyasi Accurate — SKU/nama yang diakhiri "(K)"
@@ -642,8 +653,11 @@ export async function syncAccurateForBranch(
         for (let i = 0; i < touchedIdList.length; i += CHUNK) {
           const chunk = touchedIdList.slice(i, i + CHUNK)
           // Hapus dulu baris lama punya produk-produk yang disentuh sync
-          // ini, baru insert ulang hasil terbaru (match atau mismatch).
-          const { error: delErr } = await supabase.from('product_name_checks').delete().in('product_id', chunk)
+          // ini, KHUSUS milik cabang/sumber ini aja (branch_name) —
+          // biar gak ikut kehapus catatan dari sumber Accurate/Zoho lain
+          // yang kebetulan nyentuh produk yang sama (mis. item konsi
+          // yang juga dicek dari Accurate Solo multi-gudang).
+          const { error: delErr } = await supabase.from('product_name_checks').delete().eq('branch_name', config.branchName).in('product_id', chunk)
           if (delErr) throw new Error(`Gagal bersihin catatan cek nama lama: ${delErr.message}`)
         }
       }
@@ -651,7 +665,7 @@ export async function syncAccurateForBranch(
         const CHUNK = 300
         for (let i = 0; i < checkRows.length; i += CHUNK) {
           const chunk = checkRows.slice(i, i + CHUNK)
-          const { error: insErr } = await supabase.from('product_name_checks').upsert(chunk, { onConflict: 'product_id' })
+          const { error: insErr } = await supabase.from('product_name_checks').upsert(chunk, { onConflict: 'product_id,branch_name' })
           if (insErr) throw new Error(`Gagal catat hasil cek nama: ${insErr.message}`)
         }
       }
@@ -843,7 +857,7 @@ export async function syncAccurateSoloMultiGudang(
         const CHUNK = 300
         for (let i = 0; i < touchedIdList.length; i += CHUNK) {
           const chunk = touchedIdList.slice(i, i + CHUNK)
-          const { error: delErr } = await supabase.from('product_name_checks').delete().in('product_id', chunk)
+          const { error: delErr } = await supabase.from('product_name_checks').delete().eq('branch_name', 'Accurate Solo (multi-gudang)').in('product_id', chunk)
           if (delErr) throw new Error(`Gagal bersihin catatan cek nama lama: ${delErr.message}`)
         }
       }
@@ -851,7 +865,7 @@ export async function syncAccurateSoloMultiGudang(
         const CHUNK = 300
         for (let i = 0; i < checkRows.length; i += CHUNK) {
           const chunk = checkRows.slice(i, i + CHUNK)
-          const { error: insErr } = await supabase.from('product_name_checks').upsert(chunk, { onConflict: 'product_id' })
+          const { error: insErr } = await supabase.from('product_name_checks').upsert(chunk, { onConflict: 'product_id,branch_name' })
           if (insErr) throw new Error(`Gagal catat hasil cek nama: ${insErr.message}`)
         }
       }
