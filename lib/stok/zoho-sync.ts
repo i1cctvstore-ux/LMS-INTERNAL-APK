@@ -55,6 +55,11 @@ const ZOHO_ORG_BRANCH_MAP: { envPrefix: string; branchId: string; branchName: st
   { envPrefix: 'ZOHO_2', branchId: '9b4c7834-2e20-4416-8163-2faff97294c0', branchName: 'Bali' },
 ]
 
+// Zoho Solo = "kepala suku" nama produk (lihat komentar di
+// syncZohoForBranch) — SATU-SATUNYA sumber yang boleh nimpa nama
+// produk yang udah ada secara otomatis.
+const SOLO_BRANCH_ID = 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3'
+
 export function getZohoOrgConfigs(): ZohoOrgConfig[] {
   return ZOHO_ORG_BRANCH_MAP.map(({ envPrefix, branchId, branchName }) => {
     const clientId = process.env[`${envPrefix}_CLIENT_ID`]
@@ -159,8 +164,14 @@ async function fetchAllZohoItemStocks(
     }
     const pageItems = (body.items || []) as any[]
     pageItems.forEach((it) => {
-      const sku = (it.sku || '').trim()
-      if (!sku) return // item tanpa SKU dilewati — gak bisa dicocokkan ke katalog produk
+      const rawSku = (it.sku || '').trim()
+      if (!rawSku) return // item tanpa SKU dilewati — gak bisa dicocokkan ke katalog produk
+      // Buang kata "JASA" dari SKU DI SINI, sekali aja, di sumbernya —
+      // biar semua kode di bawah (pencocokan katalog, bikin produk
+      // baru, cek nama) otomatis pakai SKU yang udah bersih, bisa
+      // nyambung ke SKU yang sama dari Accurate (yang gak punya
+      // embel-embel "JASA").
+      const sku = stripJasaFromSku(rawSku) || rawSku
 
       const stock = extractStockFromBooksItem(it)
       if (stock === null) {
@@ -187,6 +198,22 @@ function normalizeSku(s: string): string {
     .normalize('NFKC')
     .trim()
     .toLowerCase()
+}
+
+// Zoho Solo suka nyantumin kata "JASA" di SKU-nya (posisinya bisa
+// macem-macem — awal, tengah, akhir, dalam kurung, pakai dash, dll),
+// padahal SKU dasar barangnya sendiri sama kayak yang dipakai
+// Accurate. Kalau kata "JASA" ini ikut kebaca sebagai bagian SKU,
+// jadi gak pernah nyambung/ke-match ke SKU Accurate yang gak punya
+// embel-embel itu. Fungsi ini buang kata "JASA" (apapun casing/posisi
+// nya) dulu, baru rapihin sisa dash/spasi/kurung yang nyangkut — biar
+// SKU dasarnya konsisten dicocokkan lintas akun.
+function stripJasaFromSku(sku: string): string {
+  return (sku || '')
+    .replace(/\(?\s*JASA\s*\)?/gi, '')
+    .replace(/[-\s]{2,}/g, '-')
+    .replace(/^[-\s]+|[-\s]+$/g, '')
+    .trim()
 }
 
 // createNewProductsAndRefreshCatalog & pencocokan alias/nama sekarang
@@ -287,7 +314,7 @@ export async function syncZohoForBranch(
         const CHUNK = 300
         for (let i = 0; i < touchedIdList.length; i += CHUNK) {
           const chunk = touchedIdList.slice(i, i + CHUNK)
-          const { error: delErr } = await supabase.from('product_name_checks').delete().in('product_id', chunk)
+          const { error: delErr } = await supabase.from('product_name_checks').delete().eq('branch_name', config.branchName).in('product_id', chunk)
           if (delErr) throw new Error(`Gagal bersihin catatan cek nama lama: ${delErr.message}`)
         }
       }
@@ -295,8 +322,35 @@ export async function syncZohoForBranch(
         const CHUNK = 300
         for (let i = 0; i < checkRows.length; i += CHUNK) {
           const chunk = checkRows.slice(i, i + CHUNK)
-          const { error: insErr } = await supabase.from('product_name_checks').upsert(chunk, { onConflict: 'product_id' })
+          const { error: insErr } = await supabase.from('product_name_checks').upsert(chunk, { onConflict: 'product_id,branch_name' })
           if (insErr) throw new Error(`Gagal catat hasil cek nama: ${insErr.message}`)
+        }
+      }
+
+      // Zoho Solo = "kepala suku" buat nama produk — sync cabang ini
+      // SATU-SATUNYA yang boleh nimpa nama produk otomatis (gak perlu
+      // klik "Perbaiki" manual lagi). Sumber lain (Jakarta, Purwokerto,
+      // Accurate Solo multi-gudang, Zoho Bali) TETAP CUMA baca/narik
+      // stok, gak pernah nimpa nama produk yang udah ada — biar gak
+      // saling rebutan kayak sebelumnya. Produk yang beneran baru
+      // (belum pernah ke-sync dari manapun) tetap boleh dibikin oleh
+      // sumber manapun yang nemuin duluan (lewat resolveNewProductSkus
+      // di atas), cuma yang PRODUK SUDAH ADA doang yang dilindungi.
+      if (config.branchId === SOLO_BRANCH_ID) {
+        const toRename = checkRows.filter((r) => r.status === 'mismatch').map((r) => ({ id: r.product_id, name: r.nama_accurate }))
+        if (toRename.length) {
+          const CHUNK = 300
+          for (let i = 0; i < toRename.length; i += CHUNK) {
+            const chunk = toRename.slice(i, i + CHUNK)
+            const { error: renameErr } = await supabase.rpc('update_products_name_bulk', { updates: chunk })
+            if (renameErr) throw new Error(`Gagal update nama produk (Zoho Solo): ${renameErr.message}`)
+          }
+          const ids = toRename.map((r) => r.id)
+          for (let i = 0; i < ids.length; i += CHUNK) {
+            const chunk = ids.slice(i, i + CHUNK)
+            const { error: recomputeErr } = await supabase.rpc('recompute_name_check_status', { product_ids: chunk })
+            if (recomputeErr) throw new Error(`Gagal hitung ulang status cek nama: ${recomputeErr.message}`)
+          }
         }
       }
     }
