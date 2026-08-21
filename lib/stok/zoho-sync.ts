@@ -171,7 +171,8 @@ async function fetchAllZohoItemStocks(
       // baru, cek nama) otomatis pakai SKU yang udah bersih, bisa
       // nyambung ke SKU yang sama dari Accurate (yang gak punya
       // embel-embel "JASA").
-      const sku = stripJasaFromSku(rawSku) || rawSku
+      const jasaCleaned = stripJasaFromSku(rawSku) || rawSku
+      const sku = scopeNumericSku(jasaCleaned, NUMERIC_SKU_BRANCH_TAG[config.branchId] || config.branchId)
 
       const stock = extractStockFromBooksItem(it)
       if (stock === null) {
@@ -219,6 +220,22 @@ function stripJasaFromSku(sku: string): string {
     .replace(/[-\s]{2,}/g, '-')
     .replace(/^[-\s]+|[-\s]+$/g, '')
     .trim()
+}
+
+// BUG PENTING (2026-08-24): SKU angka polos (kayak "100020") itu nomor
+// urut OTOMATIS per-akun — Zoho Solo dan Zoho Bali itu 2 sistem
+// terpisah yang bisa kebetulan ngasih angka yang sama ke barang yang
+// TOTAL BEDA (sama kayak kasus yang ketemu di Accurate Jakarta/
+// Purwokerto). Dikasih label akun di sini biar gak nabrak. Sama pola
+// kayak scopeNumericSku di lib/stok/accurate-sync.ts.
+const NUMERIC_SKU_BRANCH_TAG: Record<string, string> = {
+  'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3': 'ZSOLO', // Solo
+  '9b4c7834-2e20-4416-8163-2faff97294c0': 'ZBALI', // Bali
+}
+function scopeNumericSku(sku: string, branchTag: string): string {
+  const s = (sku || '').trim()
+  if (/^\d+$/.test(s)) return `${s}-${branchTag}`
+  return s
 }
 
 // createNewProductsAndRefreshCatalog & pencocokan alias/nama sekarang
