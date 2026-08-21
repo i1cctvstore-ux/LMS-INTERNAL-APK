@@ -6019,7 +6019,6 @@ function CekNamaAccurateModal({ onClose }) {
   const [error, setError] = useState(null);
   const [allRows, setAllRows] = useState([]);
   const [fixingSku, setFixingSku] = useState(null);
-  const [fixedSkus, setFixedSkus] = useState(new Set());
   const [fixingAll, setFixingAll] = useState(false);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("mismatch"); // "mismatch" | "match"
@@ -6036,11 +6035,11 @@ function CekNamaAccurateModal({ onClose }) {
   useEffect(() => { load(); }, []);
 
   async function handleFix(row) {
-    setFixingSku(row.sku);
+    setFixingSku(row.sku + '|' + row.branchName);
     setError(null);
     try {
       await updateProductName(row.productId, row.namaAccurate);
-      setFixedSkus((prev) => new Set(prev).add(row.sku));
+      load(); // refresh -- perbaikan ini bisa ngaruh ke status cabang/sumber lain buat produk yang sama
     } catch (e) {
       setError(`Gagal perbaiki "${row.sku}": ${e?.message || e}`);
     } finally {
@@ -6052,12 +6051,8 @@ function CekNamaAccurateModal({ onClose }) {
     setFixingAll(true);
     setError(null);
     try {
-      await fixAllNameMismatches(filtered);
-      setFixedSkus((prev) => {
-        const next = new Set(prev);
-        filtered.forEach((r) => next.add(r.sku));
-        return next;
-      });
+      await fixAllNameMismatches(filtered.filter((r) => r.branchName !== "Solo")); // baris Solo udah auto-fix pas sync, gak perlu diproses manual
+      load(); // refresh -- sama alasannya kayak handleFix
     } catch (e) {
       setError(`Gagal perbaiki semua: ${e?.message || e}`);
     } finally {
@@ -6066,7 +6061,7 @@ function CekNamaAccurateModal({ onClose }) {
   }
 
   const branchOptions = ["Semua", ...Array.from(new Set(allRows.map((r) => r.branchName))).sort()];
-  const notFixed = allRows.filter((r) => !fixedSkus.has(r.sku));
+  const notFixed = allRows;
   const byTab = notFixed.filter((r) => r.status === tab);
   const byBranch = branchFilter === "Semua" ? byTab : byTab.filter((r) => r.branchName === branchFilter);
   const q = query.trim().toLowerCase();
@@ -6136,18 +6131,21 @@ function CekNamaAccurateModal({ onClose }) {
           </div>
           <div className="space-y-2 max-h-[60vh] overflow-y-auto">
             {filtered.map((r) => (
-              <div key={r.sku} className="border border-slate-200 rounded-2xl p-3">
+              <div key={r.sku + '|' + r.branchName} className="border border-slate-200 rounded-2xl p-3">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <span className="text-xs font-mono text-slate-400">{r.sku} · {r.branchName}</span>
-                  {r.status === "mismatch" && (
+                  {r.status === "mismatch" && r.branchName !== "Solo" && (
                     <button
                       onClick={() => handleFix(r)}
-                      disabled={fixingSku === r.sku}
+                      disabled={fixingSku === r.sku + '|' + r.branchName}
                       className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
                     >
-                      {fixingSku === r.sku && <Loader2 size={12} className="animate-spin" />}
-                      {fixingSku === r.sku ? "Memperbaiki..." : "Perbaiki"}
+                      {fixingSku === r.sku + '|' + r.branchName && <Loader2 size={12} className="animate-spin" />}
+                      {fixingSku === r.sku + '|' + r.branchName ? "Memperbaiki..." : "Perbaiki"}
                     </button>
+                  )}
+                  {r.status === "mismatch" && r.branchName === "Solo" && (
+                    <span className="shrink-0 text-xs text-slate-400 italic">akan otomatis sync berikutnya</span>
                   )}
                   {r.status === "match" && (
                     <span className="shrink-0 flex items-center gap-1 text-xs font-medium text-emerald-700">
