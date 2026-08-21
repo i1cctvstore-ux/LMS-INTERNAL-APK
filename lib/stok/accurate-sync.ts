@@ -384,128 +384,6 @@ export async function resolveNewProductSkus(
   return { newProductsCreated, aliasesLinked: newAliases.length }
 }
 
-// =====================================================
-// SATPAM TABRAKAN SKU (ditambahkan 2026-08-21, nyusul temuan hasil
-// query "Cek SKU vs Accurate" — SKU polos angka doang kayak "100020"
-// atau "100290" ternyata dipakai ULANG SECARA INDEPENDEN oleh Accurate
-// Purwokerto buat produk yang SAMA SEKALI BEDA dari produk yang di
-// katalog kita udah pegang SKU itu duluan. Beda dari resolveNewProductSkus
-// di atas (yang nanganin SKU yang BENERAN belum pernah ada), fungsi ini
-// nanganin SKU yang justru SUDAH ADA tapi keliru nunjuk ke produk yang
-// salah karena tabrakan angka.
-//
-// Kenapa ini WAJIB dicegat sebelum tulis stok: tanpa ini, FASE tulis
-// stok di syncAccurateForBranch/syncAccurateSoloMultiGudang/
-// syncZohoForBranch cuma cocokin lewat productIdBySku.get(sku) — begitu
-// ketemu (SKU-nya kan emang "ada"), angka stok langsung ditimpakan ke
-// situ TANPA cek namanya cocok apa nggak. Akibatnya stok 2 produk yang
-// beda total (mis. "AVARO LS3000 VACUUM" (SKU 100020, punya kita) vs
-// "Paket Avtech 2 Mpx" (SKU 100020 juga, tapi punya Accurate Purwokerto))
-// ke-campur jadi SATU angka yang salah buat kedua-duanya, SENYAP tanpa
-// warning apa pun. Ini beda kelas dari sekadar "nama beda" (yang udah
-// ditangani product_name_checks) — ini salah PRODUK, bukan cuma salah
-// LABEL.
-//
-// Aturan (sesuai keputusan: Zoho Solo = kepala suku katalog produk):
-//   - Kalau SKU dari sumber ini SUDAH ADA di katalog DAN namanya cocok
-//     (setelah dinormalisasi — beda kapital/spasi/tanda-baca dianggap
-//     sama) -> BUKAN tabrakan, biarin jalur normal (productIdBySku)
-//     yang pegang, fungsi ini gak ikut campur sama sekali.
-//   - Kalau SKU-nya ADA tapi namanya beda JAUH -> TABRAKAN. Jangan
-//     pernah nulis stok ke productId lama itu. Coba dulu cari produk
-//     LAIN di katalog yang namanya cocok (siapa tau produk ini emang
-//     udah ada, cuma sudah kepakai SKU lain). Kalau BENERAN gak ada di
-//     mana pun (termasuk gak pernah ada di Zoho Solo) -> otomatis
-//     dibikin PRODUK BARU, dikasih SKU baru berprefix nama cabang/
-//     sumbernya (mis. SKU Accurate "100020" dari Purwokerto yang
-//     collide jadi "PURWOKERTO-100020") biar gak nabrak SKU asli
-//     "100020" punya produk lain. Sync BERIKUTNYA bakal nemu produk
-//     baru ini lewat pencocokan nama (langkah sebelumnya di atas), jadi
-//     TIDAK bikin dobel lagi tiap kali sync ulang.
-//
-// TIDAK dipanggil buat sync Zoho Solo sendiri (branch kepala suku) —
-// mismatch nama dari situ udah ditangani lewat auto-rename langsung di
-// syncZohoForBranch, BUKAN lewat jalur produk-baru ini.
-// =====================================================
-
-export type SkuCollisionResult = {
-  overrides: Map<string, string> // key: normalizeSku(rawSku) -> productId pengganti KHUSUS buat item yang tabrakan (bukan peta global biasa)
-  collisionsFound: number
-  newProductsCreated: number
-}
-
-export async function resolveSkuCollisions(
-  supabase: ReturnType<typeof createAdminClient>,
-  productIdBySku: Map<string, string>,
-  nameByProductId: Map<string, string>,
-  branchTag: string,
-  items: { sku: string; name: string }[],
-): Promise<SkuCollisionResult> {
-  const overrides = new Map<string, string>()
-  type Collision = { key: string; sku: string; name: string }
-  const collisions: Collision[] = []
-  const seenKey = new Set<string>()
-
-  items.forEach((item) => {
-    const key = normalizeSku(item.sku)
-    if (!key || seenKey.has(key)) return
-    const existingId = productIdBySku.get(key)
-    if (!existingId) return // bukan urusan fungsi ini -- SKU beneran baru, ditangani resolveNewProductSkus
-    const namaKita = (nameByProductId.get(existingId) || '').trim()
-    const namaMasuk = (item.name || '').trim()
-    if (!namaKita || !namaMasuk) return
-    if (normalizeNameForMatch(namaKita) === normalizeNameForMatch(namaMasuk)) return // cocok, aman, bukan tabrakan
-    seenKey.add(key)
-    collisions.push({ key, sku: item.sku, name: item.name })
-  })
-
-  if (collisions.length === 0) return { overrides, collisionsFound: 0, newProductsCreated: 0 }
-
-  // Cari kecocokan by-nama di SELURUH katalog dulu -- mungkin produk ini
-  // udah ada (misal dari sync sebelumnya yang juga lewat jalur tabrakan
-  // ini), cuma SKU aslinya beda dari SKU yang collide di sumber ini.
-  const productIdByNormName = new Map<string, string>()
-  {
-    let from = 0
-    const PAGE_SIZE = 1000
-    while (true) {
-      const { data, error } = await supabase.from('service_products').select('id, name').range(from, from + PAGE_SIZE - 1)
-      if (error) throw new Error(`Gagal ambil katalog produk (cek tabrakan SKU): ${error.message}`)
-      ;(data || []).forEach((p: any) => {
-        const k = normalizeNameForMatch(p.name)
-        if (k && !productIdByNormName.has(k)) productIdByNormName.set(k, p.id)
-      })
-      if (!data || data.length < PAGE_SIZE) break
-      from += PAGE_SIZE
-    }
-  }
-
-  const toInsert: { id: string; sku: string; name: string; source: string }[] = []
-  // Nama yang baru dibikin produknya DALAM batch ini juga dicek, biar 2
-  // item collision dengan nama yang sama persis (kejadian nyata kalau 1
-  // aksesoris dipakai di beberapa paket) gak bikin 2 produk duplikat.
-  const createdThisBatchByName = new Map<string, string>()
-
-  collisions.forEach((c) => {
-    const nameKey = normalizeNameForMatch(c.name)
-    const existingHit = productIdByNormName.get(nameKey) || createdThisBatchByName.get(nameKey)
-    if (existingHit) {
-      overrides.set(c.key, existingHit)
-      return
-    }
-    const cleanTag = (branchTag || 'CABANG').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-    const newSku = `${cleanTag}-${c.sku}`.trim()
-    const newId = crypto.randomUUID()
-    toInsert.push({ id: newId, sku: newSku, name: c.name.toUpperCase().trim(), source: 'cabang' })
-    createdThisBatchByName.set(nameKey, newId)
-    overrides.set(c.key, newId)
-  })
-
-  const newProductsCreated = await createNewProductsAndRefreshCatalog(supabase, toInsert, productIdBySku)
-
-  return { overrides, collisionsFound: collisions.length, newProductsCreated }
-}
-
 export type SyncResult = { branchName: string; itemsUpdated: number; itemsSkipped: number }
 
 export async function syncAccurateForBranch(
@@ -624,25 +502,6 @@ export async function syncAccurateForBranch(
     )
     newProductsCreated = created
 
-    // FASE 2.5: SATPAM TABRAKAN SKU — Jakarta & Purwokerto BUKAN
-    // "kepala suku" (cuma Zoho Solo yang itu), jadi di sini WAJIB dicek:
-    // SKU yang ketemu di katalog tapi namanya beda jauh dari nama_kita
-    // berarti tabrakan kode, BUKAN produk yang sama (lihat komentar
-    // panjang di resolveSkuCollisions). Hasilnya (`skuOverrides`) dipakai
-    // GANTI productIdBySku.get() biasa di FASE 3 & blok-blok di bawah,
-    // KHUSUS buat SKU yang kena tabrakan.
-    const { overrides: skuOverrides, collisionsFound, newProductsCreated: collisionNewProducts } = await resolveSkuCollisions(
-      supabase,
-      productIdBySku,
-      nameByProductId,
-      config.branchName,
-      resolvedDetails.map((d) => ({ sku: d.matchSku, name: d.matchName })),
-    )
-    function resolveProductId(sku: string): string | undefined {
-      const key = normalizeSku(sku)
-      return skuOverrides.get(key) || productIdBySku.get(key)
-    }
-
     // FASE 3: tulis stoknya — item normal ke product_stock (kolom
     // utama), item KONSI (K) ke product_stock_konsi (jadi angka "-K"
     // di UI, DIGABUNG sama transfer manual yang udah ada).
@@ -657,7 +516,7 @@ export async function syncAccurateForBranch(
     const syncTimestamp = new Date().toISOString()
     const upsertKonsiByProductId = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number; source: string }>()
     resolvedDetails.forEach((detail) => {
-      const productId = resolveProductId(detail.matchSku)
+      const productId = productIdBySku.get(normalizeSku(detail.matchSku))
       if (!productId) { itemsSkipped += 1; return } // harusnya gak kejadian lagi, jaga-jaga aja
       if (detail.isKonsi) {
         upsertKonsiByProductId.set(productId, { branch_id: config.branchId, product_id: productId, qty_on_hand: Math.round(detail.balance), source: 'own' })
@@ -726,7 +585,7 @@ export async function syncAccurateForBranch(
     {
       const kategoriByProductId = new Map<string, string>()
       resolvedDetails.forEach((detail) => {
-        const productId = resolveProductId(detail.matchSku)
+        const productId = productIdBySku.get(normalizeSku(detail.matchSku))
         if (!productId) return
         // Item KONSI (K) & item normal SKU dasar yang sama nunjuk ke
         // produk yang sama -- kalau salah satunya punya kategori,
@@ -772,7 +631,7 @@ export async function syncAccurateForBranch(
       // UPDATE command cannot affect row a second time").
       const checkByProductId = new Map<string, { product_id: string; sku: string; branch_name: string; nama_kita: string; nama_accurate: string; status: string }>()
       resolvedDetails.forEach((detail) => {
-        const productId = resolveProductId(detail.matchSku)
+        const productId = productIdBySku.get(normalizeSku(detail.matchSku))
         if (!productId) return
         touchedIds.add(productId)
         const namaKita = (nameByProductId.get(productId) || '').trim()
@@ -784,15 +643,7 @@ export async function syncAccurateForBranch(
           branch_name: config.branchName,
           nama_kita: namaKita,
           nama_accurate: namaAccurate,
-          // Dibandingin lewat normalizeNameForMatch (bukan === mentah) —
-          // konvensi penulisan produk di sini SEMUA huruf kapital, tapi
-          // data mentah dari Accurate/Zoho/katalog lama kita kadang gak
-          // konsisten (huruf kecil, spasi ganda, "-" vs "/", dst). Beda
-          // yang cuma soal PENULISAN kayak gitu jangan ikut kehitung
-          // "mismatch" (bikin laporan penuh noise & bikin Zoho Solo
-          // auto-rename tiap sync gara-gara kapitalisasi doang) — yang
-          // ditandai mismatch cuma yang BENERAN beda kata/istilahnya.
-          status: normalizeNameForMatch(namaKita) === normalizeNameForMatch(namaAccurate) ? 'match' : 'mismatch',
+          status: namaKita === namaAccurate ? 'match' : 'mismatch',
         })
       })
       const checkRows = Array.from(checkByProductId.values())
@@ -827,11 +678,6 @@ export async function syncAccurateForBranch(
     }
     if (newProductsCreated > 0) {
       notes.push(`${newProductsCreated} produk baru otomatis dibuat di katalog dari SKU Accurate yang belum ada.`)
-    }
-    if (collisionsFound > 0) {
-      notes.push(
-        `${collisionsFound} SKU tabrakan terdeteksi (kode sama, produk beda dari katalog kita) — ${collisionNewProducts} otomatis jadi produk baru (SKU berprefix cabang), sisanya ke-mapping ke produk yang namanya udah cocok di katalog. Stok TIDAK ditulis ke produk lama yang salah.`,
-      )
     }
     if (upsertKonsiByProductId.size > 0) {
       notes.push(`${upsertKonsiByProductId.size} item konsinyasi (K) dipetakan ke kolom "-K", bukan kolom utama.`)
@@ -983,23 +829,6 @@ export async function syncAccurateSoloMultiGudang(
       allDetails.map((d) => ({ sku: d.no, name: d.name })),
     )
 
-    // SATPAM TABRAKAN SKU — akun Accurate Solo (multi-gudang) BUKAN
-    // kepala suku (bukan Zoho Solo), jadi wajib dicek sama kayak
-    // syncAccurateForBranch: SKU yang ketemu di katalog tapi namanya
-    // beda jauh = tabrakan kode, bukan produk yang sama. Lihat komentar
-    // panjang di resolveSkuCollisions untuk alasan lengkapnya.
-    const { overrides: skuOverrides, collisionsFound, newProductsCreated: collisionNewProducts } = await resolveSkuCollisions(
-      supabase,
-      productIdBySku,
-      nameByProductId,
-      'ACCURATE-SOLO',
-      allDetails.map((d) => ({ sku: d.no, name: d.name })),
-    )
-    function resolveProductId(sku: string): string | undefined {
-      const key = normalizeSku(sku)
-      return skuOverrides.get(key) || productIdBySku.get(key)
-    }
-
     // Deteksi mismatch nama — pola sama kayak syncAccurateForBranch,
     // numpang di detail yang udah diambil di atas, gak ada panggilan
     // API tambahan.
@@ -1007,7 +836,7 @@ export async function syncAccurateSoloMultiGudang(
       const touchedIds = new Set<string>()
       const checkByProductId = new Map<string, { product_id: string; sku: string; branch_name: string; nama_kita: string; nama_accurate: string; status: string }>()
       allDetails.forEach((d) => {
-        const productId = resolveProductId(d.no)
+        const productId = productIdBySku.get(normalizeSku(d.no))
         if (!productId) return
         touchedIds.add(productId)
         const namaKita = (nameByProductId.get(productId) || '').trim()
@@ -1019,15 +848,7 @@ export async function syncAccurateSoloMultiGudang(
           branch_name: 'Accurate Solo (multi-gudang)',
           nama_kita: namaKita,
           nama_accurate: namaAccurate,
-          // Dibandingin lewat normalizeNameForMatch (bukan === mentah) —
-          // konvensi penulisan produk di sini SEMUA huruf kapital, tapi
-          // data mentah dari Accurate/Zoho/katalog lama kita kadang gak
-          // konsisten (huruf kecil, spasi ganda, "-" vs "/", dst). Beda
-          // yang cuma soal PENULISAN kayak gitu jangan ikut kehitung
-          // "mismatch" (bikin laporan penuh noise & bikin Zoho Solo
-          // auto-rename tiap sync gara-gara kapitalisasi doang) — yang
-          // ditandai mismatch cuma yang BENERAN beda kata/istilahnya.
-          status: normalizeNameForMatch(namaKita) === normalizeNameForMatch(namaAccurate) ? 'match' : 'mismatch',
+          status: namaKita === namaAccurate ? 'match' : 'mismatch',
         })
       })
       const checkRows = Array.from(checkByProductId.values())
@@ -1055,7 +876,7 @@ export async function syncAccurateSoloMultiGudang(
     const konsiRows = new Map<string, { branch_id: string; product_id: string; qty_on_hand: number; source: string }>()
     let itemsSkipped = 0
     allDetails.forEach((d) => {
-      const productId = resolveProductId(d.no)
+      const productId = productIdBySku.get(normalizeSku(d.no))
       if (!productId) { itemsSkipped += 1; return }
       d.warehouses.forEach((w) => {
         const key = (w.name || '').trim().toLowerCase()
@@ -1105,11 +926,6 @@ export async function syncAccurateSoloMultiGudang(
     const notes: string[] = []
     if (detailFetchFailed > 0) notes.push(`${detailFetchFailed} item gagal diambil detailnya.`)
     if (newProductsCreated > 0) notes.push(`${newProductsCreated} produk baru otomatis dibuat.`)
-    if (collisionsFound > 0) {
-      notes.push(
-        `${collisionsFound} SKU tabrakan terdeteksi — ${collisionNewProducts} otomatis jadi produk baru (SKU berprefix ACCURATE-SOLO), sisanya ke-mapping ke produk yang namanya udah cocok. Stok TIDAK ditulis ke produk lama yang salah.`,
-      )
-    }
     notes.push(`Stok konsinyasi ditulis ke ${rows.length} kombinasi cabang+produk (Jakarta-K/Bali-K/Purwokerto-K/Solo-K).`)
 
     await supabase
