@@ -339,7 +339,22 @@ export async function resolveNewProductSkus(
   supabase: ReturnType<typeof createAdminClient>,
   productIdBySku: Map<string, string>,
   candidates: { sku: string; name: string }[],
+  options?: {
+    // Zoho Solo = "kepala suku" nama produk, jadi produk baru yang
+    // pertama kali ketemu DARI Zoho Solo tetap boleh pakai nama asli
+    // dari Zoho Solo (default, useSkuAsName=false/undefined). Semua
+    // sumber LAIN (Accurate Jakarta/Purwokerto, Accurate Solo
+    // multi-gudang, Zoho Bali) TIDAK dianggap otoritatif soal nama —
+    // kalau produknya belum pernah ketemu di Zoho Solo, nama produk
+    // baru diisi SKU-nya sendiri dulu (bukan nama dari sumber itu),
+    // biar gampang dikenali "belum ada nama resmi". Kalau produk ini
+    // NANTI nyusul ketemu di sync Zoho Solo, nama-nya otomatis
+    // dibenerin ke nama asli lewat mekanisme "kepala suku" yang udah
+    // ada (lihat product_name_checks + auto-rename di zoho-sync.ts).
+    useSkuAsName?: boolean
+  },
 ): Promise<{ newProductsCreated: number; aliasesLinked: number }> {
+  const useSkuAsName = options?.useSkuAsName === true
   if (candidates.length === 0) return { newProductsCreated: 0, aliasesLinked: 0 }
 
   // 1) Alias yang udah pernah tercatat dari sync-sync sebelumnya.
@@ -396,7 +411,8 @@ export async function resolveNewProductSkus(
       return
     }
 
-    toInsert.push({ id: crypto.randomUUID(), sku: c.sku, name: c.name.toUpperCase().trim(), source: 'cabang' })
+    const displayName = useSkuAsName ? c.sku.toUpperCase().trim() : c.name.toUpperCase().trim()
+    toInsert.push({ id: crypto.randomUUID(), sku: c.sku, name: displayName, source: 'cabang' })
   })
 
   const newProductsCreated = await createNewProductsAndRefreshCatalog(supabase, toInsert, productIdBySku)
@@ -531,6 +547,7 @@ export async function syncAccurateForBranch(
       supabase,
       productIdBySku,
       resolvedDetails.map((d) => ({ sku: d.matchSku, name: d.matchName })),
+      { useSkuAsName: true }, // Accurate Jakarta/Purwokerto bukan kepala suku nama
     )
     newProductsCreated = created
 
@@ -863,6 +880,7 @@ export async function syncAccurateSoloMultiGudang(
       supabase,
       productIdBySku,
       allDetails.map((d) => ({ sku: d.no, name: d.name })),
+      { useSkuAsName: true }, // Accurate Solo (multi-gudang) bukan kepala suku nama
     )
 
     // Deteksi mismatch nama — pola sama kayak syncAccurateForBranch,
