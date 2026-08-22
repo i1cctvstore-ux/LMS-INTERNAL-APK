@@ -304,6 +304,11 @@ export async function syncZohoForBranch(
       supabase,
       productIdBySku,
       zohoItems.map((item) => ({ sku: item.sku, name: item.name })),
+      // Zoho Solo tetap boleh pakai nama asli (dia kepala suku nama
+      // produk). Sumber Zoho lain (Bali) TIDAK dianggap otoritatif —
+      // produk baru yang belum pernah ketemu di Zoho Solo dikasih
+      // nama = SKU-nya sendiri dulu.
+      { useSkuAsName: config.branchId !== SOLO_BRANCH_ID },
     )
 
     // Nyatet hasil cek nama (produk kita vs nama LIVE di Zoho) — pola
