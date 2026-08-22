@@ -6019,7 +6019,7 @@ function CekNamaAccurateModal({ onClose }) {
   const [error, setError] = useState(null);
   const [allRows, setAllRows] = useState([]);
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState("mismatch"); // "mismatch" | "match"
+  const [tab, setTab] = useState("mismatch"); // "mismatch" | "match" | "missing_solo"
   const [branchFilter, setBranchFilter] = useState("Semua");
 
   function load() {
@@ -6032,6 +6032,28 @@ function CekNamaAccurateModal({ onClose }) {
   }
   useEffect(() => { load(); }, []);
 
+  // Produk yang BELUM PERNAH ketemu di sync Zoho Solo sama sekali --
+  // dikumpulin dari allRows yang UDAH ke-load (gak perlu query baru).
+  // Satu produk bisa punya beberapa baris (1 per cabang yang nyentuh
+  // dia); kalau di antara baris-baris itu gak ada satupun yang
+  // branchName === "Solo", berarti produk ini belum pernah "disahkan"
+  // sama kepala suku nama produk -- kemungkinan besar nama-nya masih
+  // = SKU-nya sendiri (lihat useSkuAsName di lib/stok/accurate-sync.ts
+  // & zoho-sync.ts), atau nama lama dari sumber non-otoritatif.
+  const missingFromSolo = useMemo(() => {
+    const byProduct = new Map();
+    allRows.forEach((r) => {
+      if (!byProduct.has(r.productId)) {
+        byProduct.set(r.productId, { productId: r.productId, sku: r.sku, namaKita: r.namaKita, branches: new Set() });
+      }
+      byProduct.get(r.productId).branches.add(r.branchName);
+    });
+    return Array.from(byProduct.values())
+      .filter((p) => !p.branches.has("Solo"))
+      .map((p) => ({ ...p, branches: Array.from(p.branches).sort() }))
+      .sort((a, b) => a.sku.localeCompare(b.sku));
+  }, [allRows]);
+
   const branchOptions = ["Semua", ...Array.from(new Set(allRows.map((r) => r.branchName))).sort()];
   const byTab = allRows.filter((r) => r.status === tab);
   const byBranch = branchFilter === "Semua" ? byTab : byTab.filter((r) => r.branchName === branchFilter);
@@ -6039,6 +6061,11 @@ function CekNamaAccurateModal({ onClose }) {
   const filtered = q
     ? byBranch.filter((r) => r.sku.toLowerCase().includes(q) || r.namaKita.toLowerCase().includes(q) || r.namaAccurate.toLowerCase().includes(q))
     : byBranch;
+
+  const missingFromSoloByBranch = branchFilter === "Semua" ? missingFromSolo : missingFromSolo.filter((p) => p.branches.includes(branchFilter));
+  const missingFromSoloFiltered = q
+    ? missingFromSoloByBranch.filter((p) => p.sku.toLowerCase().includes(q) || p.namaKita.toLowerCase().includes(q))
+    : missingFromSoloByBranch;
 
   const mismatchCount = allRows.filter((r) => r.status === "mismatch").length;
   const matchCount = allRows.filter((r) => r.status === "match").length;
@@ -6071,6 +6098,12 @@ function CekNamaAccurateModal({ onClose }) {
             >
               Sudah Sesuai ({matchCount})
             </button>
+            <button
+              onClick={() => setTab("missing_solo")}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium ${tab === "missing_solo" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}
+            >
+              Belum di Solo ({missingFromSolo.length})
+            </button>
           </div>
 
           <div className="flex gap-2 mb-3">
@@ -6092,7 +6125,27 @@ function CekNamaAccurateModal({ onClose }) {
             </select>
           </div>
 
-          <div className="mb-3 text-xs text-slate-500">{filtered.length} ditampilkan.</div>
+          <div className="mb-3 text-xs text-slate-500">
+            {tab === "missing_solo" ? missingFromSoloFiltered.length : filtered.length} ditampilkan.
+          </div>
+          {tab === "missing_solo" ? (
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+              {missingFromSoloFiltered.map((p) => (
+                <div key={p.productId} className="border border-slate-200 rounded-2xl p-3">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-xs font-mono text-slate-400">{p.sku} · {p.branches.join(", ")}</span>
+                    <span className="shrink-0 text-xs text-amber-600 italic">belum ada nama resmi</span>
+                  </div>
+                  <div className="text-xs text-slate-700">{p.namaKita}</div>
+                </div>
+              ))}
+              {missingFromSoloFiltered.length === 0 && (
+                <div className="py-10 text-center text-sm text-slate-400">
+                  Semua produk udah pernah ketemu di sync Zoho Solo.
+                </div>
+              )}
+            </div>
+          ) : (
           <div className="space-y-2 max-h-[60vh] overflow-y-auto">
             {filtered.map((r) => (
               <div key={r.sku + '|' + r.branchName} className="border border-slate-200 rounded-2xl p-3">
@@ -6129,6 +6182,7 @@ function CekNamaAccurateModal({ onClose }) {
               </div>
             )}
           </div>
+          )}
         </>
       )}
     </Modal>
