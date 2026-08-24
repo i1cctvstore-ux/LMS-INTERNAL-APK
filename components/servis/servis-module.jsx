@@ -572,29 +572,46 @@ function ProductCombo({ value, skuValue, onChange, products, onAddProduct, onGoT
                   : `${filtered.length}${filtered.length >= 50 ? "+" : ""} produk cocok — klik buat pilih`}
               </div>
             )}
-            {filtered.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => pick(p)}
-                className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-indigo-50"
-              >
-                {/* Cuma nampilin SKU -- nama produk sering kepanjangan & ke-truncate
-                    jadi nggak kebaca, sementara SKU lebih ringkas & unik. Kalau
-                    produknya kebetulan nggak punya SKU, fallback ke nama. */}
-                <span className="truncate font-mono text-xs">{highlightMatch(p.sku || p.name || "(tanpa SKU)", query.trim())}</span>
-                {trackedProductIds && !trackedProductIds.has(p.id) && (
-                  // "0" -- nunjukin belum ada baris stok tercatat buat
-                  // produk ini di cabang manapun. Satu karakter doang,
-                  // jadi gak bikin SKU di sebelahnya (kayak nama EZVIZ
-                  // yang panjang) kepotong. Detailnya tetap ada di
-                  // title (tooltip pas di-hover/di-tap-lama).
-                  <span className="shrink-0 text-[10px] font-semibold leading-none px-1 py-0.5 rounded bg-amber-50 text-amber-600" title="Belum ada baris stok tercatat di cabang manapun">
-                    0
+            {filtered.map((p) => {
+              // Produk yang nama-nya PERSIS sama kayak SKU-nya (hasil
+              // fitur useSkuAsName -- lihat lib/stok/accurate-sync.ts)
+              // artinya emang belum ada nama resmi, bukan produk aneh.
+              const isPlaceholderName = p.sku && norm(p.name) === norm(p.sku);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => pick(p)}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-start justify-between gap-2"
+                >
+                  {/* Nama produk sekarang yang utama ditampilkan (biar gampang
+                      dikenalin barangnya apa) -- SKU jadi keterangan kecil di
+                      bawahnya. Sebelumnya kebalik (SKU doang yang kelihatan),
+                      bikin bingung soalnya SKU angka polos gak ada artinya. */}
+                  <span className="min-w-0">
+                    {isPlaceholderName ? (
+                      <span className="block truncate font-mono text-xs text-slate-400 italic">
+                        {p.sku} <span className="not-italic text-amber-600">(belum ada nama)</span>
+                      </span>
+                    ) : (
+                      <>
+                        <span className="block truncate">{highlightMatch(p.name || "(tanpa nama)", query.trim())}</span>
+                        {p.sku && <span className="block truncate font-mono text-[11px] text-slate-400">{highlightMatch(p.sku, query.trim())}</span>}
+                      </>
+                    )}
                   </span>
-                )}
-              </button>
-            ))}
+                  {trackedProductIds && !trackedProductIds.has(p.id) && (
+                    // "0" -- nunjukin belum ada baris stok tercatat buat
+                    // produk ini di cabang manapun. Satu karakter doang,
+                    // jadi gak bikin nama di sebelahnya kepotong. Detailnya
+                    // tetap ada di title (tooltip pas di-hover/di-tap-lama).
+                    <span className="shrink-0 text-[10px] font-semibold leading-none px-1 py-0.5 rounded bg-amber-50 text-amber-600" title="Belum ada baris stok tercatat di cabang manapun">
+                      0
+                    </span>
+                  )}
+                </button>
+              );
+            })}
             {filtered.length === 0 && !query.trim() && <div className="px-3 py-2 text-sm text-slate-400">Belum ada produk.</div>}
             {query.trim() && !exactMatch && onAddProduct && (
               <div className="border-t border-slate-100 p-2 bg-slate-50">
