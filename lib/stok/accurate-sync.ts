@@ -340,17 +340,20 @@ export async function resolveNewProductSkus(
   productIdBySku: Map<string, string>,
   candidates: { sku: string; name: string }[],
   options?: {
-    // Zoho Solo = "kepala suku" nama produk, jadi produk baru yang
-    // pertama kali ketemu DARI Zoho Solo tetap boleh pakai nama asli
-    // dari Zoho Solo (default, useSkuAsName=false/undefined). Semua
-    // sumber LAIN (Accurate Jakarta/Purwokerto, Accurate Solo
-    // multi-gudang, Zoho Bali) TIDAK dianggap otoritatif soal nama —
-    // kalau produknya belum pernah ketemu di Zoho Solo, nama produk
-    // baru diisi SKU-nya sendiri dulu (bukan nama dari sumber itu),
-    // biar gampang dikenali "belum ada nama resmi". Kalau produk ini
-    // NANTI nyusul ketemu di sync Zoho Solo, nama-nya otomatis
-    // dibenerin ke nama asli lewat mekanisme "kepala suku" yang udah
-    // ada (lihat product_name_checks + auto-rename di zoho-sync.ts).
+    // CATATAN (2026-08-24, direvisi lagi hari yang sama): sempat dicoba
+    // nama produk baru dari sumber selain Zoho Solo diisi SKU-nya
+    // sendiri (useSkuAsName=true), biar jelas "belum ada nama resmi".
+    // Setelah dites nyata, SKU angka polos (mis. "100238") ternyata
+    // gak informatif sama sekali dan bikin susah dikenalin pas nyari
+    // produk. Diputuskan balik pakai nama asli dari akun sumbernya
+    // (Accurate JKT/PWT/Solo-gudang, Zoho Bali) -- lebih gampang
+    // dikenalin, walau belum "disahkan" Zoho Solo. Begitu produk ini
+    // NANTI ketemu di sync Zoho Solo, nama-nya tetap otomatis
+    // dibenerin ke nama resmi lewat mekanisme kepala suku yang ada
+    // (lihat product_name_checks + auto-rename di zoho-sync.ts) --
+    // jadi parameter ini sengaja dibiarin (bukan dihapus) kalau-kalau
+    // suatu saat mau dipakai lagi, tapi gak dipanggil dengan true di
+    // manapun sekarang.
     useSkuAsName?: boolean
   },
 ): Promise<{ newProductsCreated: number; aliasesLinked: number }> {
@@ -547,7 +550,9 @@ export async function syncAccurateForBranch(
       supabase,
       productIdBySku,
       resolvedDetails.map((d) => ({ sku: d.matchSku, name: d.matchName })),
-      { useSkuAsName: true }, // Accurate Jakarta/Purwokerto bukan kepala suku nama
+      // Balik pakai nama asli dari Accurate (lihat catatan di
+      // resolveNewProductSkus) -- SKU angka polos gak informatif
+      // kalau dijadiin nama produk.
     )
     newProductsCreated = created
 
@@ -880,7 +885,8 @@ export async function syncAccurateSoloMultiGudang(
       supabase,
       productIdBySku,
       allDetails.map((d) => ({ sku: d.no, name: d.name })),
-      { useSkuAsName: true }, // Accurate Solo (multi-gudang) bukan kepala suku nama
+      // Balik pakai nama asli dari Accurate (lihat catatan di
+      // resolveNewProductSkus).
     )
 
     // Deteksi mismatch nama — pola sama kayak syncAccurateForBranch,
