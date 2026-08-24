@@ -1223,6 +1223,10 @@ function StokCabangMatrix({ myBranchId }: { myBranchId: string | null }) {
       else if (sortKey === 'kategori') { av = a.kategori.toLowerCase(); bv = b.kategori.toLowerCase() }
       else if (sortKey === 'sku') { av = (a.sku || '').toLowerCase(); bv = (b.sku || '').toLowerCase() }
       else if (sortKey === 'total') { av = a.total; bv = b.total }
+      else if (sortKey === 'selisih_jkt_k') {
+        av = (a.sources['jkt_k']?.qty ?? 0) - (a.sources['jkt_k_solo']?.qty ?? 0)
+        bv = (b.sources['jkt_k']?.qty ?? 0) - (b.sources['jkt_k_solo']?.qty ?? 0)
+      }
       else if ((CITY_GROUPS as readonly string[]).includes(sortKey)) { av = a.cityTotal[sortKey] ?? 0; bv = b.cityTotal[sortKey] ?? 0 }
       else { av = a.sources[sortKey]?.qty ?? 0; bv = b.sources[sortKey]?.qty ?? 0 }
       if (typeof av === 'number' && typeof bv === 'number') return sortDir === 'asc' ? av - bv : bv - av
@@ -1307,7 +1311,7 @@ function StokCabangMatrix({ myBranchId }: { myBranchId: string | null }) {
     }
   }
 
-  function SortHeader({ label, sortKeyName }: { label: string; sortKeyName: string }) {
+  function SortHeader({ label, sortKeyName }: { label: React.ReactNode; sortKeyName: string }) {
     const active = sortKey === sortKeyName
     return (
       <button onClick={() => toggleSort(sortKeyName)} className={`flex items-center gap-1 hover:text-slate-600 ${active ? 'text-slate-700' : ''}`}>
@@ -1406,7 +1410,7 @@ function StokCabangMatrix({ myBranchId }: { myBranchId: string | null }) {
                           </th>
                         )
                       })}
-                      {showSelisihJktK && <th className="p-3 bg-amber-50" rowSpan={2}>Selisih<br />JKT-K</th>}
+                      {showSelisihJktK && <th className="p-3 bg-amber-50" rowSpan={2}><SortHeader label={<>Selisih<br />JKT-K</>} sortKeyName="selisih_jkt_k" /></th>}
                       <th className="p-3 bg-white" rowSpan={2}><SortHeader label="Total" sortKeyName="total" /></th>
                     </tr>
                     <tr className="border-b border-slate-100 text-center text-[10px] text-slate-400 uppercase tracking-wide">
@@ -1461,7 +1465,7 @@ function StokCabangMatrix({ myBranchId }: { myBranchId: string | null }) {
                       {CITY_GROUPS.map((g) => (
                         <th key={g} className="p-3 text-center bg-white"><SortHeader label={CITY_SHORT[g]} sortKeyName={g} /></th>
                       ))}
-                      {showSelisihJktK && <th className="p-3 text-center bg-amber-50">Selisih JKT-K</th>}
+                      {showSelisihJktK && <th className="p-3 text-center bg-amber-50"><SortHeader label="Selisih JKT-K" sortKeyName="selisih_jkt_k" /></th>}
                       <th className="p-3 bg-white"><SortHeader label="Total" sortKeyName="total" /></th>
                     </tr>
                   </thead>
