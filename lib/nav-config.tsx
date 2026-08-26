@@ -6,6 +6,7 @@ import {
   Truck,
   Layers,
   Wallet,
+  Banknote,
   Settings2,
   Users,
   FolderKanban,
@@ -20,6 +21,7 @@ export type PageKey =
   | 'dashboard'
   | 'lms-materi'
   | 'lms-verifikasi'
+  | 'kas'
   | 'proyek'
   | 'stok'
   | 'servis-claim'
@@ -67,6 +69,15 @@ export const NAV_ITEMS: NavItem[] = [
     // Halamannya sendiri juga membatasi lewat canVerify(role), menu
     // disembunyikan juga di sini biar gak bikin bingung role lain.
     roles: ['super_admin'],
+  },
+  {
+    key: 'kas',
+    label: 'Kas',
+    description: 'Buku kas & kas kecil per cabang',
+    icon: Banknote,
+    // Cuma admin & super_admin -- kasir/gudang/teknisi gak perlu (dan
+    // gak boleh) akses catatan keuangan cabang.
+    roles: ['super_admin', 'admin'],
   },
   {
     key: 'proyek',
