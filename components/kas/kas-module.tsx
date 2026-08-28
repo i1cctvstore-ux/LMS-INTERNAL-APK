@@ -60,6 +60,11 @@ type KasModuleProps = {
   currentUserBranchId: string | null
 }
 
+// Props buat wrapper (default export) -- sama kayak di atas tapi TANPA
+// `section`, soalnya section-nya sekarang state internal (tab switch),
+// bukan ditentukan dari luar lewat routing halaman lagi.
+type KasModuleWrapperProps = Omit<KasModuleProps, 'section'>
+
 type RangeKey = 'today' | 'week' | 'month' | 'lastmonth' | 'custom'
 
 const RANGE_LABELS: Record<RangeKey, string> = {
@@ -186,7 +191,12 @@ function inRange(tanggal: string, range: RangeKey, customFrom: string, customTo:
   return true
 }
 
-export default function KasModule({
+// Komponen "inner" -- isinya logic 1 section (Buku Kas ATAU Kas Kecil),
+// dibedakan lewat prop `section`. Dibungkus sama default export KasModule
+// di bawah yang nambahin tab switch "Buku Kas | Kas Kecil" di dalam 1
+// halaman -- pola sama persis kayak StokModule (tab "Stok Cabang |
+// Stok Supplier | Desty" di components/stok/stok-module.tsx).
+function KasModuleInner({
   section,
   currentUserId,
   currentUserName,
@@ -686,13 +696,11 @@ export default function KasModule({
 
   return (
     <div className="mx-auto max-w-5xl p-4 pb-16 sm:p-6 print:p-0">
-      {/* Header */}
-      <header className="mb-4 print:hidden">
-        <h1 className="text-2xl font-bold text-foreground">{title}</h1>
-        <p className="text-sm text-muted-foreground">
-          {isSuperAdmin ? 'Super Admin (Admin Pusat)' : `Admin · ${activeBranch?.name ?? ''}`}
-        </p>
-      </header>
+      {/* Info role/cabang -- judul halaman "Kas" sendiri udah ada di
+          wrapper KasModule, di sini cukup sub-info konteksnya aja */}
+      <p className="mb-4 text-sm text-muted-foreground print:hidden">
+        {isSuperAdmin ? 'Super Admin (Admin Pusat)' : `Admin · ${activeBranch?.name ?? ''}`} · <span className="font-medium text-foreground">{title}</span>
+      </p>
 
       {/* Tab cabang — hanya Super Admin */}
       {isSuperAdmin && branches.length > 0 && (
@@ -1255,6 +1263,49 @@ export default function KasModule({
           {toast}
         </div>
       )}
+    </div>
+  )
+}
+
+// ---------------- Wrapper: tab "Buku Kas | Kas Kecil" dalam 1 halaman ----------------
+// Sama persis polanya kayak StokModule (tab "Stok Cabang | Stok Supplier |
+// Desty") -- 1 menu sidebar aja ("Kas"), bukan dropdown 2 menu terpisah.
+export default function KasModule({
+  currentUserId,
+  currentUserName,
+  currentUserRole,
+  currentUserBranchId,
+}: KasModuleWrapperProps) {
+  const [activeTab, setActiveTab] = useState<'buku' | 'kecil'>('buku')
+  return (
+    <div className="text-foreground">
+      <div className="mb-4">
+        <h1 className="font-semibold text-lg text-foreground">Kas</h1>
+        <p className="text-xs text-muted-foreground mt-0.5">Buku kas & kas kecil per cabang — i1 CCTV</p>
+      </div>
+      <div className="mb-4 flex gap-1 bg-muted p-1 rounded-full w-fit print:hidden">
+        <button
+          type="button"
+          onClick={() => setActiveTab('buku')}
+          className={`px-4 py-1.5 rounded-full text-sm font-medium ${activeTab === 'buku' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
+        >
+          Buku Kas
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('kecil')}
+          className={`px-4 py-1.5 rounded-full text-sm font-medium ${activeTab === 'kecil' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
+        >
+          Kas Kecil
+        </button>
+      </div>
+      <KasModuleInner
+        section={activeTab}
+        currentUserId={currentUserId}
+        currentUserName={currentUserName}
+        currentUserRole={currentUserRole}
+        currentUserBranchId={currentUserBranchId}
+      />
     </div>
   )
 }
