@@ -982,10 +982,39 @@ export async function syncAccurateSoloMultiGudang(
       }
     }
 
+    // ---------- Pengaman tambahan (2026-08-28): sapu baris source='own'
+    // yang "nyasar" ----------
+    // Ketemu kasus nyata: TAPO C200 di Bali kolom "BALI-K" nunjukin 72
+    // (basi, dari 8 Agustus) padahal Accurate udah 0 -- soalnya BALI-K
+    // itu 'own_plus_solo' (dijumlah own+solo di UI, lihat stok-module.tsx),
+    // dan baris 'own' basi peninggalan kode versi lama (sebelum own/solo
+    // dipisah rapi) gak pernah kebersihin karena cleanup di atas cuma
+    // nyapu kombinasi yang DIA kelola (yaitu source='solo' buat Bali).
+    //
+    // source='own' cuma boleh legit ada di: Jakarta & Purwokerto (ditulis
+    // syncAccurateForBranch buat item "(K)" mereka sendiri) dan Solo
+    // sendiri (ditulis di atas dari gudang "Utama"). Bali TIDAK PERNAH
+    // seharusnya punya baris 'own' -- dia cabang Zoho, bukan Accurate,
+    // gak ada kode manapun yang nulis 'own' buat branch_id Bali. Jadi
+    // baris 'own' apapun yang ketemu di luar 3 cabang itu PASTI basi/
+    // salah, aman disapu tiap sync jalan -- gak nunggu ketauan manual lagi.
+    const OWN_ALLOWED_BRANCH_IDS = [
+      ACCURATE_BRANCH_MAP.find((b) => b.branchName === 'Jakarta')?.branchId,
+      ACCURATE_BRANCH_MAP.find((b) => b.branchName === 'Purwokerto')?.branchId,
+      SOLO_BRANCH_ID,
+    ].filter((id): id is string => !!id)
+    const { error: orphanCleanupErr, count: orphanDeletedCount } = await supabase
+      .from('product_stock_konsi')
+      .delete({ count: 'exact' })
+      .eq('source', 'own')
+      .not('branch_id', 'in', `(${OWN_ALLOWED_BRANCH_IDS.join(',')})`)
+    if (orphanCleanupErr) throw new Error(`Gagal sapu baris 'own' yang nyasar: ${orphanCleanupErr.message}`)
+
     const totalSkipped = itemsSkipped + detailFetchFailed
     const notes: string[] = []
     if (detailFetchFailed > 0) notes.push(`${detailFetchFailed} item gagal diambil detailnya.`)
     if (newProductsCreated > 0) notes.push(`${newProductsCreated} produk baru otomatis dibuat.`)
+    if (orphanDeletedCount) notes.push(`${orphanDeletedCount} baris 'own' yang nyasar (bukan Jakarta/Purwokerto/Solo) disapu bersih.`)
     notes.push(`Stok konsinyasi ditulis ke ${rows.length} kombinasi cabang+produk (Jakarta-K/Bali-K/Purwokerto-K/Solo-K).`)
 
     await supabase
