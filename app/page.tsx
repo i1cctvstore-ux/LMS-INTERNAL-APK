@@ -9,6 +9,7 @@ import { BranchManagement } from '@/components/branches/branch-management'
 import { EmployeeManagement } from '@/components/employees/employee-management'
 import ServisModule from '@/components/servis/servis-module'
 import StokModule from '@/components/stok/stok-module'
+import KasModule from '@/components/kas/kas-module'
 import { LmsMaterials } from '@/components/lms/lms-materials'
 import { LmsVerifikasi } from '@/components/lms/lms-verifikasi'
 import { ModulePlaceholder } from '@/components/module-placeholder'
@@ -155,6 +156,29 @@ export default function Page() {
           <ServisModule
             section="settings"
             currentUserId={profile!.id}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      // Modul Kas: 2 menu sidebar (dikelompokkan lewat NAV_GROUPS jadi 1
+      // folder dropdown "Kas" di Sidebar), 1 komponen yang sama dibedakan
+      // lewat prop `section` — pola persis sama seperti ServisModule.
+      case 'kas-buku':
+        return (
+          <KasModule
+            section="buku"
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'kas-kecil':
+        return (
+          <KasModule
+            section="kecil"
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
             currentUserRole={profile!.role}
             currentUserBranchId={profile!.branch_id}
           />
