@@ -6,13 +6,14 @@ import {
   Truck,
   Layers,
   Wallet,
-  Banknote,
   Settings2,
   Users,
   FolderKanban,
   Building2,
   BookOpen,
   ShieldCheck,
+  PiggyBank,
+  Receipt,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/types'
@@ -21,7 +22,6 @@ export type PageKey =
   | 'dashboard'
   | 'lms-materi'
   | 'lms-verifikasi'
-  | 'kas'
   | 'proyek'
   | 'stok'
   | 'servis-claim'
@@ -29,6 +29,8 @@ export type PageKey =
   | 'servis-inventaris'
   | 'servis-kas'
   | 'servis-master'
+  | 'kas-buku'
+  | 'kas-kecil'
   | 'user-role'
   | 'cabang'
 
@@ -45,6 +47,11 @@ export type NavItem = {
 // Role gudang cuma kerja di area Servis & Stok — gak perlu (dan gak boleh)
 // lihat Dashboard ringkasan bisnis, Proyek, apalagi Kelola Cabang/User Role.
 const NON_GUDANG_ROLES: Role[] = ['super_admin', 'admin', 'kasir', 'teknisi']
+
+// Menu Kas (Buku Kas & Kas Kecil) sengaja HANYA untuk super_admin & admin —
+// kasir/gudang/teknisi tidak pernah melihat menu ini sama sekali, beda
+// dengan menu "Kas Service" di grup Servis yang memang untuk staf servis.
+const KAS_ROLES: Role[] = ['super_admin', 'admin']
 
 export const NAV_ITEMS: NavItem[] = [
   {
@@ -70,14 +77,22 @@ export const NAV_ITEMS: NavItem[] = [
     // disembunyikan juga di sini biar gak bikin bingung role lain.
     roles: ['super_admin'],
   },
+  // ---------- Kas (Buku Kas & Kas Kecil) — menu baru, dikelompokkan
+  // jadi 1 folder dropdown di Sidebar lewat NAV_GROUPS di bawah.
+  // Cuma super_admin & admin yang boleh lihat (lihat KAS_ROLES). ----------
   {
-    key: 'kas',
-    label: 'Kas',
-    description: 'Buku kas & kas kecil per cabang',
-    icon: Banknote,
-    // Cuma admin & super_admin -- kasir/gudang/teknisi gak perlu (dan
-    // gak boleh) akses catatan keuangan cabang.
-    roles: ['super_admin', 'admin'],
+    key: 'kas-buku',
+    label: 'Buku Kas',
+    description: 'Catatan uang masuk & setoran kas harian per cabang',
+    icon: Receipt,
+    roles: KAS_ROLES,
+  },
+  {
+    key: 'kas-kecil',
+    label: 'Kas Kecil',
+    description: 'Setoran dari owner & pengeluaran operasional kas kecil per cabang',
+    icon: Wallet,
+    roles: KAS_ROLES,
   },
   {
     key: 'proyek',
@@ -163,6 +178,12 @@ export type NavGroup = {
 // terdaftar sebagai NavItem biasa di NAV_ITEMS di atas, ini cuma metadata
 // tambahan buat cara Sidebar merender & mengelompokkannya secara visual.
 export const NAV_GROUPS: NavGroup[] = [
+  {
+    key: 'kas',
+    label: 'Kas',
+    icon: PiggyBank,
+    itemKeys: ['kas-buku', 'kas-kecil'],
+  },
   {
     key: 'servis',
     label: 'Servis',
