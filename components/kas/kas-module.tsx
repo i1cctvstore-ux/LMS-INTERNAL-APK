@@ -19,6 +19,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/types'
+import { createClient } from '@/lib/supabase/client'
 import {
   fetchKasBukuEntries,
   createKasBukuMasuk,
@@ -231,21 +232,28 @@ export default function KasModule({
   }
 
   // ---------- Muat daftar cabang ----------
+  // Query langsung ke Supabase (bukan lewat custom API route) --
+  // konsisten sama pola query data lain di proyek ini. Tabel `branches`
+  // memang dibaca oleh semua role yang sudah login (kena RLS biasa).
   useEffect(() => {
     let cancelled = false
     setLoadingBranches(true)
-    fetch('/api/branches')
-      .then((res) => res.json())
-      .then((body) => {
+    const supabase = createClient()
+    supabase
+      .from('branches')
+      .select('id, name, active')
+      .order('name', { ascending: true })
+      .then(({ data, error }) => {
         if (cancelled) return
-        const active = (body.branches ?? []).filter((b: Branch) => b.active !== false)
+        if (error) {
+          setLoadError('Gagal memuat daftar cabang.')
+          return
+        }
+        const active = (data ?? []).filter((b: Branch) => b.active !== false)
         setBranches(active)
         if (isSuperAdmin && !activeBranchId && active.length > 0) {
           setActiveBranchId(active[0].id)
         }
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError('Gagal memuat daftar cabang.')
       })
       .finally(() => {
         if (!cancelled) setLoadingBranches(false)
@@ -654,6 +662,14 @@ export default function KasModule({
     return (
       <div className="flex min-h-[50vh] items-center justify-center text-sm text-muted-foreground">
         <Loader2 className="mr-2 size-4 animate-spin" /> Memuat data cabang…
+      </div>
+    )
+  }
+
+  if (loadError && branches.length === 0) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center p-6 text-center">
+        <p className="max-w-xs text-sm text-destructive">{loadError}</p>
       </div>
     )
   }
