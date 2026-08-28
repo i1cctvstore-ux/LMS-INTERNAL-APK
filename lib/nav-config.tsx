@@ -12,7 +12,6 @@ import {
   Building2,
   BookOpen,
   ShieldCheck,
-  PiggyBank,
   Receipt,
   type LucideIcon,
 } from 'lucide-react'
@@ -22,6 +21,7 @@ export type PageKey =
   | 'dashboard'
   | 'lms-materi'
   | 'lms-verifikasi'
+  | 'kas'
   | 'proyek'
   | 'stok'
   | 'servis-claim'
@@ -29,8 +29,6 @@ export type PageKey =
   | 'servis-inventaris'
   | 'servis-kas'
   | 'servis-master'
-  | 'kas-buku'
-  | 'kas-kecil'
   | 'user-role'
   | 'cabang'
 
@@ -77,21 +75,15 @@ export const NAV_ITEMS: NavItem[] = [
     // disembunyikan juga di sini biar gak bikin bingung role lain.
     roles: ['super_admin'],
   },
-  // ---------- Kas (Buku Kas & Kas Kecil) — menu baru, dikelompokkan
-  // jadi 1 folder dropdown di Sidebar lewat NAV_GROUPS di bawah.
+  // ---------- Kas (Buku Kas & Kas Kecil) — 1 menu, tab-nya ada DI
+  // DALAM halaman (lihat components/kas/kas-module.tsx), pola sama
+  // kayak "Cek Stok" (Stok Cabang/Supplier/Desty jadi 1 halaman).
   // Cuma super_admin & admin yang boleh lihat (lihat KAS_ROLES). ----------
   {
-    key: 'kas-buku',
-    label: 'Buku Kas',
-    description: 'Catatan uang masuk & setoran kas harian per cabang',
+    key: 'kas',
+    label: 'Kas',
+    description: 'Buku kas & kas kecil per cabang',
     icon: Receipt,
-    roles: KAS_ROLES,
-  },
-  {
-    key: 'kas-kecil',
-    label: 'Kas Kecil',
-    description: 'Setoran dari owner & pengeluaran operasional kas kecil per cabang',
-    icon: Wallet,
     roles: KAS_ROLES,
   },
   {
@@ -178,12 +170,6 @@ export type NavGroup = {
 // terdaftar sebagai NavItem biasa di NAV_ITEMS di atas, ini cuma metadata
 // tambahan buat cara Sidebar merender & mengelompokkannya secara visual.
 export const NAV_GROUPS: NavGroup[] = [
-  {
-    key: 'kas',
-    label: 'Kas',
-    icon: PiggyBank,
-    itemKeys: ['kas-buku', 'kas-kecil'],
-  },
   {
     key: 'servis',
     label: 'Servis',
