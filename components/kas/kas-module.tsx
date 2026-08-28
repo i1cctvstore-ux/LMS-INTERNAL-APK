@@ -223,7 +223,9 @@ function KasModuleInner({
   const [range, setRange] = useState<RangeKey>('month')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
-  const [sortKey, setSortKey] = useState<'tanggal' | 'jumlah'>('tanggal')
+  const [sortKey, setSortKey] = useState<
+    'tanggal' | 'jenis' | 'nama' | 'invoice' | 'masuk' | 'keluar' | 'metode' | 'kasir'
+  >('tanggal')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const [showAddMasuk, setShowAddMasuk] = useState(false)
@@ -356,19 +358,44 @@ function KasModuleInner({
     const q = searchTerm.trim().toLowerCase()
     const filtered = q ? rows.filter((r) => r.searchBlob.includes(q)) : rows
     const dir = sortDir === 'asc' ? 1 : -1
+    // Sama kayak mockup: tiap kolom bisa disortir sendiri-sendiri, bukan
+    // cuma Tanggal & Jumlah. "Masuk"/"Keluar" pakai -1 buat baris yang
+    // bukan arah itu, biar baris kosong ("-") selalu ke bawah pas di-sort.
+    const accessor = (r: DisplayRow): string | number => {
+      switch (sortKey) {
+        case 'jenis':
+          return r.jenisLabel
+        case 'nama':
+          return r.primary
+        case 'invoice':
+          return r.secondary
+        case 'masuk':
+          return r.arah === 'masuk' ? r.jumlah : -1
+        case 'keluar':
+          return r.arah === 'keluar' ? r.jumlah : -1
+        case 'metode':
+          return r.metodeLabel
+        case 'kasir':
+          return r.createdByName
+        default:
+          return r.tanggal
+      }
+    }
     return filtered.slice().sort((a, b) => {
-      let cmp = 0
-      if (sortKey === 'jumlah') cmp = a.jumlah - b.jumlah
-      else cmp = a.tanggal.localeCompare(b.tanggal)
+      const va = accessor(a)
+      const vb = accessor(b)
+      const cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb))
       return cmp !== 0 ? cmp * dir : 0
     })
   }, [section, periodEntries, searchTerm, sortKey, sortDir])
 
-  function toggleSort(key: 'tanggal' | 'jumlah') {
+  function toggleSort(
+    key: 'tanggal' | 'jenis' | 'nama' | 'invoice' | 'masuk' | 'keluar' | 'metode' | 'kasir',
+  ) {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else {
       setSortKey(key)
-      setSortDir('desc')
+      setSortDir(key === 'tanggal' || key === 'masuk' || key === 'keluar' ? 'desc' : 'asc')
     }
   }
 
@@ -837,14 +864,22 @@ function KasModuleInner({
                 <thead>
                   <tr className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
                     <SortableTh label="Tanggal" active={sortKey === 'tanggal'} dir={sortDir} onClick={() => toggleSort('tanggal')} />
-                    <th className="whitespace-nowrap px-3.5 py-2.5 text-left font-medium">Jenis</th>
-                    <th className="whitespace-nowrap px-3.5 py-2.5 text-left font-medium">
-                      {isBuku ? 'Customer / Catatan' : 'Keterangan'}
-                    </th>
-                    {isBuku && <th className="whitespace-nowrap px-3.5 py-2.5 text-left font-medium">No Invoice</th>}
-                    <SortableTh label="Jumlah" active={sortKey === 'jumlah'} dir={sortDir} onClick={() => toggleSort('jumlah')} numeric />
-                    {isBuku && <th className="whitespace-nowrap px-3.5 py-2.5 text-left font-medium">Metode</th>}
-                    <th className="whitespace-nowrap px-3.5 py-2.5 text-left font-medium">Diinput Oleh</th>
+                    <SortableTh label="Jenis" active={sortKey === 'jenis'} dir={sortDir} onClick={() => toggleSort('jenis')} />
+                    <SortableTh
+                      label={isBuku ? 'Customer / Catatan' : 'Keterangan'}
+                      active={sortKey === 'nama'}
+                      dir={sortDir}
+                      onClick={() => toggleSort('nama')}
+                    />
+                    {isBuku && (
+                      <SortableTh label="No Invoice" active={sortKey === 'invoice'} dir={sortDir} onClick={() => toggleSort('invoice')} />
+                    )}
+                    <SortableTh label="Uang Masuk" active={sortKey === 'masuk'} dir={sortDir} onClick={() => toggleSort('masuk')} numeric />
+                    <SortableTh label="Uang Keluar" active={sortKey === 'keluar'} dir={sortDir} onClick={() => toggleSort('keluar')} numeric />
+                    {isBuku && (
+                      <SortableTh label="Metode" active={sortKey === 'metode'} dir={sortDir} onClick={() => toggleSort('metode')} />
+                    )}
+                    <SortableTh label="Diinput Oleh" active={sortKey === 'kasir'} dir={sortDir} onClick={() => toggleSort('kasir')} />
                     {canManage && <th className="whitespace-nowrap px-3.5 py-2.5 text-left font-medium">Aksi</th>}
                   </tr>
                 </thead>
@@ -859,13 +894,11 @@ function KasModuleInner({
                       </td>
                       <td className="px-3.5 py-3">{r.primary}</td>
                       {isBuku && <td className="whitespace-nowrap px-3.5 py-3">{r.secondary || '-'}</td>}
-                      <td
-                        className={`whitespace-nowrap px-3.5 py-3 text-right font-semibold tabular-nums ${
-                          r.arah === 'masuk' ? 'text-emerald-700' : 'text-blue-700'
-                        }`}
-                      >
-                        {r.arah === 'masuk' ? '+ ' : '− '}
-                        {rupiah(r.jumlah)}
+                      <td className="whitespace-nowrap px-3.5 py-3 text-right font-semibold tabular-nums text-emerald-700">
+                        {r.arah === 'masuk' ? rupiah(r.jumlah) : '-'}
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-3 text-right font-semibold tabular-nums text-blue-700">
+                        {r.arah === 'keluar' ? rupiah(r.jumlah) : '-'}
                       </td>
                       {isBuku && <td className="whitespace-nowrap px-3.5 py-3">{r.metodeLabel}</td>}
                       <td className="whitespace-nowrap px-3.5 py-3">{r.createdByName}</td>
