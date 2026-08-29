@@ -183,6 +183,16 @@ export default function Page() {
             currentUserBranchId={profile!.branch_id}
           />
         )
+      case 'kas-um':
+        return (
+          <KasModule
+            section="um"
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
       default:
         return (
           activeItem && (
