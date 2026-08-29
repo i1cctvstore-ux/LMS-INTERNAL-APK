@@ -13,6 +13,7 @@ import {
   BookOpen,
   ShieldCheck,
   Receipt,
+  HandCoins,
   PiggyBank,
   type LucideIcon,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ export type PageKey =
   | 'lms-verifikasi'
   | 'kas-buku'
   | 'kas-kecil'
+  | 'kas-um'
   | 'proyek'
   | 'stok'
   | 'servis-claim'
@@ -77,10 +79,10 @@ export const NAV_ITEMS: NavItem[] = [
     // disembunyikan juga di sini biar gak bikin bingung role lain.
     roles: ['super_admin'],
   },
-  // ---------- Kas (Buku Kas & Kas Kecil) — 2 sub-menu, dikelompokkan
-  // jadi 1 folder dropdown "Kas" di Sidebar lewat NAV_GROUPS di bawah --
-  // pola sama persis kayak folder "Servis". Cuma super_admin & admin
-  // yang boleh lihat (lihat KAS_ROLES). ----------
+  // ---------- Kas (Buku Kas & Kas Kecil & Kas UM/Reimburse) — 3 sub-menu,
+  // dikelompokkan jadi 1 folder dropdown "Kas" di Sidebar lewat
+  // NAV_GROUPS di bawah -- pola sama persis kayak folder "Servis".
+  // Cuma super_admin & admin yang boleh lihat (lihat KAS_ROLES). ----------
   {
     key: 'kas-buku',
     label: 'Buku Kas',
@@ -93,6 +95,13 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Kas Kecil',
     description: 'Setoran dari owner & pengeluaran operasional kas kecil per cabang',
     icon: Wallet,
+    roles: KAS_ROLES,
+  },
+  {
+    key: 'kas-um',
+    label: 'Kas UM & Reimburse',
+    description: 'Top up kas, uang makan, dan reimburse karyawan per cabang',
+    icon: HandCoins,
     roles: KAS_ROLES,
   },
   {
@@ -183,7 +192,7 @@ export const NAV_GROUPS: NavGroup[] = [
     key: 'kas',
     label: 'Kas',
     icon: PiggyBank,
-    itemKeys: ['kas-buku', 'kas-kecil'],
+    itemKeys: ['kas-buku', 'kas-kecil', 'kas-um'],
   },
   {
     key: 'servis',
