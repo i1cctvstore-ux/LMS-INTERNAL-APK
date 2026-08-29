@@ -160,11 +160,23 @@ export default function Page() {
             currentUserBranchId={profile!.branch_id}
           />
         )
-      // Modul Kas: 1 menu sidebar, tab "Buku Kas | Kas Kecil" ada DI
-      // DALAM komponennya sendiri (pola sama kayak StokModule/Cek Stok).
-      case 'kas':
+      // Modul Kas: 2 menu sidebar (dikelompokkan lewat NAV_GROUPS jadi 1
+      // folder dropdown "Kas" di Sidebar, sama kayak folder "Servis"),
+      // 1 komponen yang sama dibedakan lewat prop `section`.
+      case 'kas-buku':
         return (
           <KasModule
+            section="buku"
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'kas-kecil':
+        return (
+          <KasModule
+            section="kecil"
             currentUserId={profile!.id}
             currentUserName={profile!.name}
             currentUserRole={profile!.role}
