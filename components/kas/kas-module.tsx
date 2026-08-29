@@ -31,16 +31,24 @@ import {
   createKasKecilKeluar,
   updateKasKecilEntry,
   deleteKasKecilEntry,
+  fetchKasUmEntries,
+  createKasUmMasuk,
+  createKasUmKeluar,
+  updateKasUmEntry,
+  deleteKasUmEntry,
   type KasBukuEntry,
   type KasKecilEntry,
+  type KasUmEntry,
   type KasMetode,
   type KasKecilKategori,
+  type KasUmKategori,
 } from '@/lib/kas/api'
 
 // =====================================================
-// Modul Kas: satu komponen dipakai untuk 2 halaman sidebar
-// ("Buku Kas" dan "Kas Kecil"), dibedakan lewat prop `section` — pola
-// yang sama seperti ServisModule (5 menu, 1 komponen + prop `section`).
+// Modul Kas: satu komponen dipakai untuk 3 halaman sidebar
+// ("Buku Kas", "Kas Kecil", "Kas UM & Reimburse"), dibedakan lewat prop
+// `section` — pola yang sama seperti ServisModule (5 menu, 1 komponen +
+// prop `section`).
 //
 // Akses menu ini sudah dibatasi di lib/nav-config.tsx hanya untuk
 // super_admin & admin. Di dalam komponen ini:
@@ -53,7 +61,7 @@ import {
 type Branch = { id: string; name: string; active?: boolean }
 
 type KasModuleProps = {
-  section: 'buku' | 'kecil'
+  section: 'buku' | 'kecil' | 'um'
   currentUserId: string
   currentUserName: string
   currentUserRole: Role
@@ -80,6 +88,16 @@ const KATEGORI_BADGE: Record<KasKecilKategori, string> = {
   makanan: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200',
   material: 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200',
   ongkir: 'bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200',
+}
+
+const KATEGORI_LABEL_UM: Record<KasUmKategori, string> = {
+  uangmakan: 'Uang Makan',
+  reimburse: 'Reimburse',
+}
+
+const KATEGORI_BADGE_UM: Record<KasUmKategori, string> = {
+  uangmakan: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200',
+  reimburse: 'bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200',
 }
 
 function rupiah(n: number) {
@@ -115,7 +133,10 @@ type DisplayRow = {
   searchBlob: string
 }
 
-function toDisplayRows(section: 'buku' | 'kecil', entries: (KasBukuEntry | KasKecilEntry)[]): DisplayRow[] {
+function toDisplayRows(
+  section: 'buku' | 'kecil' | 'um',
+  entries: (KasBukuEntry | KasKecilEntry | KasUmEntry)[],
+): DisplayRow[] {
   if (section === 'buku') {
     return (entries as KasBukuEntry[]).map((e) => {
       const isMasuk = e.type === 'masuk'
@@ -138,6 +159,31 @@ function toDisplayRows(section: 'buku' | 'kecil', entries: (KasBukuEntry | KasKe
         metodeLabel: isMasuk ? (isCash ? 'Cash' : 'Transfer') : isCash ? 'Serahkan Cash' : 'Transfer Bank',
         createdByName: e.createdByName,
         searchBlob: [e.customerName, e.invoiceNo, e.catatan, e.createdByName].filter(Boolean).join(' ').toLowerCase(),
+      }
+    })
+  }
+  if (section === 'um') {
+    return (entries as KasUmEntry[]).map((e) => {
+      const isMasuk = e.type === 'masuk'
+      const jenisLabel = isMasuk ? 'Top Up Kas' : KATEGORI_LABEL_UM[e.kategori as KasUmKategori]
+      const jenisBadgeClass = isMasuk
+        ? 'bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-200'
+        : KATEGORI_BADGE_UM[e.kategori as KasUmKategori]
+      return {
+        id: e.id,
+        tanggal: e.tanggal,
+        jenisLabel,
+        jenisBadgeClass,
+        arah: isMasuk ? 'masuk' : 'keluar',
+        // Kolom "primary" dipakai buat Nama Karyawan (bukan
+        // customer/catatan kayak section lain) -- Top Up Kas gak punya
+        // karyawan, jadi fallback ke catatan/"Top Up Kas".
+        primary: isMasuk ? e.catatan || 'Top Up Kas' : e.karyawan || '-',
+        secondary: isMasuk ? '' : e.keterangan || '',
+        jumlah: e.jumlah,
+        metodeLabel: '-',
+        createdByName: e.createdByName,
+        searchBlob: [e.catatan, e.karyawan, e.keterangan, e.createdByName].filter(Boolean).join(' ').toLowerCase(),
       }
     })
   }
@@ -197,9 +243,10 @@ export default function KasModule({
   currentUserBranchId,
 }: KasModuleProps) {
   const isBuku = section === 'buku'
+  const isUm = section === 'um'
   const isSuperAdmin = currentUserRole === 'super_admin'
   const canManage = isSuperAdmin // edit & hapus cuma Super Admin
-  const title = isBuku ? 'Buku Kas' : 'Kas Kecil'
+  const title = isBuku ? 'Buku Kas' : isUm ? 'Kas UM & Reimburse' : 'Kas Kecil'
   const rangeOptions: RangeKey[] = isBuku
     ? ['today', 'week', 'month', 'custom']
     : ['today', 'week', 'month', 'lastmonth', 'custom']
@@ -208,7 +255,7 @@ export default function KasModule({
   const [activeBranchId, setActiveBranchId] = useState<string | null>(isSuperAdmin ? null : currentUserBranchId)
   const [loadingBranches, setLoadingBranches] = useState(true)
 
-  const [entries, setEntries] = useState<(KasBukuEntry | KasKecilEntry)[]>([])
+  const [entries, setEntries] = useState<(KasBukuEntry | KasKecilEntry | KasUmEntry)[]>([])
   const [loadingEntries, setLoadingEntries] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -275,7 +322,11 @@ export default function KasModule({
     setLoadingEntries(true)
     setLoadError(null)
     try {
-      const data = isBuku ? await fetchKasBukuEntries(activeBranchId) : await fetchKasKecilEntries(activeBranchId)
+      const data = isBuku
+        ? await fetchKasBukuEntries(activeBranchId)
+        : isUm
+          ? await fetchKasUmEntries(activeBranchId)
+          : await fetchKasKecilEntries(activeBranchId)
       setEntries(data)
     } catch (err: any) {
       setLoadError(err?.message || 'Gagal memuat data.')
@@ -328,6 +379,21 @@ export default function KasModule({
       }
       return cards
     }
+    if (isUm) {
+      const list = periodEntries as KasUmEntry[]
+      const masuk = list.filter((e) => e.type === 'masuk').reduce((s, e) => s + e.jumlah, 0)
+      const uangmakan = list
+        .filter((e) => e.type === 'keluar' && e.kategori === 'uangmakan')
+        .reduce((s, e) => s + e.jumlah, 0)
+      const reimburse = list
+        .filter((e) => e.type === 'keluar' && e.kategori === 'reimburse')
+        .reduce((s, e) => s + e.jumlah, 0)
+      return [
+        { label: `Top Up Kas — ${label}`, value: rupiah(masuk) },
+        { label: `Uang Makan — ${label}`, value: rupiah(uangmakan) },
+        { label: `Reimburse — ${label}`, value: rupiah(reimburse) },
+      ]
+    }
     const list = periodEntries as KasKecilEntry[]
     const masuk = list.filter((e) => e.type === 'masuk').reduce((s, e) => s + e.jumlah, 0)
     const makanan = list
@@ -343,7 +409,7 @@ export default function KasModule({
       { label: `Material — ${label}`, value: rupiah(material) },
       { label: `Ongkir — ${label}`, value: rupiah(ongkir) },
     ]
-  }, [periodEntries, isBuku, isSuperAdmin, range])
+  }, [periodEntries, isBuku, isUm, isSuperAdmin, range])
 
   // ---------- Baris tabel: filter periode + cari + sort ----------
   const displayRows = useMemo(() => {
@@ -410,11 +476,13 @@ export default function KasModule({
     setShowAddMasuk(true)
   }
 
-  // ---------- Form tambah: Setor (buku) / Keluar (kecil) ----------
+  // ---------- Form tambah: Setor (buku) / Keluar (kecil) / UM-Reimburse (um) ----------
   const [sTanggal, setSTanggal] = useState(todayISO())
   const [sMetode, setSMetode] = useState<KasMetode>('cash')
   const [sCatatan, setSCatatan] = useState('')
   const [sKategori, setSKategori] = useState<KasKecilKategori>('makanan')
+  const [sKategoriUm, setSKategoriUm] = useState<KasUmKategori>('uangmakan')
+  const [sKaryawan, setSKaryawan] = useState('')
   const [sKeterangan, setSKeterangan] = useState('')
   const [sJumlah, setSJumlah] = useState('')
 
@@ -423,6 +491,8 @@ export default function KasModule({
     setSMetode('cash')
     setSCatatan('')
     setSKategori('makanan')
+    setSKategoriUm('uangmakan')
+    setSKaryawan('')
     setSKeterangan('')
     setSJumlah('')
     setShowAddOut(true)
@@ -466,8 +536,12 @@ export default function KasModule({
       showToast('Lengkapi dulu tanggal dan jumlah')
       return
     }
-    if (!isBuku && !sKeterangan.trim()) {
+    if (!isBuku && !isUm && !sKeterangan.trim()) {
       showToast('Lengkapi dulu semua field')
+      return
+    }
+    if (isUm && !sKaryawan.trim()) {
+      showToast('Lengkapi dulu nama karyawan')
       return
     }
     setShowAddOut(false)
@@ -476,7 +550,7 @@ export default function KasModule({
       warning = `Nilai setoran (${rupiah(jumlah)}) lebih besar dari saldo kas tunai saat ini (${rupiah(saldo)}). Cek lagi sebelum lanjut — tetap bisa disimpan kalau memang sudah benar.`
     }
     if (!isBuku && jumlah > saldo) {
-      warning = `Nilai pengeluaran (${rupiah(jumlah)}) lebih besar dari saldo kas kecil saat ini (${rupiah(saldo)}). Cek lagi sebelum lanjut — tetap bisa disimpan kalau memang sudah benar.`
+      warning = `Nilai pengeluaran (${rupiah(jumlah)}) lebih besar dari saldo ${isUm ? 'kas UM & Reimburse' : 'kas kecil'} saat ini (${rupiah(saldo)}). Cek lagi sebelum lanjut — tetap bisa disimpan kalau memang sudah benar.`
     }
     const rows: [string, string, boolean?][] = isBuku
       ? [
@@ -485,12 +559,20 @@ export default function KasModule({
           ['Catatan', sCatatan || '-'],
           ['Jumlah', rupiah(jumlah), true],
         ]
-      : [
-          ['Tanggal', formatTgl(sTanggal)],
-          ['Kategori', KATEGORI_LABEL[sKategori]],
-          ['Keterangan', sKeterangan],
-          ['Jumlah', rupiah(jumlah), true],
-        ]
+      : isUm
+        ? [
+            ['Tanggal', formatTgl(sTanggal)],
+            ['Kategori', KATEGORI_LABEL_UM[sKategoriUm]],
+            ['Nama Karyawan', sKaryawan],
+            ['Keterangan', sKeterangan || '-'],
+            ['Jumlah', rupiah(jumlah), true],
+          ]
+        : [
+            ['Tanggal', formatTgl(sTanggal)],
+            ['Kategori', KATEGORI_LABEL[sKategori]],
+            ['Keterangan', sKeterangan],
+            ['Jumlah', rupiah(jumlah), true],
+          ]
     setPending({ kind: 'out', summary: rows, warning })
     setShowConfirm(true)
   }
@@ -511,6 +593,15 @@ export default function KasModule({
             createdBy: currentUserId,
             createdByName: currentUserName,
           })
+        } else if (isUm) {
+          await createKasUmMasuk({
+            branchId: activeBranchId,
+            tanggal: mTanggal,
+            catatan: mCatatan.trim(),
+            jumlah: Number(mJumlah),
+            createdBy: currentUserId,
+            createdByName: currentUserName,
+          })
         } else {
           await createKasKecilMasuk({
             branchId: activeBranchId,
@@ -521,7 +612,7 @@ export default function KasModule({
             createdByName: currentUserName,
           })
         }
-        showToast(isBuku ? 'Uang masuk tercatat' : 'Setoran tercatat')
+        showToast(isBuku ? 'Uang masuk tercatat' : isUm ? 'Top up kas tercatat' : 'Setoran tercatat')
       } else {
         if (isBuku) {
           await createKasBukuSetor({
@@ -534,6 +625,18 @@ export default function KasModule({
             createdByName: currentUserName,
           })
           showToast('Setoran tercatat')
+        } else if (isUm) {
+          await createKasUmKeluar({
+            branchId: activeBranchId,
+            tanggal: sTanggal,
+            kategori: sKategoriUm,
+            karyawan: sKaryawan.trim(),
+            keterangan: sKeterangan.trim(),
+            jumlah: Number(sJumlah),
+            createdBy: currentUserId,
+            createdByName: currentUserName,
+          })
+          showToast('Data tercatat')
         } else {
           await createKasKecilKeluar({
             branchId: activeBranchId,
@@ -564,6 +667,8 @@ export default function KasModule({
   const [eInvoice, setEInvoice] = useState('')
   const [eCatatan, setECatatan] = useState('')
   const [eKategori, setEKategori] = useState<KasKecilKategori>('makanan')
+  const [eKategoriUm, setEKategoriUm] = useState<KasUmKategori>('uangmakan')
+  const [eKaryawan, setEKaryawan] = useState('')
   const [eKeterangan, setEKeterangan] = useState('')
   const [eJumlah, setEJumlah] = useState('')
 
@@ -579,6 +684,12 @@ export default function KasModule({
       setECustomer(b.customerName || '')
       setEInvoice(b.invoiceNo || '')
       setECatatan(b.catatan || '')
+    } else if (isUm) {
+      const u = raw as KasUmEntry
+      setECatatan(u.catatan || '')
+      setEKategoriUm((u.kategori as KasUmKategori) || 'uangmakan')
+      setEKaryawan(u.karyawan || '')
+      setEKeterangan(u.keterangan || '')
     } else {
       const k = raw as KasKecilEntry
       setECatatan(k.catatan || '')
@@ -603,6 +714,15 @@ export default function KasModule({
           ...(b.type === 'masuk'
             ? { customerName: eCustomer.trim(), invoiceNo: eInvoice.trim() }
             : { catatan: eCatatan.trim() }),
+        })
+      } else if (isUm) {
+        const u = raw as KasUmEntry
+        await updateKasUmEntry(u.id, {
+          tanggal: eTanggal,
+          jumlah,
+          ...(u.type === 'masuk'
+            ? { catatan: eCatatan.trim() }
+            : { kategori: eKategoriUm, karyawan: eKaryawan.trim(), keterangan: eKeterangan.trim() }),
         })
       } else {
         const k = raw as KasKecilEntry
@@ -629,6 +749,7 @@ export default function KasModule({
     setSaving(true)
     try {
       if (isBuku) await deleteKasBukuEntry(deletingRow.id)
+      else if (isUm) await deleteKasUmEntry(deletingRow.id)
       else await deleteKasKecilEntry(deletingRow.id)
       showToast('Data dihapus')
       setDeletingRow(null)
@@ -645,7 +766,9 @@ export default function KasModule({
     const rows = displayRows
     const header = isBuku
       ? ['Tanggal', 'Jenis', 'Customer/Catatan', 'No Invoice', 'Uang Masuk', 'Uang Keluar', 'Metode', 'Diinput Oleh']
-      : ['Tanggal', 'Jenis', 'Keterangan', 'Masuk', 'Keluar', 'Diinput Oleh']
+      : isUm
+        ? ['Tanggal', 'Jenis', 'Nama Karyawan', 'Keterangan', 'Uang Masuk', 'Uang Keluar', 'Diinput Oleh']
+        : ['Tanggal', 'Jenis', 'Keterangan', 'Masuk', 'Keluar', 'Diinput Oleh']
     const body = rows.map((r) =>
       isBuku
         ? [
@@ -658,14 +781,24 @@ export default function KasModule({
             r.metodeLabel,
             r.createdByName,
           ]
-        : [
-            r.tanggal,
-            r.jenisLabel,
-            r.primary,
-            r.arah === 'masuk' ? r.jumlah : '',
-            r.arah === 'keluar' ? r.jumlah : '',
-            r.createdByName,
-          ],
+        : isUm
+          ? [
+              r.tanggal,
+              r.jenisLabel,
+              r.primary,
+              r.secondary,
+              r.arah === 'masuk' ? r.jumlah : '',
+              r.arah === 'keluar' ? r.jumlah : '',
+              r.createdByName,
+            ]
+          : [
+              r.tanggal,
+              r.jenisLabel,
+              r.primary,
+              r.arah === 'masuk' ? r.jumlah : '',
+              r.arah === 'keluar' ? r.jumlah : '',
+              r.createdByName,
+            ],
     )
     const esc = (v: any) => `"${String(v).replace(/"/g, '""')}"`
     const csv = [header, ...body].map((r) => r.map(esc).join(',')).join('\r\n')
@@ -673,7 +806,7 @@ export default function KasModule({
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${isBuku ? 'buku-kas' : 'kas-kecil'}-${activeBranch?.name ?? 'cabang'}-${range}-${todayISO()}.csv`
+    a.download = `${isBuku ? 'buku-kas' : isUm ? 'kas-um-reimburse' : 'kas-kecil'}-${activeBranch?.name ?? 'cabang'}-${range}-${todayISO()}.csv`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -751,7 +884,9 @@ export default function KasModule({
             <Wallet className="size-5" />
           </div>
           <div>
-            <h2 className="text-base font-semibold text-foreground">Saldo {isBuku ? 'Kas' : 'Kas Kecil'}</h2>
+            <h2 className="text-base font-semibold text-foreground">
+              Saldo {isBuku ? 'Kas' : isUm ? 'Kas UM & Reimburse' : 'Kas Kecil'}
+            </h2>
             <p className="text-sm text-muted-foreground">
               Dihitung dari semua waktu — mewakili kas fisik yang ada sekarang
             </p>
@@ -777,6 +912,23 @@ export default function KasModule({
               className="inline-flex min-w-[150px] flex-1 items-center justify-center gap-1.5 rounded-full bg-blue-700 px-5 py-3 text-sm font-bold text-white hover:bg-blue-800"
             >
               <ArrowUpRight className="size-4" /> Setor Uang
+            </button>
+          </>
+        ) : isUm ? (
+          <>
+            <button
+              type="button"
+              onClick={openAddOut}
+              className="inline-flex min-w-[150px] flex-1 items-center justify-center gap-1.5 rounded-full bg-indigo-600 px-5 py-3 text-sm font-bold text-white hover:bg-indigo-700"
+            >
+              <span className="text-base leading-none">−</span> Catat UM / Reimburse
+            </button>
+            <button
+              type="button"
+              onClick={openAddMasuk}
+              className="inline-flex min-w-[150px] flex-1 items-center justify-center gap-1.5 rounded-full bg-blue-700 px-5 py-3 text-sm font-bold text-white hover:bg-blue-800"
+            >
+              <ArrowDownLeft className="size-4" /> Top Up Kas
             </button>
           </>
         ) : (
@@ -817,7 +969,9 @@ export default function KasModule({
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder={isBuku ? 'Cari invoice, customer, penyetor...' : 'Cari keterangan, catatan...'}
+            placeholder={
+              isBuku ? 'Cari invoice, customer, penyetor...' : isUm ? 'Cari nama karyawan, keterangan...' : 'Cari keterangan, catatan...'
+            }
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
@@ -861,13 +1015,18 @@ export default function KasModule({
                     <SortableTh label="Tanggal" active={sortKey === 'tanggal'} dir={sortDir} onClick={() => toggleSort('tanggal')} />
                     <SortableTh label="Jenis" active={sortKey === 'jenis'} dir={sortDir} onClick={() => toggleSort('jenis')} />
                     <SortableTh
-                      label={isBuku ? 'Customer / Catatan' : 'Keterangan'}
+                      label={isBuku ? 'Customer / Catatan' : isUm ? 'Nama Karyawan' : 'Keterangan'}
                       active={sortKey === 'nama'}
                       dir={sortDir}
                       onClick={() => toggleSort('nama')}
                     />
-                    {isBuku && (
-                      <SortableTh label="No Invoice" active={sortKey === 'invoice'} dir={sortDir} onClick={() => toggleSort('invoice')} />
+                    {(isBuku || isUm) && (
+                      <SortableTh
+                        label={isBuku ? 'No Invoice' : 'Keterangan'}
+                        active={sortKey === 'invoice'}
+                        dir={sortDir}
+                        onClick={() => toggleSort('invoice')}
+                      />
                     )}
                     <SortableTh label="Uang Masuk" active={sortKey === 'masuk'} dir={sortDir} onClick={() => toggleSort('masuk')} numeric />
                     <SortableTh label="Uang Keluar" active={sortKey === 'keluar'} dir={sortDir} onClick={() => toggleSort('keluar')} numeric />
@@ -888,7 +1047,7 @@ export default function KasModule({
                         </span>
                       </td>
                       <td className="px-3.5 py-3">{r.primary}</td>
-                      {isBuku && <td className="whitespace-nowrap px-3.5 py-3">{r.secondary || '-'}</td>}
+                      {(isBuku || isUm) && <td className="whitespace-nowrap px-3.5 py-3">{r.secondary || '-'}</td>}
                       <td className="whitespace-nowrap px-3.5 py-3 text-right font-semibold tabular-nums text-emerald-700">
                         {r.arah === 'masuk' ? rupiah(r.jumlah) : '-'}
                       </td>
@@ -976,11 +1135,17 @@ export default function KasModule({
       {/* ---------------- MODALS ---------------- */}
 
       {/* Modal: Uang Masuk (buku) / Setor dari Owner (kecil) */}
-      <Modal open={showAddMasuk} onClose={() => setShowAddMasuk(false)} title={isBuku ? 'Catat Uang Masuk' : 'Setor dari Owner'}>
+      <Modal
+        open={showAddMasuk}
+        onClose={() => setShowAddMasuk(false)}
+        title={isBuku ? 'Catat Uang Masuk' : isUm ? 'Top Up Kas' : 'Setor dari Owner'}
+      >
         <p className="mb-4 text-xs text-muted-foreground">
           {isBuku
             ? 'Input manual, tidak tersambung otomatis ke Accurate — buat cross-check nanti.'
-            : 'Uang masuk ke kas kecil hanya dari setoran owner.'}
+            : isUm
+              ? 'Uang masuk ke kas UM & Reimburse, biasanya dari owner/kas pusat.'
+              : 'Uang masuk ke kas kecil hanya dari setoran owner.'}
         </p>
         <Field label="Tanggal">
           <input type="date" value={mTanggal} onChange={(e) => setMTanggal(e.target.value)} className={inputCls} />
@@ -1031,8 +1196,12 @@ export default function KasModule({
         <ModalActions onCancel={() => setShowAddMasuk(false)} onSubmit={confirmAddMasuk} submitLabel="Simpan" />
       </Modal>
 
-      {/* Modal: Setor Uang (buku) / Catat Pengeluaran (kecil) */}
-      <Modal open={showAddOut} onClose={() => setShowAddOut(false)} title={isBuku ? 'Setor Uang' : 'Catat Pengeluaran'}>
+      {/* Modal: Setor Uang (buku) / Catat Pengeluaran (kecil) / UM & Reimburse (um) */}
+      <Modal
+        open={showAddOut}
+        onClose={() => setShowAddOut(false)}
+        title={isBuku ? 'Setor Uang' : isUm ? 'Catat UM / Reimburse' : 'Catat Pengeluaran'}
+      >
         <p className="mb-4 text-xs text-muted-foreground">
           {isBuku
             ? 'Setor kas tunai yang terkumpul — hari ini atau akumulasi beberapa hari.'
@@ -1041,7 +1210,7 @@ export default function KasModule({
         <Field label="Tanggal">
           <input type="date" value={sTanggal} onChange={(e) => setSTanggal(e.target.value)} className={inputCls} />
         </Field>
-        {!isBuku && (
+        {!isBuku && !isUm && (
           <Field label="Kategori">
             <select value={sKategori} onChange={(e) => setSKategori(e.target.value as KasKecilKategori)} className={inputCls}>
               <option value="makanan">Makanan</option>
@@ -1050,13 +1219,32 @@ export default function KasModule({
             </select>
           </Field>
         )}
+        {isUm && (
+          <Field label="Kategori">
+            <select value={sKategoriUm} onChange={(e) => setSKategoriUm(e.target.value as KasUmKategori)} className={inputCls}>
+              <option value="uangmakan">Uang Makan</option>
+              <option value="reimburse">Reimburse</option>
+            </select>
+          </Field>
+        )}
+        {isUm && (
+          <Field label="Nama Karyawan">
+            <input
+              type="text"
+              value={sKaryawan}
+              onChange={(e) => setSKaryawan(e.target.value)}
+              placeholder="cth. Febri"
+              className={inputCls}
+            />
+          </Field>
+        )}
         {!isBuku && (
-          <Field label="Keterangan">
+          <Field label={isUm ? 'Keterangan (opsional)' : 'Keterangan'}>
             <input
               type="text"
               value={sKeterangan}
               onChange={(e) => setSKeterangan(e.target.value)}
-              placeholder="cth. Galon + Aqua gelas 3 dus"
+              placeholder={isUm ? 'cth. Parkir + uang tambahan' : 'cth. Galon + Aqua gelas 3 dus'}
               className={inputCls}
             />
           </Field>
@@ -1094,7 +1282,19 @@ export default function KasModule({
           if (pending?.kind === 'masuk') setShowAddMasuk(true)
           else if (pending?.kind === 'out') setShowAddOut(true)
         }}
-        title={pending?.kind === 'masuk' ? (isBuku ? 'Konfirmasi Uang Masuk' : 'Konfirmasi Setoran') : isBuku ? 'Konfirmasi Setoran' : 'Konfirmasi Pengeluaran'}
+        title={
+          pending?.kind === 'masuk'
+            ? isBuku
+              ? 'Konfirmasi Uang Masuk'
+              : isUm
+                ? 'Konfirmasi Top Up Kas'
+                : 'Konfirmasi Setoran'
+            : isBuku
+              ? 'Konfirmasi Setoran'
+              : isUm
+                ? 'Konfirmasi UM / Reimburse'
+                : 'Konfirmasi Pengeluaran'
+        }
       >
         <p className="mb-4 text-xs text-muted-foreground">
           Cek lagi datanya sebelum disimpan — setelah tersimpan, hanya Super Admin yang bisa mengubah atau menghapus.
@@ -1136,7 +1336,11 @@ export default function KasModule({
       </Modal>
 
       {/* Modal: Edit (Super Admin) */}
-      <Modal open={!!editingRow} onClose={() => setEditingRow(null)} title={isBuku ? 'Edit Data Buku Kas' : 'Edit Data Kas Kecil'}>
+      <Modal
+        open={!!editingRow}
+        onClose={() => setEditingRow(null)}
+        title={isBuku ? 'Edit Data Buku Kas' : isUm ? 'Edit Data Kas UM & Reimburse' : 'Edit Data Kas Kecil'}
+      >
         {editingRow &&
           (() => {
             const raw = entries.find((e) => e.id === editingRow.id)
@@ -1184,7 +1388,23 @@ export default function KasModule({
                     <input type="text" value={eCatatan} onChange={(e) => setECatatan(e.target.value)} className={inputCls} />
                   </Field>
                 )}
-                {!isBuku && !isMasukType && (
+                {isUm && !isMasukType && (
+                  <>
+                    <Field label="Kategori">
+                      <select value={eKategoriUm} onChange={(e) => setEKategoriUm(e.target.value as KasUmKategori)} className={inputCls}>
+                        <option value="uangmakan">Uang Makan</option>
+                        <option value="reimburse">Reimburse</option>
+                      </select>
+                    </Field>
+                    <Field label="Nama Karyawan">
+                      <input type="text" value={eKaryawan} onChange={(e) => setEKaryawan(e.target.value)} className={inputCls} />
+                    </Field>
+                    <Field label="Keterangan (opsional)">
+                      <input type="text" value={eKeterangan} onChange={(e) => setEKeterangan(e.target.value)} className={inputCls} />
+                    </Field>
+                  </>
+                )}
+                {!isBuku && !isUm && !isMasukType && (
                   <>
                     <Field label="Kategori">
                       <select value={eKategori} onChange={(e) => setEKategori(e.target.value as KasKecilKategori)} className={inputCls}>
