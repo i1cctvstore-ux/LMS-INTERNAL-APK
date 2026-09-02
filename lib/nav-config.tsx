@@ -12,6 +12,7 @@ import {
   Building2,
   BookOpen,
   ShieldCheck,
+  Calculator,
   Receipt,
   HandCoins,
   PiggyBank,
@@ -23,6 +24,7 @@ export type PageKey =
   | 'dashboard'
   | 'lms-materi'
   | 'lms-verifikasi'
+  | 'kalkulator-maintenance'
   | 'kas-buku'
   | 'kas-kecil'
   | 'kas-um'
@@ -44,6 +46,12 @@ export type NavItem = {
   // Kalau diisi, menu ini cuma muncul untuk role yang disebut di sini.
   // Kalau kosong/undefined, menu terbuka untuk semua role yang sudah login.
   roles?: Role[]
+  // Kalau diisi, item ini BUKAN halaman internal React -- klik-nya buka
+  // URL ini di tab baru (target="_blank"), BUKAN ganti `activePage`
+  // seperti menu lain. Dipakai buat link ke halaman statis/publik yang
+  // gak perlu (dan gak cocok) di-render di dalam shell app internal ini
+  // (misal: kalkulator/landing page publik i1cctv.com).
+  externalUrl?: string
 }
 
 // Role gudang cuma kerja di area Servis & Stok — gak perlu (dan gak boleh)
@@ -78,6 +86,18 @@ export const NAV_ITEMS: NavItem[] = [
     // Halamannya sendiri juga membatasi lewat canVerify(role), menu
     // disembunyikan juga di sini biar gak bikin bingung role lain.
     roles: ['super_admin'],
+  },
+  // Halaman publik utuh (navbar, isi, WA CTA -- semuanya punya
+  // i1cctv.com), bukan komponen React di app ini. File statis di-taro
+  // di public/maintenance-cctv-calculator.html, di-serve langsung sama
+  // Next.js tanpa lewat routing app. Klik = buka tab baru, BUKAN
+  // routing internal (lihat field externalUrl di NavItem).
+  {
+    key: 'kalkulator-maintenance',
+    label: 'Kalkulator Maintenance',
+    description: 'Estimasi biaya Maintenance CCTV 12 bulan untuk customer',
+    icon: Calculator,
+    externalUrl: '/maintenance-cctv-calculator.html',
   },
   // ---------- Kas (Buku Kas & Kas Kecil & Kas UM/Reimburse) — 3 sub-menu,
   // dikelompokkan jadi 1 folder dropdown "Kas" di Sidebar lewat
