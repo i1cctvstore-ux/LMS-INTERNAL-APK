@@ -87,17 +87,14 @@ export const NAV_ITEMS: NavItem[] = [
     // disembunyikan juga di sini biar gak bikin bingung role lain.
     roles: ['super_admin'],
   },
-  // Halaman publik utuh (navbar, isi, WA CTA -- semuanya punya
-  // i1cctv.com), bukan komponen React di app ini. File statis di-taro
-  // di public/maintenance-cctv-calculator.html, di-serve langsung sama
-  // Next.js tanpa lewat routing app. Klik = buka tab baru, BUKAN
-  // routing internal (lihat field externalUrl di NavItem).
+  // Dulu sempat direncanain sebagai link ke halaman publik statis
+  // (externalUrl), tapi diputuskan jadi komponen React beneran biar
+  // nyatu sama desain internal -- lihat components/kalkulator/kalkulator-maintenance.tsx.
   {
     key: 'kalkulator-maintenance',
     label: 'Kalkulator Maintenance',
     description: 'Estimasi biaya Maintenance CCTV 12 bulan untuk customer',
     icon: Calculator,
-    externalUrl: '/maintenance-cctv-calculator.html',
   },
   // ---------- Kas (Buku Kas & Kas Kecil & Kas UM/Reimburse) — 3 sub-menu,
   // dikelompokkan jadi 1 folder dropdown "Kas" di Sidebar lewat
