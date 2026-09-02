@@ -23,7 +23,7 @@
 
 export default function KalkulatorMaintenance() {
   return (
-    <div className="h-[85vh] overflow-hidden rounded-2xl border border-border">
+    <div className="h-[92vh] w-full overflow-hidden">
       <iframe
         src="/kalkulator-maintenance-workspace.html"
         title="Kalkulator Estimasi Maintenance CCTV"
