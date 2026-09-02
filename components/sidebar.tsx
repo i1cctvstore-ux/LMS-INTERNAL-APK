@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ShieldCheck, LogOut, X, ChevronDown } from 'lucide-react'
+import { ShieldCheck, LogOut, X, ChevronDown, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { getVisibleNavItems, NAV_GROUPS, type PageKey } from '@/lib/nav-config'
@@ -115,6 +115,30 @@ function SidebarContent({ activePage, onNavigate, onLogout, userRole }: SidebarN
 
           // Item biasa (bukan bagian dari grup mana pun).
           const Icon = item.icon
+
+          // Item dengan externalUrl BUKAN halaman internal -- klik-nya
+          // buka tab baru (target="_blank"), BUKAN manggil onNavigate()
+          // buat ganti activePage. Dipakai buat link ke halaman statis
+          // di luar routing app ini (mis. kalkulator publik i1cctv.com).
+          if (item.externalUrl) {
+            return (
+              <a
+                key={item.key}
+                href={item.externalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition-colors',
+                  'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                )}
+              >
+                <Icon className="size-5 shrink-0" aria-hidden="true" />
+                <span className="flex-1">{item.label}</span>
+                <ExternalLink className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
+              </a>
+            )
+          }
+
           const isActive = item.key === activePage
           return (
             <button
