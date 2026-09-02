@@ -10,6 +10,7 @@ import { EmployeeManagement } from '@/components/employees/employee-management'
 import ServisModule from '@/components/servis/servis-module'
 import StokModule from '@/components/stok/stok-module'
 import KasModule from '@/components/kas/kas-module'
+import KalkulatorMaintenance from '@/components/kalkulator/kalkulator-maintenance'
 import { LmsMaterials } from '@/components/lms/lms-materials'
 import { LmsVerifikasi } from '@/components/lms/lms-verifikasi'
 import { ModulePlaceholder } from '@/components/module-placeholder'
@@ -98,6 +99,8 @@ export default function Page() {
         )
       case 'lms-verifikasi':
         return <LmsVerifikasi />
+      case 'kalkulator-maintenance':
+        return <KalkulatorMaintenance />
       case 'proyek':
         return <ProjectsPage />
       case 'stok':
