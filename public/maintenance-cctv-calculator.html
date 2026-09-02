@@ -1,355 +1,403 @@
-'use client'
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kalkulator Maintenance CCTV — i1 CCTV</title>
+<meta name="description" content="Hitung estimasi biaya Maintenance CCTV preventif 12 bulan dari i1 CCTV Store." />
+<link rel="canonical" href="https://i1cctv.com/maintenance-cctv-calculator" />
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body{font-family:Manrope,ui-sans-serif,system-ui,-apple-system,sans-serif;}
+  /* ---------- Navbar (ported 1:1 from faq.html) ---------- */
+  :root { --blue:#1754cf; --blue-dark:#0e3e98; --blue-pale:#eaf1ff; --line:#dde6f3; --ease-out:cubic-bezier(.23,1,.32,1); }
+  .site-header { position:fixed; top:0; left:0; right:0; z-index:1000; height:78px; border-bottom:1px solid transparent; transition:background 220ms var(--ease-out),border-color 220ms var(--ease-out),box-shadow 220ms var(--ease-out); }
+  .site-header.is-scrolled { background:rgba(255,255,255,.88); border-color:rgba(221,230,243,.9); box-shadow:0 6px 24px rgba(11,42,101,.06); backdrop-filter:blur(18px); }
+  .site-header:not(.is-scrolled) { background:#fff; }
+  .nav-shell { width:min(1280px, calc(100% - 40px)); height:100%; margin:auto; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+  .brand { display:flex; align-items:center; gap:9px; flex-shrink:0; }
+  .brand-wordmark { width:126px; height:38px; object-fit:contain; object-position:left center; }
+  .nav-links { display:flex; align-items:center; gap:22px; margin-left:auto; }
+  .nav-links a { position:relative; color:#475569; font-size:12px; font-weight:700; white-space:nowrap; transition:color 160ms var(--ease-out); }
+  .nav-links a::after { content:''; position:absolute; left:0; right:0; bottom:-8px; height:1px; background:var(--blue); transform:scaleX(0); transform-origin:left; transition:transform 160ms var(--ease-out); }
+  .nav-links a:hover, .nav-links a.is-active { color:var(--blue); }
+  .nav-links a:hover::after, .nav-links a.is-active::after { transform:scaleX(1); }
+  .nav-actions { display:flex; align-items:center; gap:8px; }
+  .cart-button, .menu-button { display:grid; place-items:center; width:40px; height:40px; padding:0; border:0; border-radius:50%; color:#334155; background:transparent; cursor:pointer; transition:background 160ms var(--ease-out), color 160ms var(--ease-out), transform 160ms var(--ease-out); }
+  .cart-button:hover, .menu-button:hover { background:var(--blue-pale); color:var(--blue); transform:translateY(-1px); }
+  .menu-button { display:none; }
+  .nav-icon { width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+  .mobile-backdrop { position:fixed; inset:0; z-index:1001; background:rgba(6,20,49,.38); opacity:0; pointer-events:none; transition:opacity 180ms var(--ease-out); }
+  .mobile-panel { position:fixed; inset:0 auto 0 0; z-index:1002; width:min(320px,84vw); padding:24px; background:#fff; box-shadow:25px 0 55px rgba(12,34,82,.16); transform:translateX(-105%); transition:transform 240ms var(--ease-out); }
+  body.menu-open { overflow:hidden; }
+  body.menu-open .mobile-backdrop { opacity:1; pointer-events:auto; }
+  body.menu-open .mobile-panel { transform:translateX(0); }
+  .mobile-panel-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+  .mobile-links { display:flex; flex-direction:column; gap:6px; }
+  .mobile-links a { padding:12px 6px; border-radius:8px; color:#334155; font-size:15px; font-weight:700; transition:background 160ms var(--ease-out), color 160ms var(--ease-out); }
+  .mobile-links a:hover { background:var(--blue-pale); color:var(--blue); }
+  @media (max-width:1040px) { .nav-links { gap:14px; } .nav-links a { font-size:11px; } }
+  @media (max-width:820px) { .site-header { height:69px; } .nav-links { display:none; } .menu-button { display:grid; } .nav-actions { margin-left:auto; } }
+</style>
+<script>
+  function openMobileMenu() {
+    document.body.classList.add('menu-open');
+    document.getElementById('menuButton').setAttribute('aria-expanded', 'true');
+  }
+  function closeMobileMenu() {
+    document.body.classList.remove('menu-open');
+    document.getElementById('menuButton').setAttribute('aria-expanded', 'false');
+  }
+</script>
+</head>
+<body class="bg-white text-[#14213d]">
 
-// =====================================================
-// Kalkulator estimasi Maintenance CCTV -- alat bantu INTERNAL buat staff
-// ngasih gambaran harga ke customer pas ngobrol, sebelum minta penawaran
-// resmi dari tim.
-//
-// Logic kalkulasinya di-port 1:1 dari file HTML publik
-// (maintenance-cctv-calculator.html / i1cctv.com/maintenance-cctv-calculator)
-// -- cuma navbar/footer publiknya dibuang & tampilannya dirapikan pakai
-// gaya internal (konsisten sama modul lain kayak KasModule/StokModule),
-// karena ini sekarang dipakai di dalam shell app internal, bukan halaman
-// berdiri sendiri.
-//
-// ⚠️ TODO: WHATSAPP_NUMBER di bawah masih placeholder ("628XXXXXXXXXX"),
-// sama persis kayak di file HTML aslinya -- WAJIB diganti ke nomor WA
-// beneran sebelum dipakai staff, kalau enggak tombol "Chat WhatsApp"
-// gak akan berfungsi.
-// =====================================================
+<!-- NAVBAR (ported 1:1 from faq.html) -->
+<header class="site-header" id="siteHeader">
+<div class="nav-shell">
+<a class="brand" href="https://i1cctv.com/" aria-label="i1 CCTV, kembali ke beranda">
+<img loading="eager" decoding="async" class="brand-wordmark" src="https://i1cctv.com/store/img/i1-cctv-store-logo-1659457873.jpg" alt="i1 CCTV Store">
+</a>
+<nav class="nav-links" aria-label="Navigasi utama">
+<a href="https://i1cctv.com/">Home</a><a href="https://i1cctv.com/#Paket">Paket CCTV</a><a href="https://i1cctv.com/#Layanan">Layanan Lainnya</a><a href="https://i1cctv.com/#Tentang">Tentang Kami</a><a href="https://i1cctv.com/blog">Blog</a><a href="https://i1cctv.com/faq">FAQ</a><a href="https://i1cctv.com/pos">POS</a><a href="https://i1cctv.com/#Kontak">Kontak</a>
+</nav>
+<div class="nav-actions">
+<button class="cart-button" aria-label="Buka toko online" onclick="window.location.href='https://i1cctv.com/pos/'"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M3 3h2l2.2 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L20 7H6"></path><circle cx="10" cy="20" r="1"></circle><circle cx="18" cy="20" r="1"></circle></svg></button>
+<button class="menu-button" id="menuButton" aria-label="Buka menu" aria-expanded="false" onclick="openMobileMenu()"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button>
+</div>
+</div>
+</header>
 
-import { useMemo, useState } from 'react'
-import { MessageCircle, ArrowRight, ShieldCheck } from 'lucide-react'
+<div class="mobile-backdrop" id="mobileBackdrop" onclick="closeMobileMenu()"></div>
+<aside class="mobile-panel" id="mobilePanel" aria-label="Menu navigasi seluler">
+<div class="mobile-panel-head">
+<a class="brand" href="https://i1cctv.com/"><img loading="eager" decoding="async" class="brand-wordmark" src="https://i1cctv.com/store/img/i1-cctv-store-logo-1659457873.jpg" alt="i1 CCTV Store"></a>
+<button class="cart-button" id="closeMenu" aria-label="Tutup menu" onclick="closeMobileMenu()"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+</div>
+<nav class="mobile-links"><a href="https://i1cctv.com/">Home</a><a href="https://i1cctv.com/#Paket">Paket CCTV</a><a href="https://i1cctv.com/#Layanan">Layanan Lainnya</a><a href="https://i1cctv.com/#Tentang">Tentang Kami</a><a href="https://i1cctv.com/blog">Blog</a><a href="https://i1cctv.com/faq">FAQ</a><a href="https://i1cctv.com/pos">POS</a><a href="https://i1cctv.com/#Kontak">Kontak</a></nav>
+</aside>
 
-const WHATSAPP_NUMBER = '628XXXXXXXXXX' // TODO: ganti ke nomor WA asli i1 CCTV
+<!-- PAGE CONTENT -->
+<main class="min-h-screen bg-white pt-[69px] text-[#14213d] min-[821px]:pt-[78px]">
 
-type PackageId = 'basic' | 'prioritas' | 'premium'
-type PaymentTermId = 'annual' | 'semiAnnual' | 'quarterly'
+  <div class="mx-auto max-w-[1160px] px-4 pt-5 lg:px-8">
+    <div class="flex items-center gap-3 rounded-full border border-[#dce8f8] bg-[#f8fafc] px-4 py-2.5 text-sm text-[#61718b]">
+      <svg class="h-4 w-4 text-[#1764d7]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg>
+      <span class="border-l border-[#dce8f8] pl-3">/</span>
+    </div>
+  </div>
 
-type PackageConfig = {
-  name: string
-  tagline: string
-  visit: string
-  target: string
-  listPerPoint: number
-  minimumList: number
-  promoMinimumPerPoint: number
-}
+  <section class="mx-auto grid max-w-[1160px] gap-8 px-5 pb-14 pt-12 lg:grid-cols-[1.1fr_.9fr] lg:items-end lg:px-8 lg:pb-20 lg:pt-20">
+    <div>
+      <p class="mb-5 text-xs font-bold uppercase tracking-[.2em] text-[#1764d7]">Maintenance CCTV preventif · 12 bulan</p>
+      <h2 class="max-w-3xl text-[clamp(2.6rem,6vw,5.6rem)] font-bold leading-[.95] tracking-[-.075em] text-[#14213d]">Ketahui estimasi Anda sebelum <span class="text-[#1764d7]">gangguan</span> menjadi lebih besar.</h2>
+      <p class="mt-7 max-w-2xl text-lg leading-8 text-[#61718b]">Pilih jumlah titik dan cara pembayaran. Dapatkan gambaran investasi Maintenance CCTV selama 12 bulan, lalu minta penawaran resmi dari tim i1 CCTV.</p>
+      <a href="#calculator" class="mt-8 inline-flex items-center gap-2 rounded-full bg-[#1764d7] px-6 py-3.5 text-sm font-bold text-white shadow-[0_4px_10px_#1764d729] transition hover:bg-[#073b87]">Mulai hitung estimasi
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+    <div class="rounded-[1.5rem] border border-[#dce8f8] bg-[#f7faff] p-6 shadow-[0_12px_28px_#0d234a12] lg:p-8">
+      <div class="flex items-start justify-between gap-5">
+        <div>
+          <p class="text-xs font-bold uppercase tracking-[.18em] text-[#1764d7]">Mengapa preventif?</p>
+          <h3 class="mt-3 text-2xl font-bold leading-tight tracking-[-.05em]">Sistem lebih mudah dijaga ketika kondisinya diperiksa berkala.</h3>
+        </div>
+        <div class="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#eaf3ff] text-[#1764d7]">
+          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+      </div>
+      <div class="mt-7 grid grid-cols-2 gap-4 border-t border-[#dce8f8] pt-5 text-sm">
+        <div><strong class="block text-2xl font-extrabold text-[#14213d]">12</strong><span class="text-[#61718b]">bulan perawatan</span></div>
+        <div><strong class="block text-2xl font-extrabold text-[#14213d]">3</strong><span class="text-[#61718b]">pilihan paket</span></div>
+      </div>
+    </div>
+  </section>
 
-const PACKAGE_CONFIG: Record<PackageId, PackageConfig> = {
-  basic: {
-    name: 'Basic',
-    tagline: 'Perawatan rutin untuk kebutuhan yang sederhana.',
-    visit: '2x per tahun',
-    target: 'H+3–7 hari kerja',
-    listPerPoint: 187500,
-    minimumList: 3000000,
-    promoMinimumPerPoint: 150000,
-  },
-  prioritas: {
-    name: 'Prioritas',
-    tagline: 'Pilihan seimbang untuk sistem yang ingin tetap terpantau.',
-    visit: '3x per tahun',
-    target: 'H+2–5 hari kerja',
-    listPerPoint: 287500,
-    minimumList: 4600000,
-    promoMinimumPerPoint: 230000,
-  },
-  premium: {
-    name: 'Premium',
-    tagline: 'Pemeriksaan lebih sering untuk kebutuhan prioritas.',
-    visit: '4x per tahun',
-    target: 'H+1–2 hari kerja',
-    listPerPoint: 437500,
-    minimumList: 7000000,
-    promoMinimumPerPoint: 350000,
-  },
-}
-const packageOrder: PackageId[] = ['basic', 'prioritas', 'premium']
+  <section id="calculator" class="scroll-mt-6 border-y border-[#dce8f8] bg-[#f4f6f8] px-4 py-12 lg:px-8 lg:py-16">
+    <div class="mx-auto max-w-[1160px]">
+      <div class="mb-8 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+        <div>
+          <p class="text-xs font-bold uppercase tracking-[.18em] text-[#1764d7]">Kalkulator estimasi</p>
+          <h2 class="mt-2 text-3xl font-bold tracking-[-.05em] lg:text-4xl">Atur parameter di kiri, lihat hasil di kanan.</h2>
+        </div>
+        <p class="max-w-md text-sm leading-6 text-[#61718b]">Harga paket Maintenance CCTV di bawah masih berupa contoh estimasi. Untuk harga detail dan kepastian scope, silakan hubungi tim i1 CCTV.</p>
+      </div>
 
-type PaymentTerm = { label: string; invoices: number; discount: number; invoiceNote: string }
+      <div class="grid items-start gap-5 lg:grid-cols-[.78fr_1.22fr]">
+        <div class="space-y-5 rounded-[1.5rem] border border-[#cfd9e8] bg-[#14213d] p-6 text-white shadow-[0_12px_28px_#0d234a21] lg:sticky lg:top-24 lg:p-7">
+          <div class="flex items-center gap-3 border-b border-white/10 pb-5">
+            <div class="grid h-9 w-9 place-items-center rounded-full border border-[#61a2ff]/45 bg-[#1764d7]/15">
+              <svg class="h-5 w-5 text-[#61a2ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            </div>
+            <div>
+              <p class="text-xs font-bold uppercase tracking-[.16em] text-[#93c5fd]">Langkah 01 / 02</p>
+              <h3 class="mt-1 text-xl font-bold">Parameter kebutuhan</h3>
+            </div>
+          </div>
+          <div>
+            <label for="points" class="mb-3 block text-base font-bold">Jumlah titik/kamera CCTV</label>
+            <div class="flex items-end gap-3 border-b border-[#93a4bc]/45 pb-3">
+              <input id="points" inputmode="numeric" type="number" min="0" value="16" class="w-full bg-transparent text-4xl font-medium tracking-[-.05em] text-white outline-none placeholder:text-[#93a4bc]" aria-describedby="points-help" />
+              <span class="pb-1 text-lg text-[#c3cede]">titik</span>
+            </div>
+            <p id="points-help" class="mt-3 text-sm leading-6 text-[#a9b7ca]">Masukkan 0 atau lebih. Jumlah ini menjadi dasar estimasi paket.</p>
+          </div>
+          <div class="border-t border-white/10 pt-5">
+            <label class="mb-3 block text-base font-bold">Ritme pembayaran</label>
+            <div class="space-y-2" id="termButtons"></div>
+            <p class="mt-3 text-xs leading-5 text-[#9eacbf]">Jumlah invoice dan total estimasi akan menyesuaikan pilihan Anda.</p>
+          </div>
+          <div class="border-l-2 border-[#f3c64d] bg-white/5 px-3 py-3 text-xs leading-5 text-[#fff4c7]">Belum termasuk PPN bila berlaku. Harga akhir mengikuti hasil konfirmasi scope dan lokasi.</div>
+        </div>
 
-const PAYMENT_TERMS: Record<PaymentTermId, PaymentTerm> = {
-  annual: { label: 'Tahunan lunas', invoices: 1, discount: 20, invoiceNote: '1 invoice' },
-  semiAnnual: { label: '6 bulanan', invoices: 2, discount: 5, invoiceNote: '2 invoice' },
-  quarterly: { label: 'Quarterly', invoices: 4, discount: 0, invoiceNote: '4 invoice' },
-}
-const termOrder: PaymentTermId[] = ['annual', 'semiAnnual', 'quarterly']
+        <div class="rounded-[1.5rem] border border-[#dce8f8] bg-white p-5 shadow-[0_12px_28px_#0d234a12] sm:p-7">
+          <div class="mb-6 flex items-end justify-between gap-4">
+            <div>
+              <p class="text-xs font-bold uppercase tracking-[.18em] text-[#1764d7]">Langkah 02 / 02</p>
+              <h3 class="mt-2 text-2xl font-bold tracking-[-.05em]">Bandingkan paket</h3>
+            </div>
+            <span class="rounded-full bg-[#dbeafe] px-3 py-1 text-xs font-bold text-[#1764d7]" id="pointsBadge">16 titik</span>
+          </div>
+          <div class="space-y-3" id="packageList"></div>
+          <a href="#" target="_blank" rel="noreferrer" id="ctaWhatsapp" class="mt-5 flex items-center justify-center gap-2 rounded-full bg-[#1764d7] px-5 py-3.5 text-sm font-bold text-white shadow-[0_4px_10px_#1764d729] transition hover:bg-[#073b87]">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            Chat kami untuk harga detail
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
 
-function calculateEstimate(packageId: PackageId, points: number, paymentTermId: PaymentTermId) {
-  const pkg = PACKAGE_CONFIG[packageId]
-  const term = PAYMENT_TERMS[paymentTermId]
-  const safePoints = Math.max(0, Math.floor(Number.isFinite(points) ? points : 0))
-  const listPrice = Math.max(safePoints * pkg.listPerPoint, pkg.minimumList)
-  const promoFloor = Math.max(safePoints * pkg.promoMinimumPerPoint, pkg.minimumList * 0.8)
-  const estimatedAnnual = Math.max(listPrice * (1 - term.discount / 100), promoFloor)
+  <section class="border-y border-[#dce8f8] bg-[#f4f6f8] px-5 py-16 lg:px-8 lg:py-24">
+    <div class="mx-auto max-w-[1160px]">
+      <div class="mb-10 max-w-2xl">
+        <p class="text-xs font-bold uppercase tracking-[.18em] text-[#1764d7]">Non-Member vs Member</p>
+        <h2 class="mt-3 text-4xl font-bold leading-tight tracking-[-.06em]">Service memperbaiki gangguan hari ini. Member menjaga sistem tetap terkontrol setelahnya.</h2>
+      </div>
+      <div class="overflow-x-auto rounded-[1.25rem] border border-[#dce8f8] bg-white shadow-[0_12px_28px_#0d234a12]">
+        <table class="w-full min-w-[680px] border-collapse text-sm">
+          <thead>
+            <tr>
+              <th class="w-1/3 border-b border-[#dce8f8] bg-white px-5 py-4 text-left text-xs font-bold uppercase tracking-[.12em] text-[#61718b]"> </th>
+              <th class="border-b border-[#dce8f8] bg-[#f4f6f8] px-5 py-4 text-left align-top">
+                <span class="block text-sm font-extrabold text-[#334155]">Non-Member</span>
+                <span class="block text-xs font-medium text-[#61718b]">Service saat rusak</span>
+              </th>
+              <th class="border-b border-2 border-b-[#f3c64d] bg-[#fff8e6] px-5 py-4 text-left align-top">
+                <span class="block text-sm font-extrabold text-[#8a5b00]">Member</span>
+                <span class="block text-xs font-medium text-[#a1770a]">Kontrak AMC</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b border-[#eef2f7]">
+              <td class="px-5 py-4 align-top font-bold text-[#14213d]">Kunjungan Preventive</td>
+              <td class="px-5 py-4 align-top text-[#61718b]">Tidak terjadwal</td>
+              <td class="px-5 py-4 align-top bg-[#fffaf0] font-semibold text-[#334155]">Terjadwal rutin sesuai paket</td>
+            </tr>
+            <tr class="border-b border-[#eef2f7]">
+              <td class="px-5 py-4 align-top font-bold text-[#14213d]">Cleaning & Health Check</td>
+              <td class="px-5 py-4 align-top text-[#61718b]">Saat service, ditagihkan terpisah</td>
+              <td class="px-5 py-4 align-top bg-[#fffaf0] font-semibold text-[#334155]">Termasuk dalam kunjungan rutin</td>
+            </tr>
+            <tr class="border-b border-[#eef2f7]">
+              <td class="px-5 py-4 align-top font-bold text-[#14213d]">Yang Diperiksa</td>
+              <td class="px-5 py-4 align-top text-[#61718b]">Sesuai keluhan saat itu</td>
+              <td class="px-5 py-4 align-top bg-[#fffaf0] font-semibold text-[#334155]">Kamera, rekaman, storage, power & koneksi</td>
+            </tr>
+            <tr class="border-b border-[#eef2f7]">
+              <td class="px-5 py-4 align-top font-bold text-[#14213d]">Respons Bantuan</td>
+              <td class="px-5 py-4 align-top text-[#61718b]">Jadwal normal</td>
+              <td class="px-5 py-4 align-top bg-[#fffaf0] font-semibold text-[#334155]">Prioritas sesuai tier paket</td>
+            </tr>
+            <tr class="border-b border-[#eef2f7]">
+              <td class="px-5 py-4 align-top font-bold text-[#14213d]">Corrective Ringan</td>
+              <td class="px-5 py-4 align-top text-[#61718b]">Jasa dihitung per pekerjaan</td>
+              <td class="px-5 py-4 align-top bg-[#fffaf0] font-semibold text-[#334155]">Kuota sesuai paket yang dipilih</td>
+            </tr>
+            <tr class="border-b border-[#eef2f7]">
+              <td class="px-5 py-4 align-top font-bold text-[#14213d]">Remote / Aplikasi HP</td>
+              <td class="px-5 py-4 align-top text-[#61718b]">Dihitung sebagai jasa tambahan</td>
+              <td class="px-5 py-4 align-top bg-[#fffaf0] font-semibold text-[#334155]">Termasuk bantuan sesuai paket</td>
+            </tr>
+            <tr class="border-b border-[#eef2f7]">
+              <td class="px-5 py-4 align-top font-bold text-[#14213d]">Harga Jasa & Barang</td>
+              <td class="px-5 py-4 align-top text-[#61718b]">Harga normal</td>
+              <td class="px-5 py-4 align-top bg-[#fffaf0] font-semibold text-[#334155]">Harga khusus member</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-4 align-top font-bold text-[#14213d]">Kepastian Biaya</td>
+              <td class="px-5 py-4 align-top text-[#61718b]">Tergantung kerusakan</td>
+              <td class="px-5 py-4 align-top bg-[#fffaf0] font-semibold text-[#334155]">Biaya perawatan lebih terencana</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="border-y border-[#dce8f8] bg-[#f4f6f8] px-5 py-16 lg:px-8 lg:py-20">
+    <div class="mx-auto grid max-w-[1160px] gap-8 lg:grid-cols-[1fr_.9fr] lg:items-end">
+      <div>
+        <p class="text-xs font-bold uppercase tracking-[.18em] text-[#1764d7]">Batasan yang perlu diketahui</p>
+        <h2 class="mt-3 max-w-xl text-4xl font-bold leading-tight tracking-[-.06em]">Beberapa kebutuhan memang perlu dilihat lebih dekat.</h2>
+      </div>
+      <div>
+        <p class="text-sm leading-7 text-[#61718b]">Material, sparepart, kabel, pipa, konektor, pekerjaan sipil, alat akses tinggi, perangkat pengganti, dan perbaikan besar dapat memerlukan penawaran terpisah agar scope dan biayanya tepat.</p>
+        <a href="#" target="_blank" rel="noreferrer" id="ctaWhatsapp2" class="mt-5 inline-flex items-center gap-2 font-bold text-[#1764d7]">Minta survei / penawaran khusus
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M7 7h10v10"/></svg>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-[#14213d] px-5 py-16 text-white lg:px-8 lg:py-24">
+    <div class="mx-auto flex max-w-[1160px] flex-col justify-between gap-8 lg:flex-row lg:items-end">
+      <div>
+        <p class="text-xs font-bold uppercase tracking-[.18em] text-[#f3c64d]">Langkah berikutnya</p>
+        <h2 class="mt-3 max-w-2xl text-4xl font-bold leading-tight tracking-[-.06em] lg:text-6xl">Minta penawaran resmi sesuai lokasi Anda.</h2>
+      </div>
+      <div class="max-w-sm">
+        <p class="text-sm leading-7 text-[#c3cede]">Estimasi ini adalah gambaran awal. Tim i1 CCTV akan mengonfirmasi scope, kondisi perangkat, jumlah titik, dan akses sebelum memberikan penawaran resmi.</p>
+        <a href="#" target="_blank" rel="noreferrer" id="ctaWhatsapp3" class="mt-6 inline-flex items-center gap-2 rounded-full bg-[#1764d7] px-5 py-3.5 text-sm font-bold text-white transition hover:bg-[#073b87]">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+          Chat WhatsApp i1 CCTV
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <footer class="border-t border-white/10 bg-[#0d234a] px-5 py-6 text-center text-xs leading-5 text-[#9eacbf] lg:px-8">
+    <p>© i1 CCTV · Maintenance CCTV preventif 12 bulan · Estimasi awal sebelum PPN bila berlaku</p>
+  </footer>
+</main>
+
+<script>
+// ---- Navbar scroll behavior (ported 1:1 from faq.html) ----
+(function () {
+  var header = document.getElementById('siteHeader');
+  window.addEventListener('scroll', function () {
+    header.classList.toggle('is-scrolled', window.scrollY > 18);
+  }, { passive: true });
+  document.querySelectorAll('.mobile-links a').forEach(function (link) {
+    link.addEventListener('click', closeMobileMenu);
+  });
+})();
+
+// ---- Calculator logic (mirrors client/src/config/maintenanceCctv.ts) ----
+const WHATSAPP_NUMBER = "628XXXXXXXXXX";
+
+const PACKAGE_CONFIG = {
+  basic: { name: "Basic", tagline: "Perawatan rutin untuk kebutuhan yang sederhana.", visit: "2x per tahun", target: "H+3–7 hari kerja", listPerPoint: 187500, minimumList: 3000000, promoMinimumPerPoint: 150000 },
+  prioritas: { name: "Prioritas", tagline: "Pilihan seimbang untuk sistem yang ingin tetap terpantau.", visit: "3x per tahun", target: "H+2–5 hari kerja", listPerPoint: 287500, minimumList: 4600000, promoMinimumPerPoint: 230000 },
+  premium: { name: "Premium", tagline: "Pemeriksaan lebih sering untuk kebutuhan prioritas.", visit: "4x per tahun", target: "H+1–2 hari kerja", listPerPoint: 437500, minimumList: 7000000, promoMinimumPerPoint: 350000 },
+};
+const packageOrder = ["basic", "prioritas", "premium"];
+
+const PAYMENT_TERMS = {
+  annual: { label: "Tahunan lunas", invoices: 1, discount: 20, invoiceNote: "1 invoice" },
+  semiAnnual: { label: "6 bulanan", invoices: 2, discount: 5, invoiceNote: "2 invoice" },
+  quarterly: { label: "Quarterly", invoices: 4, discount: 0, invoiceNote: "4 invoice" },
+};
+const termOrder = ["annual", "semiAnnual", "quarterly"];
+
+let paymentTerm = "annual";
+
+function calculateEstimate(packageId, points, paymentTermId) {
+  const pkg = PACKAGE_CONFIG[packageId];
+  const term = PAYMENT_TERMS[paymentTermId];
+  const safePoints = Math.max(0, Math.floor(Number.isFinite(points) ? points : 0));
+  const listPrice = Math.max(safePoints * pkg.listPerPoint, pkg.minimumList);
+  const promoFloor = Math.max(safePoints * pkg.promoMinimumPerPoint, pkg.minimumList * 0.8);
+  const estimatedAnnual = Math.max(listPrice * (1 - term.discount / 100), promoFloor);
   return {
     estimatedAnnual: Math.round(estimatedAnnual),
     invoiceValue: Math.round(estimatedAnnual / term.invoices),
     monthlyEquivalent: Math.round(estimatedAnnual / 12),
-  }
+  };
 }
 
-function formatRupiah(value: number) {
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(value)
+function formatRupiah(value) {
+  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value);
 }
 
-export default function KalkulatorMaintenance() {
-  const [points, setPoints] = useState(16)
-  const [paymentTerm, setPaymentTerm] = useState<PaymentTermId>('annual')
+function buildWhatsappLink(packageId) {
+  const points = getPoints();
+  const term = PAYMENT_TERMS[paymentTerm];
+  const packageName = packageId ? PACKAGE_CONFIG[packageId].name : "paket Maintenance CCTV";
+  const price = packageId ? formatRupiah(calculateEstimate(packageId, points, paymentTerm).estimatedAnnual) : "perlu dikonfirmasi";
+  const message = `Halo i1 CCTV, saya ingin meminta penawaran resmi Maintenance CCTV.\n\nPaket: ${packageName}\nJumlah titik/kamera: ${points}\nMetode pembayaran: ${term.label}\nKisaran estimasi: ${price}\n\nHarga di kalkulator ini masih berupa estimasi. Mohon dibantu konfirmasi scope dan penawaran resminya. Terima kasih.`;
+  return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+}
 
-  const term = PAYMENT_TERMS[paymentTerm]
-  const safePoints = Math.max(0, Number.isFinite(points) ? Math.floor(points) : 0)
+function getPoints() {
+  return Math.max(0, Number.parseInt(document.getElementById("points").value || "0", 10) || 0);
+}
 
-  function buildWhatsappLink(packageId?: PackageId) {
-    const packageName = packageId ? PACKAGE_CONFIG[packageId].name : 'paket Maintenance CCTV'
-    const price = packageId
-      ? formatRupiah(calculateEstimate(packageId, safePoints, paymentTerm).estimatedAnnual)
-      : 'perlu dikonfirmasi'
-    const message = `Halo i1 CCTV, saya ingin meminta penawaran resmi Maintenance CCTV.\n\nPaket: ${packageName}\nJumlah titik/kamera: ${safePoints}\nMetode pembayaran: ${term.label}\nKisaran estimasi: ${price}\n\nHarga di kalkulator ini masih berupa estimasi. Mohon dibantu konfirmasi scope dan penawaran resminya. Terima kasih.`
-    return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`
-  }
+function renderTermButtons() {
+  const el = document.getElementById("termButtons");
+  el.innerHTML = termOrder.map(function (id) {
+    const item = PAYMENT_TERMS[id];
+    const active = id === paymentTerm;
+    return `<button type="button" data-term="${id}" class="term-btn flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition ${active ? "border-[#61a2ff] bg-[#1764d7] text-white shadow-[0_4px_10px_#1764d729]" : "border-white/15 text-[#c3cede] hover:border-[#61a2ff]"}" aria-pressed="${active}"><span class="text-sm font-bold">${item.label}</span><span class="text-xs">${item.invoiceNote}</span></button>`;
+  }).join("");
+  el.querySelectorAll(".term-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      paymentTerm = btn.getAttribute("data-term");
+      render();
+    });
+  });
+}
 
-  const estimates = useMemo(
-    () =>
-      packageOrder.map((id) => ({
-        id,
-        pkg: PACKAGE_CONFIG[id],
-        estimate: calculateEstimate(id, safePoints, paymentTerm),
-      })),
-    [safePoints, paymentTerm],
-  )
-
-  return (
-    <div className="mx-auto max-w-5xl p-4 pb-16 sm:p-6">
-      {/* Header -- pola sama kayak header modul lain (KasModule dkk) */}
-      <header className="mb-6">
-        <p className="text-xs font-bold uppercase tracking-[.18em] text-indigo-600">
-          Maintenance CCTV preventif · 12 bulan
-        </p>
-        <h1 className="mt-1 text-2xl font-bold text-foreground">Kalkulator Estimasi Maintenance CCTV</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Alat bantu internal buat ngasih gambaran estimasi ke customer pas lagi ngobrol. Harga final tetap butuh
-          konfirmasi scope & lokasi dari tim sebelum dikirim jadi penawaran resmi.
-        </p>
-      </header>
-
-      <div className="grid items-start gap-5 lg:grid-cols-[.78fr_1.22fr]">
-        {/* Panel parameter */}
-        <div className="space-y-5 rounded-2xl border border-border bg-[#14213d] p-6 text-white lg:sticky lg:top-4">
-          <div className="flex items-center gap-3 border-b border-white/10 pb-5">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[#61a2ff]/45 bg-[#1764d7]/15">
-              <ShieldCheck className="h-5 w-5 text-[#61a2ff]" />
-            </div>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[.16em] text-[#93c5fd]">Langkah 01 / 02</p>
-              <h2 className="mt-1 text-xl font-bold">Parameter kebutuhan</h2>
-            </div>
+function renderPackages() {
+  const points = getPoints();
+  const term = PAYMENT_TERMS[paymentTerm];
+  const list = document.getElementById("packageList");
+  list.innerHTML = packageOrder.map(function (id) {
+    const pkg = PACKAGE_CONFIG[id];
+    const estimate = calculateEstimate(id, points, paymentTerm);
+    const isRecommended = id === "prioritas";
+    return `<article class="rounded-[.9rem] border p-4 transition hover:-translate-y-0.5 ${isRecommended ? "border-[#61a2ff] bg-[#f7faff] shadow-[0_4px_10px_#1764d714]" : "border-[#dce8f8] bg-white"}">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h4 class="text-lg font-bold tracking-[-.03em]">${pkg.name}</h4>
+            ${isRecommended ? '<span class="rounded-full bg-[#dbeafe] px-2 py-1 text-[9px] font-bold uppercase tracking-[.1em] text-[#1764d7]">Paling seimbang</span>' : ""}
           </div>
-
-          <div>
-            <label htmlFor="points" className="mb-3 block text-base font-bold">
-              Jumlah titik/kamera CCTV
-            </label>
-            <div className="flex items-end gap-3 border-b border-[#93a4bc]/45 pb-3">
-              <input
-                id="points"
-                inputMode="numeric"
-                type="number"
-                min={0}
-                value={points}
-                onChange={(e) => setPoints(Number(e.target.value))}
-                className="w-full bg-transparent text-4xl font-medium tracking-[-.05em] text-white outline-none placeholder:text-[#93a4bc]"
-              />
-              <span className="pb-1 text-lg text-[#c3cede]">titik</span>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-[#a9b7ca]">
-              Masukkan 0 atau lebih. Jumlah ini menjadi dasar estimasi paket.
-            </p>
-          </div>
-
-          <div className="border-t border-white/10 pt-5">
-            <label className="mb-3 block text-base font-bold">Ritme pembayaran</label>
-            <div className="space-y-2">
-              {termOrder.map((id) => {
-                const item = PAYMENT_TERMS[id]
-                const active = id === paymentTerm
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setPaymentTerm(id)}
-                    aria-pressed={active}
-                    className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition ${
-                      active
-                        ? 'border-[#61a2ff] bg-[#1764d7] text-white shadow-[0_4px_10px_#1764d729]'
-                        : 'border-white/15 text-[#c3cede] hover:border-[#61a2ff]'
-                    }`}
-                  >
-                    <span className="text-sm font-bold">{item.label}</span>
-                    <span className="text-xs">{item.invoiceNote}</span>
-                  </button>
-                )
-              })}
-            </div>
-            <p className="mt-3 text-xs leading-5 text-[#9eacbf]">
-              Jumlah invoice dan total estimasi akan menyesuaikan pilihan Anda.
-            </p>
-          </div>
-
-          <div className="border-l-2 border-[#f3c64d] bg-white/5 px-3 py-3 text-xs leading-5 text-[#fff4c7]">
-            Belum termasuk PPN bila berlaku. Harga akhir mengikuti hasil konfirmasi scope dan lokasi.
-          </div>
+          <p class="mt-1 text-xs text-[#61718b]">${pkg.tagline}</p>
         </div>
-
-        {/* Daftar paket */}
-        <div className="rounded-2xl border border-border bg-background p-5 shadow-sm sm:p-7">
-          <div className="mb-6 flex items-end justify-between gap-4">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[.18em] text-indigo-600">Langkah 02 / 02</p>
-              <h2 className="mt-2 text-2xl font-bold tracking-[-.03em] text-foreground">Bandingkan paket</h2>
-            </div>
-            <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">
-              {safePoints} titik
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {estimates.map(({ id, pkg, estimate }) => {
-              const isRecommended = id === 'prioritas'
-              return (
-                <article
-                  key={id}
-                  className={`rounded-2xl border p-4 transition hover:-translate-y-0.5 ${
-                    isRecommended ? 'border-[#61a2ff] bg-indigo-50/40 shadow-sm' : 'border-border bg-background'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-lg font-bold tracking-[-.03em] text-foreground">{pkg.name}</h3>
-                        {isRecommended && (
-                          <span className="rounded-full bg-indigo-100 px-2 py-1 text-[9px] font-bold uppercase tracking-[.1em] text-indigo-700">
-                            Paling seimbang
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">{pkg.tagline}</p>
-                    </div>
-                    <div className="text-right">
-                      <strong className="block text-lg font-extrabold tracking-[-.03em] text-foreground">
-                        {formatRupiah(estimate.estimatedAnnual)}
-                      </strong>
-                      <span className="text-[10px] text-muted-foreground">estimasi / 12 bulan</span>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-3 text-xs text-muted-foreground sm:grid-cols-4">
-                    <span>
-                      <b className="block text-foreground">{pkg.visit}</b>visit preventif
-                    </span>
-                    <span>
-                      <b className="block text-foreground">{pkg.target}</b>target kedatangan
-                    </span>
-                    <span>
-                      <b className="block text-foreground">{formatRupiah(estimate.invoiceValue)}</b>
-                      per invoice · {term.label}
-                    </span>
-                    <span>
-                      <b className="block text-foreground">{formatRupiah(estimate.monthlyEquivalent)}</b>setara / bulan
-                    </span>
-                  </div>
-                  <a
-                    href={buildWhatsappLink(id)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-4 flex items-center justify-between border-t border-border pt-3 text-xs font-bold text-indigo-600"
-                  >
-                    Pilih paket ini
-                    <ArrowRight className="h-4 w-4" />
-                  </a>
-                </article>
-              )
-            })}
-          </div>
-
-          <a
-            href={buildWhatsappLink()}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-5 flex items-center justify-center gap-2 rounded-full bg-indigo-600 px-5 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700"
-          >
-            <MessageCircle className="h-4 w-4" />
-            Chat kami untuk harga detail
-            <ArrowRight className="h-4 w-4" />
-          </a>
+        <div class="text-right">
+          <strong class="block text-lg font-extrabold tracking-[-.04em] text-[#14213d]">${formatRupiah(estimate.estimatedAnnual)}</strong>
+          <span class="text-[10px] text-[#61718b]">estimasi / 12 bulan</span>
         </div>
       </div>
-
-      {/* Non-Member vs Member */}
-      <section className="mt-10">
-        <p className="text-xs font-bold uppercase tracking-[.18em] text-indigo-600">Non-Member vs Member</p>
-        <h2 className="mt-2 max-w-2xl text-xl font-bold leading-snug tracking-[-.03em] text-foreground">
-          Service memperbaiki gangguan hari ini. Member menjaga sistem tetap terkontrol setelahnya.
-        </h2>
-        <div className="mt-5 overflow-x-auto rounded-2xl border border-border bg-background shadow-sm">
-          <table className="w-full min-w-[640px] border-collapse text-sm">
-            <thead>
-              <tr>
-                <th className="w-1/3 border-b border-border bg-background px-5 py-3 text-left text-xs font-bold uppercase tracking-[.1em] text-muted-foreground">
-                  {' '}
-                </th>
-                <th className="border-b border-border bg-muted/40 px-5 py-3 text-left align-top">
-                  <span className="block text-sm font-extrabold text-foreground">Non-Member</span>
-                  <span className="block text-xs font-medium text-muted-foreground">Service saat rusak</span>
-                </th>
-                <th className="border-b border-2 border-b-amber-400 bg-amber-50 px-5 py-3 text-left align-top">
-                  <span className="block text-sm font-extrabold text-amber-800">Member</span>
-                  <span className="block text-xs font-medium text-amber-700">Kontrak AMC</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {[
-                ['Kunjungan Preventive', 'Tidak terjadwal', 'Terjadwal rutin sesuai paket'],
-                ['Cleaning & Health Check', 'Saat service, ditagihkan terpisah', 'Termasuk dalam kunjungan rutin'],
-                ['Yang Diperiksa', 'Sesuai keluhan saat itu', 'Kamera, rekaman, storage, power & koneksi'],
-                ['Respons Bantuan', 'Jadwal normal', 'Prioritas sesuai tier paket'],
-                ['Corrective Ringan', 'Jasa dihitung per pekerjaan', 'Kuota sesuai paket yang dipilih'],
-                ['Remote / Aplikasi HP', 'Dihitung sebagai jasa tambahan', 'Termasuk bantuan sesuai paket'],
-                ['Harga Jasa & Barang', 'Harga normal', 'Harga khusus member'],
-                ['Kepastian Biaya', 'Tergantung kerusakan', 'Biaya perawatan lebih terencana'],
-              ].map(([label, non, member]) => (
-                <tr key={label}>
-                  <td className="px-5 py-3 align-top font-bold text-foreground">{label}</td>
-                  <td className="px-5 py-3 align-top text-muted-foreground">{non}</td>
-                  <td className="px-5 py-3 align-top bg-amber-50/40 font-semibold text-foreground">{member}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* Batasan */}
-      <section className="mt-10 rounded-2xl border border-border bg-muted/30 p-5 sm:p-7">
-        <p className="text-xs font-bold uppercase tracking-[.18em] text-indigo-600">Batasan yang perlu diketahui</p>
-        <h2 className="mt-2 max-w-xl text-xl font-bold leading-snug tracking-[-.03em] text-foreground">
-          Beberapa kebutuhan memang perlu dilihat lebih dekat.
-        </h2>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Material, sparepart, kabel, pipa, konektor, pekerjaan sipil, alat akses tinggi, perangkat pengganti, dan
-          perbaikan besar dapat memerlukan penawaran terpisah agar scope dan biayanya tepat.
-        </p>
-        <a
-          href={buildWhatsappLink()}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-indigo-600"
-        >
-          Minta survei / penawaran khusus
-          <ArrowRight className="h-4 w-4" />
-        </a>
-      </section>
-    </div>
-  )
+      <div class="mt-4 grid grid-cols-2 gap-3 border-t border-[#eaf3ff] pt-3 text-xs text-[#61718b] sm:grid-cols-4">
+        <span><b class="block text-[#14213d]">${pkg.visit}</b>visit preventif</span>
+        <span><b class="block text-[#14213d]">${pkg.target}</b>target kedatangan</span>
+        <span><b class="block text-[#14213d]">${formatRupiah(estimate.invoiceValue)}</b>per invoice · ${term.label}</span>
+        <span><b class="block text-[#14213d]">${formatRupiah(estimate.monthlyEquivalent)}</b>setara / bulan</span>
+      </div>
+      <a href="${buildWhatsappLink(id)}" target="_blank" rel="noreferrer" class="mt-4 flex items-center justify-between border-t border-[#eaf3ff] pt-3 text-xs font-bold text-[#1764d7]">Pilih paket ini
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M7 7h10v10"/></svg>
+      </a>
+    </article>`;
+  }).join("");
 }
+
+function render() {
+  const points = getPoints();
+  document.getElementById("pointsBadge").textContent = points + " titik";
+  renderTermButtons();
+  renderPackages();
+  const link = buildWhatsappLink();
+  document.getElementById("ctaWhatsapp").href = link;
+  document.getElementById("ctaWhatsapp2").href = link;
+  document.getElementById("ctaWhatsapp3").href = link;
+}
+
+document.getElementById("points").addEventListener("input", render);
+render();
+</script>
+</body>
+</html>
