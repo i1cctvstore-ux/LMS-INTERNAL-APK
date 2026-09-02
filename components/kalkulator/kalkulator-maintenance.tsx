@@ -23,23 +23,18 @@
 
 export default function KalkulatorMaintenance() {
   return (
-    <div className="flex h-full flex-col p-4 sm:p-6">
-      <header className="mb-4 shrink-0">
+    <div className="flex h-[calc(100vh-2rem)] flex-col p-4 sm:p-6">
+      <header className="mb-3 shrink-0">
         <p className="text-xs font-bold uppercase tracking-[.18em] text-indigo-600">
           Maintenance CCTV preventif · multi-lokasi
         </p>
         <h1 className="mt-1 text-2xl font-bold text-foreground">Kalkulator Estimasi Maintenance CCTV</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Alat bantu internal buat ngasih gambaran estimasi ke customer pas lagi ngobrol. Harga final tetap butuh
-          konfirmasi scope & lokasi dari tim sebelum dikirim jadi penawaran resmi.
-        </p>
       </header>
       <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-border">
         <iframe
           src="/kalkulator-maintenance-workspace.html"
           title="Kalkulator Estimasi Maintenance CCTV"
           className="h-full w-full border-0"
-          style={{ minHeight: '80vh' }}
         />
       </div>
     </div>
