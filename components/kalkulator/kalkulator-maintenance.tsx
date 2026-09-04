@@ -78,14 +78,12 @@ export default function KalkulatorMaintenance() {
   }
 
   return (
-    <div className="p-4 sm:p-6">
-      <iframe
-        ref={iframeRef}
-        onLoad={setupIframe}
-        src="/kalkulator-maintenance-workspace.html"
-        title="Kalkulator Estimasi Maintenance CCTV"
-        className="block w-full border-0"
-      />
-    </div>
+    <iframe
+      ref={iframeRef}
+      onLoad={setupIframe}
+      src="/kalkulator-maintenance-workspace.html"
+      title="Kalkulator Estimasi Maintenance CCTV"
+      className="block w-full border-0"
+    />
   )
 }
