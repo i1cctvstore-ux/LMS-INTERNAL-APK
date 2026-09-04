@@ -55,7 +55,23 @@ export default function KalkulatorMaintenance() {
       const doc = iframeRef.current?.contentDocument
       if (!doc) return
       const style = doc.createElement('style')
-      style.textContent = '.ledger-sidebar { display: none !important; }'
+      style.textContent = `
+        .ledger-sidebar { display: none !important; }
+        /* Kotak "Decision Ledger" (hero-signal) & bar harga navy
+           (decision-cockpit) di halaman ini ukurannya kegedean
+           dibanding elemen app kita yang lain -- diperkecil di sini,
+           MURNI ukuran visual doang, gak nyentuh angka/logic-nya. */
+        .decision-cockpit { min-height: 64px !important; margin: 10px 0 14px !important; }
+        .cockpit-price strong, .cockpit-metric strong { font-size: 16px !important; }
+        .cockpit-price small, .cockpit-metric small,
+        .cockpit-price span, .cockpit-metric span { font-size: 8px !important; }
+        .cockpit-stamp strong { font-size: 10px !important; }
+        .hero-signal { padding: 8px !important; }
+        .hero-signal strong { font-size: 14px !important; margin: 1px 0 !important; }
+        .hero-signal span { font-size: 8px !important; }
+        .hero-signal small { font-size: 9px !important; }
+        .signal-icon { width: 30px !important; height: 30px !important; flex-basis: 30px !important; }
+      `
       doc.head.appendChild(style)
     } catch {
       // Kalau gagal (mis. browser lama), gapapa -- iframe tetap
