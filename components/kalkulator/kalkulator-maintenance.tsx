@@ -5,62 +5,40 @@
 // ngasih gambaran harga ke customer (mendukung multi-lokasi).
 //
 // File aslinya (kalkulator-maintenance-workspace.html) adalah aplikasi
-// React MANDIRI yang sudah di-bundle jadi 1 file HTML utuh (React +
-// ReactDOM + logic hitung harga yang cukup rumit -- multi-lokasi,
-// beberapa komponen biaya per visit). Di-embed lewat <iframe>, BUKAN
-// ditulis ulang manual -- nulis ulang dari kode yang sudah di-minify
-// beresiko salah baca formula harga (ini alat hitung harga BENERAN
-// dipakai buat kasih penawaran ke customer, jadi salah dikit bisa
-// bikin salah kasih harga). Lewat iframe, logic-nya dijamin 100% sama
-// persis kayak file aslinya.
+// React MANDIRI yang sudah di-bundle jadi 1 file HTML utuh. Di-embed
+// lewat <iframe>, BUKAN ditulis ulang manual -- nulis ulang dari kode
+// yang sudah di-minify beresiko salah baca formula harga (ini alat
+// hitung harga BENERAN dipakai buat kasih penawaran ke customer).
+// Lewat iframe, logic-nya dijamin 100% sama persis kayak file aslinya.
 //
-// Supaya gak kelihatan kayak "app di dalam app" (sidebar kita di kiri
-// luar, sidebar bawaan file ini juga ada lagi di kiri iframe), kita
-// suntik 1 baris CSS ke DALAM iframe-nya lewat JS (aman, gak lewat
-// CORS, karena file ini di-hosting satu domain sama app kita) buat
-// nyembunyiin panel .ledger-sidebar bawaan file itu doang -- SAMA
-// SEKALI GAK NYENTUH logic/JS-nya, cuma nyembunyiin 1 elemen visual.
-// .app-shell di file itu display:flex, jadi begitu .ledger-sidebar
-// disembunyiin, .workspace (konten utama) otomatis melebar sendiri
-// ngisi ruang kosongnya -- gak perlu atur css lain.
+// Dua penyesuaian visual yang di-suntik lewat JS (AMAN, gak lewat
+// CORS karena file-nya satu domain sama app kita, dan SAMA SEKALI
+// GAK NYENTUH logic/JS aslinya):
+//  1. Sembunyiin panel .ledger-sidebar bawaan file itu (biar gak
+//     kesannya "app di dalam app" -- app kita udah punya sidebar
+//     sendiri) & perkecil beberapa badge yang kegedean.
+//  2. Auto-height: iframe-nya dibikin NGIKUTIN tinggi konten di
+//     dalamnya (bukan tinggi tetap) -- jadi TIDAK ADA scroll sendiri
+//     di dalam iframe, yang scroll cuma halaman app kita aja (1
+//     scrollbar, bukan dobel). Tinggi ini terus dipantau
+//     (ResizeObserver) supaya tetap pas walau kontennya berubah pas
+//     user isi form/tambah lokasi.
 // =====================================================
 
-// Tinggi iframe dihitung OTOMATIS lewat JS (bukan angka vh yang
-// ditebak) -- diukur dari posisi pasti elemen ini ke bawah layar,
-// jadi dijamin pas berapa pun tinggi header/padding bawaan app kamu,
-// tanpa perlu tau angka persisnya. Ini juga yang bikin halaman utama
-// (di LUAR iframe) gak ikut-ikutan scroll lagi -- sebelumnya pakai
-// 92vh yang kadang dikit kelebihan dari ruang yang beneran tersedia.
-import { useEffect, useRef, useState } from 'react'
+import { useRef } from 'react'
 
 export default function KalkulatorMaintenance() {
-  const containerRef = useRef<HTMLDivElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
-  const [height, setHeight] = useState<number | null>(null)
 
-  useEffect(() => {
-    function updateHeight() {
-      const el = containerRef.current
-      if (!el) return
-      const top = el.getBoundingClientRect().top
-      setHeight(Math.max(300, window.innerHeight - top - 8))
-    }
-    updateHeight()
-    window.addEventListener('resize', updateHeight)
-    return () => window.removeEventListener('resize', updateHeight)
-  }, [])
+  function setupIframe() {
+    const iframe = iframeRef.current
+    const doc = iframe?.contentDocument
+    if (!iframe || !doc) return
 
-  function hideEmbeddedSidebar() {
     try {
-      const doc = iframeRef.current?.contentDocument
-      if (!doc) return
       const style = doc.createElement('style')
       style.textContent = `
         .ledger-sidebar { display: none !important; }
-        /* Kotak "Decision Ledger" (hero-signal) & bar harga navy
-           (decision-cockpit) di halaman ini ukurannya kegedean
-           dibanding elemen app kita yang lain -- diperkecil di sini,
-           MURNI ukuran visual doang, gak nyentuh angka/logic-nya. */
         .decision-cockpit { min-height: 64px !important; margin: 10px 0 14px !important; }
         .cockpit-price strong, .cockpit-metric strong { font-size: 16px !important; }
         .cockpit-price small, .cockpit-metric small,
@@ -71,23 +49,41 @@ export default function KalkulatorMaintenance() {
         .hero-signal span { font-size: 8px !important; }
         .hero-signal small { font-size: 9px !important; }
         .signal-icon { width: 30px !important; height: 30px !important; flex-basis: 30px !important; }
+        html, body { overflow: visible !important; }
       `
       doc.head.appendChild(style)
     } catch {
-      // Kalau gagal (mis. browser lama), gapapa -- iframe tetap
-      // tampil normal, cuma sidebar bawaannya gak kesembunyiin.
+      // Gagal suntik CSS gapapa -- lanjut ke auto-height di bawah.
+    }
+
+    function resize() {
+      if (!iframe) return
+      const body = doc.body
+      const html = doc.documentElement
+      const h = Math.max(body?.scrollHeight || 0, html?.scrollHeight || 0, body?.offsetHeight || 0, html?.offsetHeight || 0)
+      if (h > 0) iframe.style.height = h + 'px'
+    }
+    resize()
+
+    // Pantau perubahan ukuran konten (user isi form, tambah lokasi,
+    // dst) biar tinggi iframe terus nyesuain -- gak numpuk jadi
+    // scroll internal.
+    try {
+      const ro = new ResizeObserver(resize)
+      ro.observe(doc.body)
+    } catch {
+      // ResizeObserver gak tersedia (browser sangat lama) -- iframe
+      // tetap kepasang tinggi awalnya, gapapa buat fallback.
     }
   }
 
   return (
-    <div ref={containerRef} className="w-full overflow-hidden" style={{ height: height ?? '80vh' }}>
-      <iframe
-        ref={iframeRef}
-        onLoad={hideEmbeddedSidebar}
-        src="/kalkulator-maintenance-workspace.html"
-        title="Kalkulator Estimasi Maintenance CCTV"
-        className="h-full w-full border-0"
-      />
-    </div>
+    <iframe
+      ref={iframeRef}
+      onLoad={setupIframe}
+      src="/kalkulator-maintenance-workspace.html"
+      title="Kalkulator Estimasi Maintenance CCTV"
+      className="block w-full border-0"
+    />
   )
 }
