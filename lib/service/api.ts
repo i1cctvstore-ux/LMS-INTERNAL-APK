@@ -352,6 +352,21 @@ async function setBranchSparepartQty(branchId: string, sparepartId: string, qty:
   if (error) throw new Error(error.message)
 }
 
+// Motong 1 unit dari stok cabang (product_stock, source='cabang') --
+// dipanggil PERSIS di momen klaim "Ganti Baru" resmi pindah status ke
+// "Stok Toko" (customer BENERAN dikasih unit pengganti dari stok
+// kita). Lewat RPC (security definer), bukan .update() langsung dari
+// browser, sesuai pola proyek ini buat tulisan yang sensitif.
+async function decrementBranchProductStock(branchId: string, sku: string, amount = 1) {
+  const supabase = createClient()
+  const { error } = await supabase.rpc('decrement_branch_product_stock', {
+    p_branch_id: branchId,
+    p_sku: sku,
+    p_amount: amount,
+  })
+  if (error) throw new Error(error.message)
+}
+
 function productFromRow(row: any): ProductItem {
   return {
     id: row.id,
@@ -599,6 +614,30 @@ async function syncClaims(branchId: string, prev: Claim[], next: Claim[], userId
   updated.forEach((c) => tasks.push(supabase.from('service_claims').update(claimToRow(c, branchId)).eq('id', c.id)))
   if (deletedIds.length) tasks.push(supabase.from('service_claims').delete().in('id', deletedIds))
   await runAndCheck(tasks)
+
+  // ---------- Potong stok cabang pas klaim "Ganti Baru" resmi
+  // diselesaikan pakai Stok Toko ----------
+  // Trigger-nya PERSIS di transisi sumberPenyelesaian -> "Stok Toko"
+  // (bukan tiap kali klaim itu di-edit apapun -- biar gak kepotong
+  // dobel-dobel cuma gara-gara klaim yang sama di-update ulang buat
+  // hal lain, mis. biaya toko atau catatan). Klaim yang masih
+  // "tertahan"/"menunggu" (belum ada sumberPenyelesaian, atau baru
+  // dikirim ke supplier) TIDAK memotong stok sama sekali -- sesuai
+  // aturan bisnis: stok cuma berkurang pas BENERAN kepake/dikasih ke
+  // customer, bukan pas masih dalam proses.
+  const stockDecrementTasks: Promise<void>[] = []
+  function maybeDecrementForClaim(claim: Claim, before?: Claim) {
+    const becameStokToko = claim.sumberPenyelesaian === 'Stok Toko' && before?.sumberPenyelesaian !== 'Stok Toko'
+    if (!becameStokToko) return
+    if (!claim.produkSku) {
+      console.warn(`Klaim ${claim.id} jadi "Stok Toko" tapi gak punya produkSku -- stok TIDAK dipotong otomatis, cek manual.`)
+      return
+    }
+    stockDecrementTasks.push(decrementBranchProductStock(branchId, claim.produkSku, 1))
+  }
+  inserted.forEach((c) => maybeDecrementForClaim(c))
+  updated.forEach((c) => maybeDecrementForClaim(c, prev.find((p) => p.id === c.id)))
+  if (stockDecrementTasks.length) await Promise.all(stockDecrementTasks)
 }
 
 async function syncBatches(branchId: string, prev: Batch[], next: Batch[], userId?: string) {
