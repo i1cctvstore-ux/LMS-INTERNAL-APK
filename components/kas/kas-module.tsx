@@ -68,9 +68,10 @@ type KasModuleProps = {
   currentUserBranchId: string | null
 }
 
-type RangeKey = 'today' | 'week' | 'month' | 'lastmonth' | 'custom'
+type RangeKey = 'all' | 'today' | 'week' | 'month' | 'lastmonth' | 'custom'
 
 const RANGE_LABELS: Record<RangeKey, string> = {
+  all: 'Semua',
   today: 'Hari Ini',
   week: 'Minggu Ini',
   month: 'Bulan Ini',
@@ -210,6 +211,7 @@ function toDisplayRows(
 }
 
 function inRange(tanggal: string, range: RangeKey, customFrom: string, customTo: string): boolean {
+  if (range === 'all') return true
   const d = new Date(tanggal + 'T00:00:00')
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -248,8 +250,8 @@ export default function KasModule({
   const canManage = isSuperAdmin // edit & hapus cuma Super Admin
   const title = isBuku ? 'Buku Kas' : isUm ? 'Kas UM & Reimburse' : 'Kas Kecil'
   const rangeOptions: RangeKey[] = isBuku
-    ? ['today', 'week', 'month', 'custom']
-    : ['today', 'week', 'month', 'lastmonth', 'custom']
+    ? ['all', 'today', 'week', 'month', 'custom']
+    : ['all', 'today', 'week', 'month', 'lastmonth', 'custom']
 
   const [branches, setBranches] = useState<Branch[]>([])
   const [activeBranchId, setActiveBranchId] = useState<string | null>(isSuperAdmin ? null : currentUserBranchId)
