@@ -25,10 +25,30 @@
 // ngisi ruang kosongnya -- gak perlu atur css lain.
 // =====================================================
 
-import { useRef } from 'react'
+// Tinggi iframe dihitung OTOMATIS lewat JS (bukan angka vh yang
+// ditebak) -- diukur dari posisi pasti elemen ini ke bawah layar,
+// jadi dijamin pas berapa pun tinggi header/padding bawaan app kamu,
+// tanpa perlu tau angka persisnya. Ini juga yang bikin halaman utama
+// (di LUAR iframe) gak ikut-ikutan scroll lagi -- sebelumnya pakai
+// 92vh yang kadang dikit kelebihan dari ruang yang beneran tersedia.
+import { useEffect, useRef, useState } from 'react'
 
 export default function KalkulatorMaintenance() {
+  const containerRef = useRef<HTMLDivElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const [height, setHeight] = useState<number | null>(null)
+
+  useEffect(() => {
+    function updateHeight() {
+      const el = containerRef.current
+      if (!el) return
+      const top = el.getBoundingClientRect().top
+      setHeight(Math.max(300, window.innerHeight - top - 8))
+    }
+    updateHeight()
+    window.addEventListener('resize', updateHeight)
+    return () => window.removeEventListener('resize', updateHeight)
+  }, [])
 
   function hideEmbeddedSidebar() {
     try {
@@ -44,7 +64,7 @@ export default function KalkulatorMaintenance() {
   }
 
   return (
-    <div className="h-[92vh] w-full overflow-hidden">
+    <div ref={containerRef} className="w-full overflow-hidden" style={{ height: height ?? '80vh' }}>
       <iframe
         ref={iframeRef}
         onLoad={hideEmbeddedSidebar}
