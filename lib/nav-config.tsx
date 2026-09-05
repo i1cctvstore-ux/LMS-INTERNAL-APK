@@ -58,10 +58,13 @@ export type NavItem = {
 // lihat Dashboard ringkasan bisnis, Proyek, apalagi Kelola Cabang/User Role.
 const NON_GUDANG_ROLES: Role[] = ['super_admin', 'admin', 'kasir', 'teknisi']
 
-// Menu Kas (Buku Kas & Kas Kecil) sengaja HANYA untuk super_admin & admin —
-// kasir/gudang/teknisi tidak pernah melihat menu ini sama sekali, beda
-// dengan menu "Kas Service" di grup Servis yang memang untuk staf servis.
-const KAS_ROLES: Role[] = ['super_admin', 'admin']
+// Menu Kas (Buku Kas & Kas Kecil & Kas UM/Reimburse) untuk super_admin,
+// admin, DAN gudang -- kasir/teknisi tetap tidak melihat menu ini sama
+// sekali, beda dengan menu "Kas Service" di grup Servis yang memang
+// untuk semua staf servis. Ditambahkan gudang (2026-09-05) karena
+// beberapa cabang (Purwokerto/Bali/Solo) cuma punya akun ber-role
+// gudang, bukan admin, dan tetap butuh akses ke Kas cabangnya sendiri.
+const KAS_ROLES: Role[] = ['super_admin', 'admin', 'gudang']
 
 export const NAV_ITEMS: NavItem[] = [
   {
