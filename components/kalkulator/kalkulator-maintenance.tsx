@@ -70,6 +70,12 @@ export default function KalkulatorMaintenance() {
         .hero-signal small { font-size: 9px !important; }
         .signal-icon { width: 30px !important; height: 30px !important; flex-basis: 30px !important; }
         html, body { overflow: visible !important; }
+        /* Hampir semua ukuran teks di file ini ditulis pakai px tetap
+           (bukan rem), jadi gak bisa diskalain cuma lewat 1 aturan
+           font-size di root -- pakai zoom biar SEMUA teks (judul,
+           label, isi form, dst) membesar proporsional sekaligus,
+           tanpa perlu override tiap class satu-satu. */
+        body { zoom: 1.15; }
         /* Samain warna tombol biar konsisten sama app (indigo-600,
            bukan navy/gold bawaan file ini). */
         .print-button { background: #4f46e5 !important; color: #fff !important; }
@@ -104,6 +110,14 @@ export default function KalkulatorMaintenance() {
         .decision-cockpit.healthy .cockpit-metric:nth-of-type(4) strong { color: #16a34a !important; }
         .decision-cockpit.risk .cockpit-metric:nth-of-type(4) strong { color: #dc2626 !important; }
         .decision-cockpit.watch .cockpit-metric:nth-of-type(4) strong { color: #d97706 !important; }
+        /* Tab "Tahunan (Lunas)/6 Bulanan/Quarterly" pas ke-pilih, dan
+           tombol paket yang ke-pilih -- ini bagian UI INTERNAL staff,
+           beda dari styling dokumen quotation final (.quote-*,
+           .print-quote, .comparison-*) yang SENGAJA dibiarin navy
+           karena itu bukan tampilan app, tapi dokumen resmi buat
+           customer. */
+        .payment-choice.active { background: #4f46e5 !important; color: #fff !important; }
+        .regular-package-actions button.active { background: #4f46e5 !important; color: #fff !important; }
       `
       doc.head.appendChild(style)
     } catch {
