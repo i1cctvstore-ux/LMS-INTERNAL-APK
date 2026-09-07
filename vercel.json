@@ -1,16 +1,16 @@
 {
   "crons": [
     {
-      "path": "/api/stok/sync-zoho",
-      "schedule": "0 3 * * *"
-    },
-    {
       "path": "/api/stok/sync-accurate",
-      "schedule": "0 20 * * *"
+      "schedule": "0 1 * * *"
     },
     {
       "path": "/api/stok/sync-accurate-solo-konsi",
-      "schedule": "0 21 * * *"
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/stok/sync-zoho",
+      "schedule": "0 1 * * *"
     }
   ]
 }
