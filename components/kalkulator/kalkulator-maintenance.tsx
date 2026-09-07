@@ -31,9 +31,7 @@ import { useEffect, useRef, useState } from 'react'
 export default function KalkulatorMaintenance() {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
   const [breakoutStyle, setBreakoutStyle] = useState<React.CSSProperties>({})
-  const [height, setHeight] = useState<number | null>(null)
 
   // Breakout dari padding kiri-kanan shell app -- DIUKUR OTOMATIS dari
   // padding elemen induknya (bukan nebak angka vh/rem kayak sebelumnya,
@@ -51,22 +49,6 @@ export default function KalkulatorMaintenance() {
     updateBreakout()
     window.addEventListener('resize', updateBreakout)
     return () => window.removeEventListener('resize', updateBreakout)
-  }, [])
-
-  // Tinggi kotak iframe -- diukur dari posisi elemen ini ke bawah
-  // layar (bukan tinggi konten kalkulatornya), biar halaman app tetap
-  // pendek/normal. Iframe-nya sendiri yang scroll kalau kontennya
-  // lebih panjang dari kotak ini.
-  useEffect(() => {
-    function updateHeight() {
-      const el = containerRef.current
-      if (!el) return
-      const top = el.getBoundingClientRect().top
-      setHeight(Math.max(300, window.innerHeight - top - 16))
-    }
-    updateHeight()
-    window.addEventListener('resize', updateHeight)
-    return () => window.removeEventListener('resize', updateHeight)
   }, [])
 
   function setupIframe() {
@@ -91,15 +73,19 @@ export default function KalkulatorMaintenance() {
         /* Perbesar teks yang paling sering dibaca -- override
            per-elemen (bukan zoom global lagi, itu kemarin bikin
            perhitungan tinggi/scroll iframe jadi meleset). */
-        body { font-size: 15px !important; }
-        input, select, textarea { font-size: 14px !important; }
-        label, .field-label { font-size: 13px !important; }
-        h1, h2, h3 { font-size: 1.15em !important; }
-        .hero-signal strong { font-size: 16px !important; }
-        .cockpit-price strong { font-size: 22px !important; }
-        .cockpit-metric strong { font-size: 18px !important; }
+        body { font-size: 16px !important; }
+        input, select, textarea, button { font-size: 15px !important; }
+        label, .field-label, td, th, li, p { font-size: 14px !important; }
+        h1, h2, h3 { font-size: 1.25em !important; }
+        .hero-signal strong { font-size: 17px !important; }
+        .hero-signal span, .hero-signal small { font-size: 11px !important; }
+        .cockpit-price strong { font-size: 26px !important; }
+        .cockpit-metric strong { font-size: 20px !important; }
         .cockpit-price small, .cockpit-metric small,
-        .cockpit-price span, .cockpit-metric span { font-size: 10px !important; }
+        .cockpit-price span, .cockpit-metric span { font-size: 11px !important; }
+        .cockpit-signals { font-size: 11px !important; }
+        .step-tabs, .payment-choice, .payment-choice b { font-size: 13px !important; }
+        .quote-summary-tag, .quote-summary-label { font-size: 12px !important; }
         /* Samain warna tombol biar konsisten sama app (indigo-600,
            bukan navy/gold bawaan file ini). */
         .print-button { background: #4f46e5 !important; color: #fff !important; }
@@ -151,7 +137,11 @@ export default function KalkulatorMaintenance() {
 
   return (
     <div ref={wrapperRef} style={breakoutStyle}>
-      <div ref={containerRef} className="w-full overflow-hidden" style={{ height: height ?? '80vh' }}>
+      {/* Tinggi pakai CSS calc() langsung (bukan ukur via JS lagi --
+          itu kemarin timing-nya belum pas pas render pertama, bikin
+          kotaknya kelewat tinggi & halaman ikut ke-scroll lagi).
+          100dvh dikurangi kira-kira tinggi header app + jarak aman. */}
+      <div className="w-full overflow-hidden" style={{ height: 'calc(100dvh - 130px)' }}>
         <iframe
           ref={iframeRef}
           onLoad={setupIframe}
