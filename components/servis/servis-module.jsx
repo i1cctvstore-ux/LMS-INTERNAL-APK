@@ -6841,6 +6841,7 @@ function PrintSuratJalanReceipt({ batch, items, branchInfo, onClose }) {
           <tr className="border-b border-slate-300 text-left">
             <th className="py-1 pr-2">Brand / Produk</th>
             <th className="py-1 pr-2">SN</th>
+            <th className="py-1 pr-2">Kelengkapan</th>
             <th className="py-1 pr-2">Kerusakan</th>
             <th className="py-1">Jenis</th>
           </tr>
@@ -6850,6 +6851,7 @@ function PrintSuratJalanReceipt({ batch, items, branchInfo, onClose }) {
             <tr key={c.id} className="border-b border-slate-100">
               <td className="py-1 pr-2">{c.brand} {c.produk}</td>
               <td className="py-1 pr-2 font-mono text-xs">{c.snDiterima}</td>
+              <td className="py-1 pr-2">{c.kelengkapan || "-"}</td>
               <td className="py-1 pr-2">{c.catatan || "-"}</td>
               <td className="py-1">{c.jenis === "Ganti Baru" ? "Klaim Balik" : "Servis"}</td>
             </tr>
