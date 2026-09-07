@@ -16,13 +16,14 @@
 // GAK NYENTUH logic/JS aslinya):
 //  1. Sembunyiin panel .ledger-sidebar bawaan file itu (biar gak
 //     kesannya "app di dalam app" -- app kita udah punya sidebar
-//     sendiri) & perkecil beberapa badge yang kegedean.
-//  2. Auto-height: iframe-nya dibikin NGIKUTIN tinggi konten di
-//     dalamnya (bukan tinggi tetap) -- jadi TIDAK ADA scroll sendiri
-//     di dalam iframe, yang scroll cuma halaman app kita aja (1
-//     scrollbar, bukan dobel). Tinggi ini terus dipantau
-//     (ResizeObserver) supaya tetap pas walau kontennya berubah pas
-//     user isi form/tambah lokasi.
+//     sendiri) & perkecil beberapa badge yang kegedean, samain warna
+//     tombol biar konsisten sama app.
+//  2. Tinggi iframe DIUKUR OTOMATIS dari sisa ruang layar (bukan
+//     ngikutin tinggi konten kalkulatornya -- itu udah dicoba, tapi
+//     bikin halaman app jadi PANJANG BANGET karena semua 4 langkah
+//     form ke-render jadi 1 halaman nonstop). Jadi iframe punya
+//     tinggi terbatas & scroll SENDIRI di dalamnya -- halaman app
+//     kita tetap pendek/normal kayak halaman lain.
 // =====================================================
 
 import { useEffect, useRef, useState } from 'react'
@@ -30,7 +31,9 @@ import { useEffect, useRef, useState } from 'react'
 export default function KalkulatorMaintenance() {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [breakoutStyle, setBreakoutStyle] = useState<React.CSSProperties>({})
+  const [height, setHeight] = useState<number | null>(null)
 
   // Breakout dari padding kiri-kanan shell app -- DIUKUR OTOMATIS dari
   // padding elemen induknya (bukan nebak angka vh/rem kayak sebelumnya,
@@ -48,6 +51,22 @@ export default function KalkulatorMaintenance() {
     updateBreakout()
     window.addEventListener('resize', updateBreakout)
     return () => window.removeEventListener('resize', updateBreakout)
+  }, [])
+
+  // Tinggi kotak iframe -- diukur dari posisi elemen ini ke bawah
+  // layar (bukan tinggi konten kalkulatornya), biar halaman app tetap
+  // pendek/normal. Iframe-nya sendiri yang scroll kalau kontennya
+  // lebih panjang dari kotak ini.
+  useEffect(() => {
+    function updateHeight() {
+      const el = containerRef.current
+      if (!el) return
+      const top = el.getBoundingClientRect().top
+      setHeight(Math.max(300, window.innerHeight - top - 16))
+    }
+    updateHeight()
+    window.addEventListener('resize', updateHeight)
+    return () => window.removeEventListener('resize', updateHeight)
   }, [])
 
   function setupIframe() {
@@ -69,13 +88,18 @@ export default function KalkulatorMaintenance() {
         .hero-signal span { font-size: 8px !important; }
         .hero-signal small { font-size: 9px !important; }
         .signal-icon { width: 30px !important; height: 30px !important; flex-basis: 30px !important; }
-        html, body { overflow: visible !important; }
-        /* Hampir semua ukuran teks di file ini ditulis pakai px tetap
-           (bukan rem), jadi gak bisa diskalain cuma lewat 1 aturan
-           font-size di root -- pakai zoom biar SEMUA teks (judul,
-           label, isi form, dst) membesar proporsional sekaligus,
-           tanpa perlu override tiap class satu-satu. */
-        body { zoom: 1.15; }
+        /* Perbesar teks yang paling sering dibaca -- override
+           per-elemen (bukan zoom global lagi, itu kemarin bikin
+           perhitungan tinggi/scroll iframe jadi meleset). */
+        body { font-size: 15px !important; }
+        input, select, textarea { font-size: 14px !important; }
+        label, .field-label { font-size: 13px !important; }
+        h1, h2, h3 { font-size: 1.15em !important; }
+        .hero-signal strong { font-size: 16px !important; }
+        .cockpit-price strong { font-size: 22px !important; }
+        .cockpit-metric strong { font-size: 18px !important; }
+        .cockpit-price small, .cockpit-metric small,
+        .cockpit-price span, .cockpit-metric span { font-size: 10px !important; }
         /* Samain warna tombol biar konsisten sama app (indigo-600,
            bukan navy/gold bawaan file ini). */
         .print-button { background: #4f46e5 !important; color: #fff !important; }
@@ -121,39 +145,21 @@ export default function KalkulatorMaintenance() {
       `
       doc.head.appendChild(style)
     } catch {
-      // Gagal suntik CSS gapapa -- lanjut ke auto-height di bawah.
-    }
-
-    function resize() {
-      if (!iframe) return
-      const body = doc.body
-      const html = doc.documentElement
-      const h = Math.max(body?.scrollHeight || 0, html?.scrollHeight || 0, body?.offsetHeight || 0, html?.offsetHeight || 0)
-      if (h > 0) iframe.style.height = h + 'px'
-    }
-    resize()
-
-    // Pantau perubahan ukuran konten (user isi form, tambah lokasi,
-    // dst) biar tinggi iframe terus nyesuain -- gak numpuk jadi
-    // scroll internal.
-    try {
-      const ro = new ResizeObserver(resize)
-      ro.observe(doc.body)
-    } catch {
-      // ResizeObserver gak tersedia (browser sangat lama) -- iframe
-      // tetap kepasang tinggi awalnya, gapapa buat fallback.
+      // Gagal suntik CSS gapapa -- iframe tetap tampil normal.
     }
   }
 
   return (
     <div ref={wrapperRef} style={breakoutStyle}>
-      <iframe
-        ref={iframeRef}
-        onLoad={setupIframe}
-        src="/kalkulator-maintenance-workspace.html"
-        title="Kalkulator Estimasi Maintenance CCTV"
-        className="block w-full border-0"
-      />
+      <div ref={containerRef} className="w-full overflow-hidden" style={{ height: height ?? '80vh' }}>
+        <iframe
+          ref={iframeRef}
+          onLoad={setupIframe}
+          src="/kalkulator-maintenance-workspace.html"
+          title="Kalkulator Estimasi Maintenance CCTV"
+          className="block h-full w-full border-0"
+        />
+      </div>
     </div>
   )
 }
