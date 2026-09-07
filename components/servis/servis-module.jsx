@@ -3677,15 +3677,31 @@ const SUPPLIER_EMPTY_FILTERS = { supplier: "", jenis: "", state: "", dokumen: ""
 
 function SupplierBatchOptionsMenu({ onPrint, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
+  const btnRef = useRef(null);
+
+  function handleToggle() {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      // Menu ini ~130px tingginya (3 baris) -- kalau ruang di bawah
+      // tombol kurang dari itu, buka ke ATAS aja. Ini yang bikin baris
+      // paling bawah tabel (yang wrapper-nya overflow-x-auto, otomatis
+      // ngebatesin overflow-y juga) gak kepotong lagi kayak sebelumnya.
+      setOpenUp(spaceBelow < 150);
+    }
+    setOpen((o) => !o);
+  }
+
   return (
     <div className="relative" onClick={(e) => e.stopPropagation()}>
-      <button onClick={() => setOpen((o) => !o)} className="text-slate-400 hover:text-slate-700 p-1.5 -m-1.5 rounded-lg hover:bg-slate-100" title="Menu lainnya">
+      <button ref={btnRef} onClick={handleToggle} className="text-slate-400 hover:text-slate-700 p-1.5 -m-1.5 rounded-lg hover:bg-slate-100" title="Menu lainnya">
         <MoreVertical size={18} />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-1 w-56 bg-white border border-slate-200 rounded-2xl shadow-lg z-50 py-1">
+          <div className={`absolute right-0 w-56 bg-white border border-slate-200 rounded-2xl shadow-lg z-50 py-1 ${openUp ? "bottom-full mb-1" : "top-full mt-1"}`}>
             <button onClick={() => { setOpen(false); onPrint(); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
               <Printer size={14} /> Cetak Surat Jalan
             </button>
