@@ -137,11 +137,12 @@ export default function KalkulatorMaintenance() {
 
   return (
     <div ref={wrapperRef} style={breakoutStyle}>
-      {/* Tinggi pakai CSS calc() langsung (bukan ukur via JS lagi --
-          itu kemarin timing-nya belum pas pas render pertama, bikin
-          kotaknya kelewat tinggi & halaman ikut ke-scroll lagi).
-          100dvh dikurangi kira-kira tinggi header app + jarak aman. */}
-      <div className="w-full overflow-hidden" style={{ height: 'calc(100dvh - 130px)' }}>
+      {/* Tinggi pakai persentase yang AMAN (sengaja gak 100% ngisi
+          layar) -- beberapa kali coba pakai calc() berdasarkan tinggi
+          header masih suka meleset dikit & bikin scroll dobel lagi.
+          78vh ini sengaja dikasih jarak aman biar dijamin gak pernah
+          overflow, walau artinya nyisa sedikit ruang kosong di bawah. */}
+      <div className="w-full overflow-hidden" style={{ height: '78vh' }}>
         <iframe
           ref={iframeRef}
           onLoad={setupIframe}
