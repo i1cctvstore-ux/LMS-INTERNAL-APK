@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Plus, Search, Printer, Package, Truck, CheckCircle2, X, Upload,
   Pencil, Settings2, SlidersHorizontal, AlertTriangle, Loader2, Download,
@@ -3677,31 +3678,54 @@ const SUPPLIER_EMPTY_FILTERS = { supplier: "", jenis: "", state: "", dokumen: ""
 
 function SupplierBatchOptionsMenu({ onPrint, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
-  const [openUp, setOpenUp] = useState(false);
+  const [pos, setPos] = useState(null); // { top, left, openUp }
   const btnRef = useRef(null);
 
   function handleToggle() {
     if (!open && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
+      const menuHeight = 132; // ~3 baris menu
       const spaceBelow = window.innerHeight - rect.bottom;
-      // Menu ini ~130px tingginya (3 baris) -- kalau ruang di bawah
-      // tombol kurang dari itu, buka ke ATAS aja. Ini yang bikin baris
-      // paling bawah tabel (yang wrapper-nya overflow-x-auto, otomatis
-      // ngebatesin overflow-y juga) gak kepotong lagi kayak sebelumnya.
-      setOpenUp(spaceBelow < 150);
+      const openUp = spaceBelow < menuHeight + 8;
+      setPos({
+        left: rect.right - 224, // w-56 = 224px, sejajar kanan tombol
+        top: openUp ? rect.top - menuHeight - 4 : rect.bottom + 4,
+      });
     }
     setOpen((o) => !o);
   }
 
+  // Kalau di-scroll/resize pas lagi kebuka, tutup aja -- posisi yang
+  // udah dihitung bisa jadi gak akurat lagi kalau dibiarin kebuka.
+  useEffect(() => {
+    if (!open) return;
+    function close() { setOpen(false); }
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
   return (
-    <div className="relative" onClick={(e) => e.stopPropagation()}>
+    <div onClick={(e) => e.stopPropagation()}>
       <button ref={btnRef} onClick={handleToggle} className="text-slate-400 hover:text-slate-700 p-1.5 -m-1.5 rounded-lg hover:bg-slate-100" title="Menu lainnya">
         <MoreVertical size={18} />
       </button>
-      {open && (
+      {open && pos && createPortal(
+        // Di-render langsung ke document.body (React Portal) -- BUKAN
+        // di dalam struktur tabel -- biar lolos dari wrapper tabel
+        // yang overflow-x-auto (itu ngepotong dropdown ke segala arah,
+        // gak peduli dibuka ke atas/bawah, kalau dropdownnya masih di
+        // dalam wrapper itu).
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={`absolute right-0 w-56 bg-white border border-slate-200 rounded-2xl shadow-lg z-50 py-1 ${openUp ? "bottom-full mb-1" : "top-full mt-1"}`}>
+          <div
+            className="fixed w-56 bg-white border border-slate-200 rounded-2xl shadow-lg z-50 py-1"
+            style={{ top: pos.top, left: pos.left }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <button onClick={() => { setOpen(false); onPrint(); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
               <Printer size={14} /> Cetak Surat Jalan
             </button>
@@ -3712,7 +3736,8 @@ function SupplierBatchOptionsMenu({ onPrint, onEdit, onDelete }) {
               <X size={14} /> Hapus Batch
             </button>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );
