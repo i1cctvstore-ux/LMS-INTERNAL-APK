@@ -70,17 +70,40 @@ export default function KalkulatorMaintenance() {
         .hero-signal small { font-size: 9px !important; }
         .signal-icon { width: 30px !important; height: 30px !important; flex-basis: 30px !important; }
         html, body { overflow: visible !important; }
-        /* Samain warna tombol & badge biar konsisten sama app (yang
-           pakai indigo-600 buat tombol utama, mis. di modul Kas) --
-           bukan navy/gold bawaan file ini. Cuma ganti warna, gak
-           nyentuh ukuran/posisi/logic elemen-elemennya. */
+        /* Samain warna tombol biar konsisten sama app (indigo-600,
+           bukan navy/gold bawaan file ini). */
         .print-button { background: #4f46e5 !important; color: #fff !important; }
         .add-location { background: #eef2ff !important; color: #4f46e5 !important; }
-        .signal-icon { background: #eef2ff !important; color: #4f46e5 !important; }
         .step-next { background: #4f46e5 !important; }
         .step-next:hover { background: #4338ca !important; }
         .step-back { background: #eef2ff !important; color: #4f46e5 !important; }
-        .decision-cockpit { background: #3730a3 !important; border-left-color: #4f46e5 !important; }
+        /* Kotak "Decision Ledger" (.decision-cockpit) tadinya blok
+           navy solid gede -- beda total sama gaya app kamu yang
+           kartu putih + aksen warna pastel lembut (lihat kartu-kartu
+           di Dashboard: background putih, ikon di badge bulat warna
+           muda). Diubah jadi kartu putih dengan border kiri indigo,
+           teks gelap -- MURNI visual, gak nyentuh logic/angka. */
+        .decision-cockpit {
+          background: #fff !important;
+          color: #1e293b !important;
+          border: 1px solid #e5e7eb !important;
+          border-left: 4px solid #4f46e5 !important;
+          box-shadow: 0 1px 2px rgba(0,0,0,.05) !important;
+        }
+        .decision-cockpit strong { color: #1e1b4b !important; }
+        .cockpit-price strong { color: #4f46e5 !important; }
+        .cockpit-price span, .cockpit-metric span { color: #6366f1 !important; }
+        .cockpit-price small, .cockpit-metric small { color: #64748b !important; }
+        .cockpit-price, .cockpit-metric, .cockpit-signals { border-right-color: #e5e7eb !important; }
+        .cockpit-signals { color: #64748b !important; border-color: #e5e7eb !important; }
+        .cockpit-signals i { background: #4f46e5 !important; }
+        .signal-icon { background: #eef2ff !important; color: #4f46e5 !important; }
+        .hero-signal { background: #eef2ff !important; }
+        .hero-signal strong { color: #1e1b4b !important; }
+        .hero-signal span, .hero-signal small { color: #4f46e5 !important; }
+        .decision-cockpit.healthy .cockpit-metric:nth-of-type(4) strong { color: #16a34a !important; }
+        .decision-cockpit.risk .cockpit-metric:nth-of-type(4) strong { color: #dc2626 !important; }
+        .decision-cockpit.watch .cockpit-metric:nth-of-type(4) strong { color: #d97706 !important; }
       `
       doc.head.appendChild(style)
     } catch {
