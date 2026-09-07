@@ -78,12 +78,20 @@ export default function KalkulatorMaintenance() {
   }
 
   return (
-    <iframe
-      ref={iframeRef}
-      onLoad={setupIframe}
-      src="/kalkulator-maintenance-workspace.html"
-      title="Kalkulator Estimasi Maintenance CCTV"
-      className="block w-full border-0"
-    />
+    // Breakout dari padding kiri-kanan shell app -- margin negatif
+    // "nembus" keluar dari padding standar, biar iframe bener-bener
+    // mepet ke tepi (beda dari halaman lain yang sengaja ngikutin
+    // padding shell). Angkanya nebak nilai padding umum (p-4/p-6/p-8) --
+    // kalau ternyata masih ada sisa jarak putih tipis atau malah
+    // kepotong dikit, kasih tau biar disesuaikan lagi.
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8">
+      <iframe
+        ref={iframeRef}
+        onLoad={setupIframe}
+        src="/kalkulator-maintenance-workspace.html"
+        title="Kalkulator Estimasi Maintenance CCTV"
+        className="block w-full border-0"
+      />
+    </div>
   )
 }
