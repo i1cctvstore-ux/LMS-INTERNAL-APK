@@ -18,12 +18,12 @@
 //     kesannya "app di dalam app" -- app kita udah punya sidebar
 //     sendiri) & perkecil beberapa badge yang kegedean, samain warna
 //     tombol biar konsisten sama app.
-//  2. Tinggi iframe DIUKUR OTOMATIS dari sisa ruang layar (bukan
-//     ngikutin tinggi konten kalkulatornya -- itu udah dicoba, tapi
-//     bikin halaman app jadi PANJANG BANGET karena semua 4 langkah
-//     form ke-render jadi 1 halaman nonstop). Jadi iframe punya
-//     tinggi terbatas & scroll SENDIRI di dalamnya -- halaman app
-//     kita tetap pendek/normal kayak halaman lain.
+//  2. Auto-height: iframe-nya NGIKUTIN tinggi konten di dalamnya --
+//     TIDAK ADA scroll sendiri di dalam iframe, yang scroll cuma
+//     halaman app kita aja (1 scrollbar, bukan dobel). Konsekuensinya
+//     halaman app jadi lebih panjang karena semua langkah form
+//     kalkulator ke-render sekaligus -- itu wajar/gak masalah, sesuai
+//     yang diminta (cuma 1 scrollbar, bukan bounded-height).
 // =====================================================
 
 import { useEffect, useRef, useState } from 'react'
@@ -128,29 +128,43 @@ export default function KalkulatorMaintenance() {
            customer. */
         .payment-choice.active { background: #4f46e5 !important; color: #fff !important; }
         .regular-package-actions button.active { background: #4f46e5 !important; color: #fff !important; }
+        html, body { overflow: visible !important; }
       `
       doc.head.appendChild(style)
     } catch {
-      // Gagal suntik CSS gapapa -- iframe tetap tampil normal.
+      // Gagal suntik CSS gapapa -- lanjut ke auto-height di bawah.
+    }
+
+    function resize() {
+      if (!iframe) return
+      const body = doc.body
+      const html = doc.documentElement
+      const h = Math.max(body?.scrollHeight || 0, html?.scrollHeight || 0, body?.offsetHeight || 0, html?.offsetHeight || 0)
+      if (h > 0) iframe.style.height = h + 'px'
+    }
+    resize()
+
+    // Pantau perubahan ukuran konten (user isi form, tambah lokasi,
+    // dst) biar tinggi iframe terus nyesuain -- gak numpuk jadi
+    // scroll internal, tetap cuma 1 scrollbar (punya app).
+    try {
+      const ro = new ResizeObserver(resize)
+      ro.observe(doc.body)
+    } catch {
+      // ResizeObserver gak tersedia (browser sangat lama) -- iframe
+      // tetap kepasang tinggi awalnya, gapapa buat fallback.
     }
   }
 
   return (
     <div ref={wrapperRef} style={breakoutStyle}>
-      {/* Tinggi pakai persentase yang AMAN (sengaja gak 100% ngisi
-          layar) -- beberapa kali coba pakai calc() berdasarkan tinggi
-          header masih suka meleset dikit & bikin scroll dobel lagi.
-          78vh ini sengaja dikasih jarak aman biar dijamin gak pernah
-          overflow, walau artinya nyisa sedikit ruang kosong di bawah. */}
-      <div className="w-full overflow-hidden" style={{ height: '78vh' }}>
-        <iframe
-          ref={iframeRef}
-          onLoad={setupIframe}
-          src="/kalkulator-maintenance-workspace.html"
-          title="Kalkulator Estimasi Maintenance CCTV"
-          className="block h-full w-full border-0"
-        />
-      </div>
+      <iframe
+        ref={iframeRef}
+        onLoad={setupIframe}
+        src="/kalkulator-maintenance-workspace.html"
+        title="Kalkulator Estimasi Maintenance CCTV"
+        className="block w-full border-0"
+      />
     </div>
   )
 }
