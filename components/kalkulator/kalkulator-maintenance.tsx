@@ -25,10 +25,30 @@
 //     user isi form/tambah lokasi.
 // =====================================================
 
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export default function KalkulatorMaintenance() {
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const [breakoutStyle, setBreakoutStyle] = useState<React.CSSProperties>({})
+
+  // Breakout dari padding kiri-kanan shell app -- DIUKUR OTOMATIS dari
+  // padding elemen induknya (bukan nebak angka vh/rem kayak sebelumnya,
+  // yang kemarin kelewat gede & bikin overflow horizontal / scrollbar
+  // di bawah). Jadi presisi pas berapa pun padding shell-nya.
+  useEffect(() => {
+    function updateBreakout() {
+      const parent = wrapperRef.current?.parentElement
+      if (!parent) return
+      const cs = window.getComputedStyle(parent)
+      const pl = parseFloat(cs.paddingLeft) || 0
+      const pr = parseFloat(cs.paddingRight) || 0
+      setBreakoutStyle({ marginLeft: -pl, marginRight: -pr, width: `calc(100% + ${pl + pr}px)` })
+    }
+    updateBreakout()
+    window.addEventListener('resize', updateBreakout)
+    return () => window.removeEventListener('resize', updateBreakout)
+  }, [])
 
   function setupIframe() {
     const iframe = iframeRef.current
@@ -89,13 +109,7 @@ export default function KalkulatorMaintenance() {
   }
 
   return (
-    // Breakout dari padding kiri-kanan shell app -- margin negatif
-    // "nembus" keluar dari padding standar, biar iframe bener-bener
-    // mepet ke tepi (beda dari halaman lain yang sengaja ngikutin
-    // padding shell). Angkanya nebak nilai padding umum (p-4/p-6/p-8) --
-    // kalau ternyata masih ada sisa jarak putih tipis atau malah
-    // kepotong dikit, kasih tau biar disesuaikan lagi.
-    <div className="-mx-4 sm:-mx-6 lg:-mx-8">
+    <div ref={wrapperRef} style={breakoutStyle}>
       <iframe
         ref={iframeRef}
         onLoad={setupIframe}
