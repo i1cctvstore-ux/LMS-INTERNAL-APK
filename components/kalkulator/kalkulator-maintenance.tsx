@@ -50,6 +50,17 @@ export default function KalkulatorMaintenance() {
         .hero-signal small { font-size: 9px !important; }
         .signal-icon { width: 30px !important; height: 30px !important; flex-basis: 30px !important; }
         html, body { overflow: visible !important; }
+        /* Samain warna tombol & badge biar konsisten sama app (yang
+           pakai indigo-600 buat tombol utama, mis. di modul Kas) --
+           bukan navy/gold bawaan file ini. Cuma ganti warna, gak
+           nyentuh ukuran/posisi/logic elemen-elemennya. */
+        .print-button { background: #4f46e5 !important; color: #fff !important; }
+        .add-location { background: #eef2ff !important; color: #4f46e5 !important; }
+        .signal-icon { background: #eef2ff !important; color: #4f46e5 !important; }
+        .step-next { background: #4f46e5 !important; }
+        .step-next:hover { background: #4338ca !important; }
+        .step-back { background: #eef2ff !important; color: #4f46e5 !important; }
+        .decision-cockpit { background: #3730a3 !important; border-left-color: #4f46e5 !important; }
       `
       doc.head.appendChild(style)
     } catch {
