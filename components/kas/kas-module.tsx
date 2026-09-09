@@ -262,7 +262,7 @@ export default function KasModule({
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [searchTerm, setSearchTerm] = useState('')
-  const [range, setRange] = useState<RangeKey>('month')
+  const [range, setRange] = useState<RangeKey>('all')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [sortKey, setSortKey] = useState<
