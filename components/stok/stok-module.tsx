@@ -1550,43 +1550,89 @@ function StokCabangMatrix({ myBranchId }: { myBranchId: string | null }) {
   )
 }
 
+// Brand yang boleh dicoba potong akhiran ukuran microSD kalau SKU Desty
+// gak exact-match ke Master SKU -- brand-brand ini jual varian ukuran
+// microSD sebagai listing/SKU Desty terpisah (mis. "EZVIZ-C6N-2MP-32GB"),
+// padahal stoknya nempel ke 1 kamera fisik yang sama (SKU master-nya
+// "EZVIZ-C6N-2MP" doang, tanpa akhiran ukuran). Brand LAIN TIDAK dicoba
+// potong sama sekali -- kalau gak exact match, langsung dianggap orphan
+// (SKU brand lain kadang kebetulan mirip pola tapi bukan varian kamera,
+// berbahaya kalau dipukul rata). Jangan ubah tanpa alasan kuat -- lihat
+// INSTRUKSI_INTEGRASI_CEK_STOK.md bagian 3.3.
+const DESTY_VARIANT_BRANDS = ['EZVIZ', 'IMOU', 'DAHUA', 'TAPO']
+const DESTY_VARIANT_SUFFIX = /-(32|64|128|256)GB$/i
+
 // ---------- Tab: Desty ----------
 function StokDestyTab() {
   const { rows, loading } = useStokCabangRows()
-  const [destySkuSet, setDestySkuSet] = useState<Set<string>>(new Set())
-  const [destyCount, setDestyCount] = useState(0)
+  const [destySkuList, setDestySkuList] = useState<string[]>([])
   const [showDestyUpload, setShowDestyUpload] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [query, setQuery] = useState('')
 
   async function loadDestyList() {
     try {
-      const skus = await loadDestyListedSkus()
-      setDestySkuSet(new Set(skus.map((s) => normalizeSku(s))))
-      setDestyCount(skus.length)
+      setDestySkuList(await loadDestyListedSkus())
     } catch {
-      setDestySkuSet(new Set())
-      setDestyCount(0)
+      setDestySkuList([])
     }
   }
   useEffect(() => { loadDestyList() }, [])
 
-  // Produk yang SKU-nya ada di daftar Desty — ini yang ditampilkan
-  // sebagai "list barang yang ada di Desty" di tab ini.
+  const destyCount = destySkuList.length
+
+  // Peta SKU (dinormalisasi) -> baris produk, buat lookup exact match.
+  const productBySku = useMemo(() => {
+    const map = new Map<string, (typeof rows)[number]>()
+    rows.forEach((r) => {
+      if (r.sku) map.set(normalizeSku(r.sku), r)
+    })
+    return map
+  }, [rows])
+
+  // Cocokin TIAP SKU Desty (bukan tiap produk kita lagi) ke produk yang
+  // ada -- 1 SKU Desty = 1 baris hasil, walau beberapa SKU Desty (varian
+  // -32GB/-64GB/dst) berujung nempel ke produk fisik yang sama. Exact
+  // match dicoba dulu; kalau gagal & brand-nya termasuk
+  // DESTY_VARIANT_BRANDS, coba lagi setelah akhiran ukurannya dibuang.
+  const { matched, orphanCount } = useMemo(() => {
+    const list: { destySku: string; row: (typeof rows)[number] }[] = []
+    let orphans = 0
+    destySkuList.forEach((raw) => {
+      let row = productBySku.get(normalizeSku(raw))
+      if (!row) {
+        const upper = raw.trim().toUpperCase()
+        const isVariantBrand = DESTY_VARIANT_BRANDS.some((b) => upper.startsWith(b))
+        if (isVariantBrand && DESTY_VARIANT_SUFFIX.test(upper)) {
+          row = productBySku.get(normalizeSku(raw.replace(DESTY_VARIANT_SUFFIX, '')))
+        }
+      }
+      if (row) list.push({ destySku: raw, row })
+      else orphans += 1
+    })
+    return { matched: list, orphanCount: orphans }
+  }, [destySkuList, productBySku])
+
+  // Produk (sebenarnya: SKU Desty yang udah ketemu pasangannya) yang
+  // ditampilkan sebagai "list barang yang ada di Desty" di tab ini.
   const destyRows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    let base = rows.filter((r) => r.sku && destySkuSet.has(normalizeSku(r.sku)))
-    if (q) base = base.filter((r) => `${r.name} ${r.sku}`.toLowerCase().includes(q))
-    return base.sort((a, b) => a.name.localeCompare(b.name))
-  }, [rows, destySkuSet, query])
+    let base = matched
+    if (q) base = base.filter(({ destySku, row }) => `${row.name} ${row.sku} ${destySku}`.toLowerCase().includes(q))
+    return base.sort((a, b) => a.row.name.localeCompare(b.row.name))
+  }, [matched, query])
 
-  // Ekspor format "Bulk Update On-Hand Stock" Desty — cuma produk yang
-  // SKU-nya ada di daftar destySkuSet (hasil upload "List SKU Desty"),
-  // TERMASUK yang stoknya 0 (biar Desty tau itemnya emang habis, bukan
-  // gak ke-export). Dikelompokkan per kota (blok Jakarta dulu, baru
-  // Solo, Bali, Purwokerto — BUKAN diselang-seling), semua di 1 sheet,
-  // header & merge cell dibikin match persis template resmi Desty biar
-  // bisa langsung diimport balik.
+  // Ekspor format "Bulk Update On-Hand Stock" Desty — cuma SKU Desty
+  // yang ketemu pasangannya (destyRows), TERMASUK yang stoknya 0 (biar
+  // Desty tau itemnya emang habis, bukan gak ke-export). Kolom SKU yang
+  // diekspor = SKU Desty ASLI (bukan SKU master) -- soalnya tiap varian
+  // (-32GB/-64GB/dst) itu listing SENDIRI di sisi Desty, jadi harus
+  // diidentifikasi pakai SKU Desty-nya masing-masing biar stoknya
+  // ke-update ke listing yang benar, walau angkanya sama-sama ngikutin
+  // stok fisik 1 kamera yang sama. Dikelompokkan per kota (blok Jakarta
+  // dulu, baru Solo, Bali, Purwokerto — BUKAN diselang-seling), semua di
+  // 1 sheet, header & merge cell dibikin match persis template resmi
+  // Desty biar bisa langsung diimport balik.
   function exportToDesty() {
     if (destyRows.length === 0) {
       setMessage('Belum ada produk yang cocok dengan daftar SKU Desty — upload daftarnya dulu lewat tombol "Upload List SKU Desty".')
@@ -1608,8 +1654,8 @@ function StokDestyTab() {
 
     const dataRows: (string | number)[][] = []
     CITY_GROUPS.forEach((group) => {
-      destyRows.forEach((r) => {
-        dataRows.push([r.name, r.sku, DESTY_GUDANG_ID[group], group, '', '', r.cityTotal[group] ?? 0, ''])
+      destyRows.forEach(({ destySku, row }) => {
+        dataRows.push([row.name, destySku, DESTY_GUDANG_ID[group], group, '', '', row.cityTotal[group] ?? 0, ''])
       })
     })
 
@@ -1665,7 +1711,10 @@ function StokDestyTab() {
           </span>
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-800">Barang yang Ada di Desty</div>
-            <div className="text-xs text-slate-400">{destyRows.length} dari {destyCount} SKU terdaftar ketemu di katalog kita</div>
+            <div className="text-xs text-slate-400">
+              {destyRows.length} dari {destyCount} SKU terdaftar ketemu di katalog kita
+              {orphanCount > 0 && <span className="text-amber-600"> · {orphanCount} belum ketemu</span>}
+            </div>
           </div>
         </div>
 
@@ -1685,17 +1734,22 @@ function StokDestyTab() {
                 </tr>
               </thead>
               <tbody>
-                {destyRows.map((r) => (
-                  <tr key={r.productId} className="border-b border-slate-50">
+                {destyRows.map(({ destySku, row }) => (
+                  <tr key={destySku} className="border-b border-slate-50">
                     <td className="p-3">
-                      <div className="font-medium text-slate-800">{r.name}</div>
-                      {r.subjenis && <div className="text-xs text-slate-400">{r.subjenis}</div>}
+                      <div className="font-medium text-slate-800">{row.name}</div>
+                      {row.subjenis && <div className="text-xs text-slate-400">{row.subjenis}</div>}
                     </td>
-                    <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{r.sku || '-'}</td>
+                    <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">
+                      {destySku}
+                      {normalizeSku(destySku) !== normalizeSku(row.sku || '') && (
+                        <span className="block text-[10px] text-slate-400 normal-case">→ {row.sku}</span>
+                      )}
+                    </td>
                     {CITY_GROUPS.map((g) => (
-                      <td key={g} className="p-3 text-center text-slate-700">{r.cityTotal[g]}</td>
+                      <td key={g} className="p-3 text-center text-slate-700">{row.cityTotal[g]}</td>
                     ))}
-                    <td className="p-3 text-center font-semibold text-slate-800">{r.total}</td>
+                    <td className="p-3 text-center font-semibold text-slate-800">{row.total}</td>
                   </tr>
                 ))}
                 {destyRows.length === 0 && (
