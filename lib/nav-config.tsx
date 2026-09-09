@@ -17,6 +17,7 @@ import {
   HandCoins,
   PiggyBank,
   FileText,
+  ClipboardCheck,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/types'
@@ -32,6 +33,7 @@ export type PageKey =
   | 'qb-katalog'
   | 'proyek'
   | 'stok'
+  | 'stok-opname'
   | 'servis-claim'
   | 'servis-supplier'
   | 'servis-inventaris'
@@ -155,6 +157,15 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Stok',
     description: 'Kelola inventaris perangkat CCTV',
     icon: Boxes,
+  },
+  {
+    key: 'stok-opname',
+    label: 'Stock Opname',
+    description: 'Sesi hitung fisik stok per cabang, bandingkan saldo sistem vs hasil hitung',
+    icon: ClipboardCheck,
+    // Cuma admin & super_admin -- gudang/kasir/teknisi gak lihat menu
+    // ini sama sekali.
+    roles: ['super_admin', 'admin'],
   },
   // ---------- Servis (dulu 1 menu dengan tab di dalamnya, sekarang
   // 5 menu terpisah langsung di sidebar utama) ----------
