@@ -997,3 +997,25 @@
 .qb-root .catalog-brand { font-size: 12px !important; }
 .qb-root .readonly-badge { font-size: 12px !important; }
 .qb-root .catalog-foot { font-size: 12px !important; }
+
+/* =====================================================
+   Tambahan (2026-09, ronde 2): sisa teks kecil di halaman Katalog
+   Produk yang belum ke-cover ronde pertama (eyebrow label, badge
+   hijau sinkronisasi, deskripsi, kotak pencarian), plus benerin gap
+   kosong di atas "Katalog Produk" (asalnya padding-top 38px bawaan
+   .catalog-hero numpuk sama padding shell app kita).
+   ===================================================== */
+.qb-root .eyebrow { font-size: 12px !important; }
+.qb-root .sync-catalog-card span { font-size: 11px !important; }
+.qb-root .sync-catalog-card strong { font-size: 13px !important; }
+.qb-root .catalog-card-head p { font-size: 13px !important; }
+.qb-root .catalog-card-head h2 { font-size: 20px !important; }
+.qb-root .list-search input { font-size: 14px !important; }
+.qb-root .catalog-page-v2 .sync-operation-copy > span { font-size: 11px !important; }
+.qb-root .catalog-page-v2 .sync-operation-copy p { font-size: 13px !important; }
+.qb-root .catalog-page-v2 .sync-operation-copy h2 { font-size: 19px !important; }
+.qb-root .catalog-hero h1 { font-size: 30px !important; }
+.qb-root .catalog-hero {
+  padding-top: 4px !important;
+  padding-bottom: 16px !important;
+}
