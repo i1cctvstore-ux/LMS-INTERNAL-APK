@@ -86,6 +86,26 @@ export default function KalkulatorMaintenance() {
         .cockpit-signals { font-size: 11px !important; }
         .step-tabs, .payment-choice, .payment-choice b { font-size: 13px !important; }
         .quote-summary-tag, .quote-summary-label { font-size: 12px !important; }
+        /* Ronde 2 -- kelas <span>/<div> kecil yang kelewat dari
+           override generik (body/label/td/dst) sebelumnya, soalnya
+           itu cuma nyasar ke TAG tertentu, gak nyentuh class span/div
+           custom kayak ini. Cuma bagian wizard/UI interaktif yang
+           dibenerin -- bagian dokumen quotation final (buat
+           di-print/kirim customer) SENGAJA dibiarin, sama kayak
+           keputusan warna sebelumnya (dokumen resmi wajar beda
+           konvensi ukuran dari UI app). */
+        .eyebrow { font-size: 12px !important; }
+        .crumb { font-size: 12px !important; }
+        .decision-caption { font-size: 12px !important; }
+        .decision-top { font-size: 11px !important; }
+        .decision-tier { font-size: 12px !important; }
+        .hero-copy { font-size: 13px !important; }
+        .tier-card-top { font-size: 11px !important; }
+        .tier-sub { font-size: 11px !important; }
+        .date-helper { font-size: 12px !important; }
+        .margin-note { font-size: 12px !important; }
+        .location-note { font-size: 12px !important; }
+        .top-actions { font-size: 12px !important; }
         /* Samain warna tombol biar konsisten sama app (indigo-600,
            bukan navy/gold bawaan file ini). */
         .print-button { background: #4f46e5 !important; color: #fff !important; }
