@@ -12,6 +12,7 @@ import StokModule from '@/components/stok/stok-module'
 import KasModule from '@/components/kas/kas-module'
 import KalkulatorMaintenance from '@/components/kalkulator/kalkulator-maintenance'
 import QuoteBuilderModule from '@/components/quote-builder/QuoteBuilderModule'
+import StockOpnamePage from '@/components/stok-opname/stock-opname-page'
 import { LmsMaterials } from '@/components/lms/lms-materials'
 import { LmsVerifikasi } from '@/components/lms/lms-verifikasi'
 import { ModulePlaceholder } from '@/components/module-placeholder'
@@ -111,6 +112,15 @@ export default function Page() {
             currentUserName={profile!.name}
             currentUserRole={profile!.role}
             currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'stok-opname':
+        return (
+          <StockOpnamePage
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id || ''}
           />
         )
       case 'cabang':
