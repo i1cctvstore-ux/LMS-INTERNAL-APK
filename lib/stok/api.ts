@@ -1326,3 +1326,96 @@ export async function fixAllNameMismatches(rows: NameCheckRow[]): Promise<void> 
     if (error) throw new Error(error.message)
   }
 }
+
+// =====================================================
+// Stok Menipis — 3 kartu ("Baru Menipis Hari Ini", "Menunggu Diubah di
+// Accurate", "Discontinue/No Stock — Stok Menipis"). Lihat
+// INSTRUKSI_INTEGRASI_CEK_STOK.md bagian 3.4 & 4 buat spesifikasinya.
+// =====================================================
+
+export type MenipisAktifRow = {
+  sku: string
+  kota: string
+  qtySebelum: number
+  pertamaTerpicuAt: string
+  terakhirDicekAt: string
+}
+
+export type MenipisDismissedRow = {
+  sku: string
+  kotaSnapshot: string[]
+}
+
+export type StokDiscontinueRow = {
+  sku: string
+  ditandaiAt: string
+}
+
+// Bandingin qty SEKARANG (dari useStokCabangRows, sumbernya sama kayak
+// tab Stok Cabang) ke snapshot refresh SEBELUMNYA -- deteksi transisi
+// naik/turun ambang <=1, catat ke menipis_kota_aktif. Dikirim per-batch
+// (bukan sekali ~5600 baris) biar aman ukuran payload RPC.
+export async function refreshMenipisTracking(items: { sku: string; kota: string; qty: number }[]): Promise<void> {
+  const supabase = createClient()
+  const CHUNK = 500
+  for (let i = 0; i < items.length; i += CHUNK) {
+    const chunk = items.slice(i, i + CHUNK).filter((it) => it.sku)
+    if (chunk.length === 0) continue
+    const { error } = await supabase.rpc('refresh_menipis_tracking', { p_rows: chunk })
+    if (error) throw new Error(error.message)
+  }
+}
+
+export async function loadMenipisKotaAktif(): Promise<MenipisAktifRow[]> {
+  const supabase = createClient()
+  const out: MenipisAktifRow[] = []
+  const PAGE = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('menipis_kota_aktif')
+      .select('sku, kota, qty_sebelum, pertama_terpicu_at, terakhir_dicek_at')
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    ;(data || []).forEach((r: any) =>
+      out.push({ sku: r.sku, kota: r.kota, qtySebelum: r.qty_sebelum, pertamaTerpicuAt: r.pertama_terpicu_at, terakhirDicekAt: r.terakhir_dicek_at }),
+    )
+    if (!data || data.length < PAGE) break
+    from += PAGE
+  }
+  return out
+}
+
+export async function loadStokDitandaiDiscontinue(): Promise<StokDiscontinueRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.from('stok_ditandai_discontinue').select('sku, ditandai_at')
+  if (error) throw new Error(error.message)
+  return (data || []).map((r: any) => ({ sku: r.sku, ditandaiAt: r.ditandai_at }))
+}
+
+export async function loadMenipisDismissed(): Promise<MenipisDismissedRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.from('menipis_dismissed').select('sku, kota_snapshot')
+  if (error) throw new Error(error.message)
+  return (data || []).map((r: any) => ({ sku: r.sku, kotaSnapshot: r.kota_snapshot || [] }))
+}
+
+export async function tandaiStokDiscontinue(skus: string[]): Promise<void> {
+  const supabase = createClient()
+  if (skus.length === 0) return
+  const { error } = await supabase.rpc('tandai_stok_discontinue', { p_skus: skus })
+  if (error) throw new Error(error.message)
+}
+
+export async function dismissMenipis(items: { sku: string; kota: string[] }[]): Promise<void> {
+  const supabase = createClient()
+  if (items.length === 0) return
+  const { error } = await supabase.rpc('dismiss_menipis', { p_items: items })
+  if (error) throw new Error(error.message)
+}
+
+export async function cleanupStokDitandaiDiscontinue(): Promise<void> {
+  const supabase = createClient()
+  const { error } = await supabase.rpc('cleanup_stok_ditandai_discontinue')
+  if (error) throw new Error(error.message)
+}
