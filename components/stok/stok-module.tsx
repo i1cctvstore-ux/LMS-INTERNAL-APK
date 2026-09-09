@@ -60,9 +60,12 @@ import {
   type GudangColumnChoice,
 } from '@/lib/stok/parse-supplier-file'
 import { loadTransferBalanceMatrix } from '@/lib/stok/transfer-api'
+import StockOpnameTab from '@/components/stok/stock-opname-tab'
 import * as XLSX from 'xlsx'
 
 type StokModuleProps = {
+  currentUserId: string
+  currentUserName: string
   currentUserRole: string
   currentUserBranchId: string | null
 }
@@ -2323,11 +2326,22 @@ function StokMenipisTab() {
   )
 }
 
-export default function StokModule({ currentUserBranchId }: StokModuleProps) {
-  const [activeTab, setActiveTab] = useState<'cabang' | 'supplier' | 'desty' | 'menipis'>('cabang')
+export default function StokModule({ currentUserId, currentUserName, currentUserRole, currentUserBranchId }: StokModuleProps) {
+  const [activeTab, setActiveTab] = useState<'cabang' | 'supplier' | 'desty' | 'menipis' | 'opname'>('cabang')
   const [showRiwayat, setShowRiwayat] = useState(false)
   const [syncLogs, setSyncLogs] = useState<SyncLogRow[]>([])
   const [uploadLogs, setUploadLogs] = useState<UploadLogRow[]>([])
+  const [opnameBranches, setOpnameBranches] = useState<{ id: string; name: string }[]>([])
+
+  // Tab "Stock Opname" cuma buat admin & super_admin -- gudang gak
+  // lihat sama sekali (beda dari tab lain yang kebuka buat gudang juga).
+  const canSeeOpname = currentUserRole === 'admin' || currentUserRole === 'super_admin'
+
+  useEffect(() => {
+    if (activeTab === 'opname' && opnameBranches.length === 0) {
+      loadAllBranches().then((b) => setOpnameBranches(b.map((x) => ({ id: x.id, name: x.name })))).catch(() => {})
+    }
+  }, [activeTab, opnameBranches.length])
 
   async function openRiwayat() {
     setShowRiwayat(true)
@@ -2371,6 +2385,14 @@ export default function StokModule({ currentUserBranchId }: StokModuleProps) {
           >
             Menipis
           </button>
+          {canSeeOpname && (
+            <button
+              onClick={() => setActiveTab('opname')}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium ${activeTab === 'opname' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}
+            >
+              Stock Opname
+            </button>
+          )}
         </div>
         <button onClick={openRiwayat} className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}>
           <Clock size={14} /> Riwayat
@@ -2383,8 +2405,16 @@ export default function StokModule({ currentUserBranchId }: StokModuleProps) {
         <StokSupplierTab />
       ) : activeTab === 'desty' ? (
         <StokDestyTab />
-      ) : (
+      ) : activeTab === 'menipis' ? (
         <StokMenipisTab />
+      ) : (
+        <StockOpnameTab
+          currentUserId={currentUserId}
+          currentUserName={currentUserName}
+          currentUserRole={currentUserRole as any}
+          currentUserBranchId={currentUserBranchId || ''}
+          branches={opnameBranches}
+        />
       )}
 
       {showRiwayat && <RiwayatModal syncLogs={syncLogs} uploadLogs={uploadLogs} onClose={() => setShowRiwayat(false)} />}
