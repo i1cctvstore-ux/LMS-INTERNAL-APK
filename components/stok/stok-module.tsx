@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   Search, RefreshCw, Clock, CheckCircle2, XCircle, Loader2, Upload, X, PackageSearch,
-  ChevronUp, ChevronDown, ChevronsUpDown, FileSpreadsheet, Zap, SlidersHorizontal, RotateCcw, Check, Download,
+  ChevronUp, ChevronDown, ChevronsUpDown, FileSpreadsheet, Zap, SlidersHorizontal, RotateCcw, Check, Download, AlertTriangle,
 } from 'lucide-react'
 import {
   loadAllBranches,
@@ -29,6 +29,16 @@ import {
   normalizeSku,
   loadDestyListedSkus,
   replaceDestyListedSkus,
+  refreshMenipisTracking,
+  loadMenipisKotaAktif,
+  loadStokDitandaiDiscontinue,
+  loadMenipisDismissed,
+  tandaiStokDiscontinue,
+  dismissMenipis,
+  cleanupStokDitandaiDiscontinue,
+  type MenipisAktifRow,
+  type MenipisDismissedRow,
+  type StokDiscontinueRow,
   type BranchOption,
   type StockMatrixData,
   type SyncLogRow,
@@ -1928,8 +1938,393 @@ function StokSupplierTab() {
   )
 }
 
+function sameKotaSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const sa = [...a].sort()
+  const sb = [...b].sort()
+  return sa.every((v, i) => v === sb[i])
+}
+
+type MenipisSkuGroup = {
+  sku: string
+  name: string
+  subjenis: string | null
+  kotaAktif: string[]
+  qtySebelumByKota: Record<string, number>
+  menipisSejak: string
+  cityTotal: Record<string, number>
+  total: number
+}
+
+// ---------- Tab: Menipis (3 kartu) ----------
+function StokMenipisTab() {
+  const { rows, loading: loadingRows } = useStokCabangRows()
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [aktif, setAktif] = useState<MenipisAktifRow[]>([])
+  const [discontinue, setDiscontinue] = useState<StokDiscontinueRow[]>([])
+  const [dismissed, setDismissed] = useState<MenipisDismissedRow[]>([])
+  const [loadingCards, setLoadingCards] = useState(true)
+  const [selected1, setSelected1] = useState<Set<string>>(new Set())
+  const [selected3, setSelected3] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [didRefresh, setDidRefresh] = useState(false)
+
+  async function loadCardData() {
+    setLoadingCards(true)
+    try {
+      await cleanupStokDitandaiDiscontinue().catch(() => {})
+      const [a, d, ds] = await Promise.all([loadMenipisKotaAktif(), loadStokDitandaiDiscontinue(), loadMenipisDismissed()])
+      setAktif(a)
+      setDiscontinue(d)
+      setDismissed(ds)
+    } catch (e: any) {
+      setMessage(`Gagal memuat data Menipis: ${e?.message || e}`)
+    } finally {
+      setLoadingCards(false)
+    }
+  }
+
+  // Begitu data Stok Cabang (rows) kelar dimuat, bandingin qty
+  // SEKARANG ke snapshot refresh terakhir (sekali per kali tab ini
+  // dibuka) -- ini yang mendeteksi "baru menipis hari ini" / "udah
+  // naik lagi". Lihat catatan di migration SQL soal trade-off ini.
+  useEffect(() => {
+    if (loadingRows || didRefresh || rows.length === 0) return
+    setDidRefresh(true)
+    setRefreshing(true)
+    setRefreshError(null)
+    const payload: { sku: string; kota: string; qty: number }[] = []
+    rows.forEach((r) => {
+      if (!r.sku) return
+      CITY_GROUPS.forEach((g) => payload.push({ sku: r.sku, kota: g, qty: r.cityTotal[g] ?? 0 }))
+    })
+    refreshMenipisTracking(payload)
+      .then(() => loadCardData())
+      .catch((e: any) => setRefreshError(`Gagal refresh deteksi menipis: ${e?.message || e}`))
+      .finally(() => setRefreshing(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingRows, rows])
+
+  const rowBySku = useMemo(() => {
+    const map = new Map<string, (typeof rows)[number]>()
+    rows.forEach((r) => { if (r.sku) map.set(normalizeSku(r.sku), r) })
+    return map
+  }, [rows])
+
+  const discontinueSkuSet = useMemo(() => new Set(discontinue.map((d) => normalizeSku(d.sku))), [discontinue])
+
+  // Kelompokkin baris aktif per SKU (1 SKU bisa aktif di >1 kota).
+  const groupedBySku = useMemo(() => {
+    const map = new Map<string, MenipisSkuGroup>()
+    aktif.forEach((a) => {
+      const key = normalizeSku(a.sku)
+      const row = rowBySku.get(key)
+      if (!row) return // produk gak ketemu di katalog kita saat ini, skip
+      let g = map.get(key)
+      if (!g) {
+        g = { sku: row.sku, name: row.name, subjenis: row.subjenis, kotaAktif: [], qtySebelumByKota: {}, menipisSejak: a.pertamaTerpicuAt, cityTotal: row.cityTotal, total: row.total }
+        map.set(key, g)
+      }
+      g.kotaAktif.push(a.kota)
+      g.qtySebelumByKota[a.kota] = a.qtySebelum
+      if (a.pertamaTerpicuAt > g.menipisSejak) g.menipisSejak = a.pertamaTerpicuAt
+    })
+    return map
+  }, [aktif, rowBySku])
+
+  // Kartu 1: kategori normal (bukan No Stock) DAN belum ditandai discontinue.
+  const kartu1 = useMemo(() => {
+    return Array.from(groupedBySku.values())
+      .filter((g) => {
+        const row = rowBySku.get(normalizeSku(g.sku))
+        const isNoStock = (row?.kategori || '').trim().toLowerCase() === 'no stock'
+        return !isNoStock && !discontinueSkuSet.has(normalizeSku(g.sku))
+      })
+      .sort((a, b) => b.menipisSejak.localeCompare(a.menipisSejak))
+  }, [groupedBySku, rowBySku, discontinueSkuSet])
+
+  // Kartu 3: kategori No Stock ATAU udah ditandai discontinue, MINUS
+  // yang kombinasi kota aktifnya SAMA PERSIS kayak yang udah di-dismiss.
+  const kartu3 = useMemo(() => {
+    return Array.from(groupedBySku.values())
+      .filter((g) => {
+        const row = rowBySku.get(normalizeSku(g.sku))
+        const isNoStock = (row?.kategori || '').trim().toLowerCase() === 'no stock'
+        const isDiscontinued = discontinueSkuSet.has(normalizeSku(g.sku))
+        if (!isNoStock && !isDiscontinued) return false
+        const dismiss = dismissed.find((d) => normalizeSku(d.sku) === normalizeSku(g.sku) && sameKotaSet(d.kotaSnapshot, g.kotaAktif))
+        return !dismiss
+      })
+      .sort((a, b) => b.menipisSejak.localeCompare(a.menipisSejak))
+  }, [groupedBySku, rowBySku, discontinueSkuSet, dismissed])
+
+  // Kartu 2: langsung dari daftar discontinue (read-only, gak ada bulk action).
+  const kartu2 = useMemo(() => {
+    return discontinue
+      .map((d) => {
+        const row = rowBySku.get(normalizeSku(d.sku))
+        return { sku: d.sku, name: row?.name || d.sku, ditandaiAt: d.ditandaiAt }
+      })
+      .sort((a, b) => b.ditandaiAt.localeCompare(a.ditandaiAt))
+  }, [discontinue, rowBySku])
+
+  async function handleTandaiDiscontinue() {
+    if (selected1.size === 0) return
+    setBusy(true)
+    try {
+      await tandaiStokDiscontinue(Array.from(selected1))
+      setSelected1(new Set())
+      await loadCardData()
+      setMessage(`${selected1.size} SKU dipindah ke "Menunggu Diubah di Accurate".`)
+    } catch (e: any) {
+      setMessage(`Gagal menandai discontinue: ${e?.message || e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDismiss() {
+    if (selected3.size === 0) return
+    setBusy(true)
+    try {
+      const items = Array.from(selected3).map((sku) => {
+        const g = kartu3.find((k) => k.sku === sku)
+        return { sku, kota: g?.kotaAktif || [] }
+      })
+      await dismissMenipis(items)
+      setSelected3(new Set())
+      await loadCardData()
+      setMessage(`${items.length} SKU ditandai sudah dipantau.`)
+    } catch (e: any) {
+      setMessage(`Gagal menandai sudah dipantau: ${e?.message || e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const busyLoading = loadingRows || loadingCards || refreshing
+
+  return (
+    <div>
+      {refreshing && (
+        <div className="mb-3 p-3 rounded-2xl bg-indigo-50 border border-indigo-100 text-sm text-indigo-700 flex items-center gap-2">
+          <Loader2 className="animate-spin" size={14} /> Ngecek perubahan stok terbaru...
+        </div>
+      )}
+      {refreshError && <div className="mb-3 p-3 rounded-2xl bg-red-50 border border-red-200 text-sm text-red-600">{refreshError}</div>}
+      {message && (
+        <div className="mb-3 p-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-600 flex items-center justify-between gap-2">
+          <span>{message}</span>
+          <button onClick={() => setMessage(null)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+        </div>
+      )}
+
+      {/* Kartu 1 */}
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden mb-4">
+        <div className="flex items-center justify-between gap-2.5 p-4 border-b border-slate-100 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
+              <AlertTriangle size={18} />
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-slate-800">Baru Menipis Hari Ini ({kartu1.length})</div>
+              <div className="text-xs text-slate-400">Stok ≤1 di salah satu/lebih kota, belum ditandai discontinue</div>
+            </div>
+          </div>
+          {selected1.size > 0 && (
+            <button onClick={handleTandaiDiscontinue} disabled={busy} className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnPrimaryCls} disabled:opacity-40`}>
+              Tandai Discontinue/No Stock ({selected1.size})
+            </button>
+          )}
+        </div>
+        {busyLoading ? (
+          <div className="p-8 text-center text-slate-400"><Loader2 className="inline animate-spin mr-2" size={14} /> Memuat...</div>
+        ) : kartu1.length === 0 ? (
+          <div className="p-8 text-center text-slate-400 text-sm">Gak ada SKU yang baru menipis. 🎉</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide">
+                  <th className="p-3 w-8">
+                    <input
+                      type="checkbox"
+                      checked={selected1.size === kartu1.length && kartu1.length > 0}
+                      onChange={(e) => setSelected1(e.target.checked ? new Set(kartu1.map((k) => k.sku)) : new Set())}
+                    />
+                  </th>
+                  <th className="p-3">Nama Produk</th>
+                  <th className="p-3">SKU</th>
+                  <th className="p-3">Kota Menipis</th>
+                  {CITY_GROUPS.map((g) => <th key={g} className="p-3 text-center">{CITY_SHORT[g]}</th>)}
+                  <th className="p-3 text-center">Total</th>
+                  <th className="p-3">Menipis Sejak</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kartu1.map((k) => (
+                  <tr key={k.sku} className="border-b border-slate-50">
+                    <td className="p-3">
+                      <input
+                        type="checkbox"
+                        checked={selected1.has(k.sku)}
+                        onChange={(e) => {
+                          const next = new Set(selected1)
+                          if (e.target.checked) next.add(k.sku); else next.delete(k.sku)
+                          setSelected1(next)
+                        }}
+                      />
+                    </td>
+                    <td className="p-3">
+                      <div className="font-medium text-slate-800">{k.name}</div>
+                      {k.subjenis && <div className="text-xs text-slate-400">{k.subjenis}</div>}
+                    </td>
+                    <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{k.sku}</td>
+                    <td className="p-3 text-amber-700 font-medium">{k.kotaAktif.join(', ')}</td>
+                    {CITY_GROUPS.map((g) => (
+                      <td key={g} className="p-3 text-center">
+                        {k.kotaAktif.includes(g) ? (
+                          <span className="text-amber-700 font-medium">{k.qtySebelumByKota[g]} → {k.cityTotal[g]}</span>
+                        ) : (
+                          <span className="text-slate-600">{k.cityTotal[g]}</span>
+                        )}
+                      </td>
+                    ))}
+                    <td className="p-3 text-center font-semibold text-slate-800">{k.total}</td>
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDateTime(k.menipisSejak)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Kartu 2 */}
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden mb-4">
+        <div className="flex items-center gap-2.5 p-4 border-b border-slate-100">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+            <Clock size={18} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-slate-800">Menunggu Diubah di Accurate ({kartu2.length})</div>
+            <div className="text-xs text-slate-400">Read-only — otomatis hilang begitu kategori di Accurate udah beneran diubah jadi Discontinue/No Stock</div>
+          </div>
+        </div>
+        {kartu2.length === 0 ? (
+          <div className="p-8 text-center text-slate-400 text-sm">Gak ada yang lagi ditunggu.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide">
+                  <th className="p-3">Nama Produk</th>
+                  <th className="p-3">SKU</th>
+                  <th className="p-3">Ditandai Sejak</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kartu2.map((k) => (
+                  <tr key={k.sku} className="border-b border-slate-50">
+                    <td className="p-3 font-medium text-slate-800">{k.name}</td>
+                    <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{k.sku}</td>
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDateTime(k.ditandaiAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Kartu 3 */}
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
+        <div className="flex items-center justify-between gap-2.5 p-4 border-b border-slate-100 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+              <PackageSearch size={18} />
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-slate-800">Discontinue/No Stock — Stok Menipis ({kartu3.length})</div>
+              <div className="text-xs text-slate-400">Info doang, gak butuh keputusan restock</div>
+            </div>
+          </div>
+          {selected3.size > 0 && (
+            <button onClick={handleDismiss} disabled={busy} className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}>
+              Tandai Sudah Dipantau ({selected3.size})
+            </button>
+          )}
+        </div>
+        {busyLoading ? (
+          <div className="p-8 text-center text-slate-400"><Loader2 className="inline animate-spin mr-2" size={14} /> Memuat...</div>
+        ) : kartu3.length === 0 ? (
+          <div className="p-8 text-center text-slate-400 text-sm">Gak ada.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs text-slate-400 uppercase tracking-wide">
+                  <th className="p-3 w-8">
+                    <input
+                      type="checkbox"
+                      checked={selected3.size === kartu3.length && kartu3.length > 0}
+                      onChange={(e) => setSelected3(e.target.checked ? new Set(kartu3.map((k) => k.sku)) : new Set())}
+                    />
+                  </th>
+                  <th className="p-3">Nama Produk</th>
+                  <th className="p-3">SKU</th>
+                  <th className="p-3">Status</th>
+                  <th className="p-3">Kota Menipis</th>
+                  {CITY_GROUPS.map((g) => <th key={g} className="p-3 text-center">{CITY_SHORT[g]}</th>)}
+                  <th className="p-3 text-center">Total</th>
+                  <th className="p-3">Menipis Sejak</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kartu3.map((k) => (
+                  <tr key={k.sku} className="border-b border-slate-50">
+                    <td className="p-3">
+                      <input
+                        type="checkbox"
+                        checked={selected3.has(k.sku)}
+                        onChange={(e) => {
+                          const next = new Set(selected3)
+                          if (e.target.checked) next.add(k.sku); else next.delete(k.sku)
+                          setSelected3(next)
+                        }}
+                      />
+                    </td>
+                    <td className="p-3">
+                      <div className="font-medium text-slate-800">{k.name}</div>
+                      {k.subjenis && <div className="text-xs text-slate-400">{k.subjenis}</div>}
+                    </td>
+                    <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{k.sku}</td>
+                    <td className="p-3">
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                        {discontinueSkuSet.has(normalizeSku(k.sku)) ? 'Discontinue' : 'No Stock'}
+                      </span>
+                    </td>
+                    <td className="p-3 text-slate-600">{k.kotaAktif.join(', ')}</td>
+                    {CITY_GROUPS.map((g) => (
+                      <td key={g} className="p-3 text-center text-slate-600">{k.cityTotal[g]}</td>
+                    ))}
+                    <td className="p-3 text-center font-semibold text-slate-800">{k.total}</td>
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDateTime(k.menipisSejak)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function StokModule({ currentUserBranchId }: StokModuleProps) {
-  const [activeTab, setActiveTab] = useState<'cabang' | 'supplier' | 'desty'>('cabang')
+  const [activeTab, setActiveTab] = useState<'cabang' | 'supplier' | 'desty' | 'menipis'>('cabang')
   const [showRiwayat, setShowRiwayat] = useState(false)
   const [syncLogs, setSyncLogs] = useState<SyncLogRow[]>([])
   const [uploadLogs, setUploadLogs] = useState<UploadLogRow[]>([])
@@ -1970,13 +2365,27 @@ export default function StokModule({ currentUserBranchId }: StokModuleProps) {
           >
             Desty
           </button>
+          <button
+            onClick={() => setActiveTab('menipis')}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium ${activeTab === 'menipis' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}
+          >
+            Menipis
+          </button>
         </div>
         <button onClick={openRiwayat} className={`flex items-center gap-1.5 px-3 py-2 text-sm ${btnSecondaryCls}`}>
           <Clock size={14} /> Riwayat
         </button>
       </div>
 
-      {activeTab === 'cabang' ? <StokCabangMatrix myBranchId={currentUserBranchId} /> : activeTab === 'supplier' ? <StokSupplierTab /> : <StokDestyTab />}
+      {activeTab === 'cabang' ? (
+        <StokCabangMatrix myBranchId={currentUserBranchId} />
+      ) : activeTab === 'supplier' ? (
+        <StokSupplierTab />
+      ) : activeTab === 'desty' ? (
+        <StokDestyTab />
+      ) : (
+        <StokMenipisTab />
+      )}
 
       {showRiwayat && <RiwayatModal syncLogs={syncLogs} uploadLogs={uploadLogs} onClose={() => setShowRiwayat(false)} />}
     </div>
