@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 
 @custom-variant dark (&:is(.dark *));
 
@@ -97,7 +98,6 @@
 }
 
 /* Style reminder — i1 CCTV: white and cobalt intranet, rounded cards, crisp sans typography, calm gray separators. */
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 
 .qb-root { --ink:#171b26; --sub:#707786; --blue:#3159d5; --blue-weak:#eef2ff; --green:#41a35d; --paper:#fff; --canvas:#f7f8fb; --line:#e3e6ec; --terra:#d9665c; --radius:22px; }
 .qb-root * { box-sizing:border-box; }
