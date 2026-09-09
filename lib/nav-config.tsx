@@ -16,6 +16,7 @@ import {
   Receipt,
   HandCoins,
   PiggyBank,
+  FileText,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/types'
@@ -28,6 +29,7 @@ export type PageKey =
   | 'kas-buku'
   | 'kas-kecil'
   | 'kas-um'
+  | 'qb-katalog'
   | 'proyek'
   | 'stok'
   | 'servis-claim'
@@ -57,6 +59,13 @@ export type NavItem = {
 // Role gudang cuma kerja di area Servis & Stok — gak perlu (dan gak boleh)
 // lihat Dashboard ringkasan bisnis, Proyek, apalagi Kelola Cabang/User Role.
 const NON_GUDANG_ROLES: Role[] = ['super_admin', 'admin', 'kasir', 'teknisi']
+
+// Quote Builder (bikin penawaran, katalog produk, template) -- baru
+// katalog yang udah jadi, roles-nya cuma super_admin & admin dulu
+// (sama kayak yang udah dites di level SQL waktu handoff -- lihat
+// HANDOFF_FEBRI.md, "role reviewer/sales/staff/viewer" di dokumen
+// awal belum ada di sistem role kita yang sebenarnya).
+const QB_ROLES: Role[] = ['super_admin', 'admin']
 
 // Menu Kas (Buku Kas & Kas Kecil & Kas UM/Reimburse) untuk super_admin,
 // admin, DAN gudang -- kasir/teknisi tetap tidak melihat menu ini sama
@@ -123,6 +132,16 @@ export const NAV_ITEMS: NavItem[] = [
     description: 'Top up kas, uang makan, dan reimburse karyawan per cabang',
     icon: HandCoins,
     roles: KAS_ROLES,
+  },
+  // ---------- Quote Builder -- baru "Katalog Produk" yang jadi,
+  // "Daftar Penawaran" & "Template Penawaran" nyusul kalau halamannya
+  // udah di-port. ----------
+  {
+    key: 'qb-katalog',
+    label: 'Katalog Produk',
+    description: 'Price list per cabang (read-only, sumbernya Google Sheet/Zoho)',
+    icon: FileText,
+    roles: QB_ROLES,
   },
   {
     key: 'proyek',
