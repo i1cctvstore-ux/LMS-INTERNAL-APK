@@ -11,13 +11,12 @@
  * datanya yang beda (props, bukan supabase.auth.getSession()).
  */
 import { createContext, useContext, type ReactNode } from "react";
-
-export type QuoteBuilderRole = "super_admin" | "admin" | "kasir" | "gudang" | "teknisi";
+import type { Role } from "@/lib/supabase/types";
 
 type QuoteBuilderProfile = {
   id: string;
   name: string;
-  role: QuoteBuilderRole;
+  role: Role;
   branch_id: string | null;
 };
 
@@ -34,7 +33,7 @@ export type AuthProviderProps = {
   children: ReactNode;
   currentUserId: string;
   currentUserName: string;
-  currentUserRole: QuoteBuilderRole;
+  currentUserRole: Role;
   currentUserBranchId: string | null;
 };
 
