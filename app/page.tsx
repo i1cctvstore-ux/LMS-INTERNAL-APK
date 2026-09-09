@@ -105,7 +105,14 @@ export default function Page() {
       case 'proyek':
         return <ProjectsPage />
       case 'stok':
-        return <StokModule currentUserRole={profile!.role} currentUserBranchId={profile!.branch_id} />
+        return (
+          <StokModule
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
       case 'cabang':
         return <BranchManagement />
       case 'user-role':
