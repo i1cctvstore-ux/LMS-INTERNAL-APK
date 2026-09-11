@@ -54,7 +54,10 @@ export type KasKecilEntry = {
 }
 
 export type KasUmEntryType = 'masuk' | 'keluar'
-export type KasUmKategori = 'uangmakan' | 'reimburse'
+// 2026-09-11: nambah 'material' & 'lainlain' -- lihat migration
+// 20260911000100_kas_um_kategori_material_lainlain.sql buat constraint
+// DB-nya.
+export type KasUmKategori = 'uangmakan' | 'reimburse' | 'material' | 'lainlain'
 
 export type KasUmEntry = {
   id: string
