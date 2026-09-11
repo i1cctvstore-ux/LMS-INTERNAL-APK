@@ -84,8 +84,10 @@ export default function Page() {
   // oleh selain super_admin/admin), jatuhkan ke halaman default yang memang
   // boleh diakses role itu. Normalnya tidak akan kejadian karena menu yang
   // tidak boleh dilihat memang tidak dirender di Sidebar.
-  const visibleKeys = new Set(getVisibleNavItems(profile.role).map((i) => i.key))
-  const effectivePage: PageKey = visibleKeys.has(activePage) ? activePage : getDefaultPage(profile.role)
+  const visibleKeys = new Set(getVisibleNavItems(profile.role, profile.branch_id).map((i) => i.key))
+  const effectivePage: PageKey = visibleKeys.has(activePage)
+    ? activePage
+    : getDefaultPage(profile.role, profile.branch_id)
   const activeItem = NAV_ITEMS.find((i) => i.key === effectivePage)
 
   function renderPage() {
@@ -245,6 +247,7 @@ export default function Page() {
       userName={profile.name}
       userEmail={profile.email}
       userRole={profile.role}
+      userBranchId={profile.branch_id}
     >
       {renderPage()}
     </AppShell>
