@@ -29,6 +29,7 @@ import {
   normalizeSku,
   loadDestyListedSkus,
   replaceDestyListedSkus,
+  shouldRefreshMenipisToday,
   refreshMenipisTracking,
   loadMenipisKotaAktif,
   loadStokDitandaiDiscontinue,
@@ -1988,22 +1989,34 @@ function StokMenipisTab() {
     }
   }
 
-  // Begitu data Stok Cabang (rows) kelar dimuat, bandingin qty
-  // SEKARANG ke snapshot refresh terakhir (sekali per kali tab ini
-  // dibuka) -- ini yang mendeteksi "baru menipis hari ini" / "udah
-  // naik lagi". Lihat catatan di migration SQL soal trade-off ini.
+  // 2026-09-11: SEBELUMNYA, tiap tab ini dibuka selalu ngirim ulang
+  // payload qty semua SKU x kota ke refresh_menipis_tracking buat
+  // dibandingin ke snapshot terakhir -- padahal Stok Cabang cuma
+  // ke-sync 1x/hari (jam 03:00 WIB), jadi kerjaan ini kebanyakan cuma
+  // ngulang hasil yang sama kalau tab dibuka >1x di hari yang sama.
+  //
+  // Sekarang: tanya dulu ke should_refresh_menipis_today() (RPC baru,
+  // row-locked di server) -- cuma user PERTAMA yang buka tab ini di
+  // hari itu yang beneran kirim payload & jalanin diff-nya. Kalau
+  // sudah pernah direfresh hari ini, langsung loadCardData() aja
+  // (baca data yang sudah ada, instant, gak ngulang hitung).
   useEffect(() => {
     if (loadingRows || didRefresh || rows.length === 0) return
     setDidRefresh(true)
     setRefreshing(true)
     setRefreshError(null)
-    const payload: { sku: string; kota: string; qty: number }[] = []
-    rows.forEach((r) => {
-      if (!r.sku) return
-      CITY_GROUPS.forEach((g) => payload.push({ sku: r.sku, kota: g, qty: r.cityTotal[g] ?? 0 }))
-    })
-    refreshMenipisTracking(payload)
-      .then(() => loadCardData())
+    shouldRefreshMenipisToday()
+      .then((shouldRefresh) => {
+        if (!shouldRefresh) {
+          return loadCardData()
+        }
+        const payload: { sku: string; kota: string; qty: number }[] = []
+        rows.forEach((r) => {
+          if (!r.sku) return
+          CITY_GROUPS.forEach((g) => payload.push({ sku: r.sku, kota: g, qty: r.cityTotal[g] ?? 0 }))
+        })
+        return refreshMenipisTracking(payload).then(() => loadCardData())
+      })
       .catch((e: any) => setRefreshError(`Gagal refresh deteksi menipis: ${e?.message || e}`))
       .finally(() => setRefreshing(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
