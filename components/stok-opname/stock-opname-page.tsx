@@ -144,7 +144,15 @@ export default function StockOpnamePage({
   currentUserBranchId,
 }: StockOpnamePageProps) {
   const isSuperAdmin = currentUserRole === "super_admin";
-  const canAccess = currentUserRole === "super_admin" || currentUserRole === "admin";
+  // 2026-09-11: gudang ditambahin -- cabang Solo/Bali/Purwokerto cuma
+  // punya akun ber-role gudang, jadi tanpa ini mereka gak bisa akses
+  // halaman ini sama sekali walau menunya sudah kelihatan (lihat juga
+  // lib/nav-config.tsx). RLS di DB sudah branch-based, bukan role-based,
+  // jadi aman ditambahin di sini.
+  const canAccess =
+    currentUserRole === "super_admin" ||
+    currentUserRole === "admin" ||
+    currentUserRole === "gudang";
 
   // Daftar cabang di-fetch sendiri di sini (bukan lewat props dari
   // app/page.tsx) -- pola sama kayak tab Stock Opname versi sebelumnya
@@ -198,7 +206,7 @@ export default function StockOpnamePage({
   if (!canAccess) {
     return (
       <div className="p-6 text-sm text-neutral-500">
-        Halaman Stock Opname hanya untuk Admin dan Super Admin.
+        Halaman Stock Opname tidak tersedia untuk role kamu (kasir/teknisi).
       </div>
     );
   }
@@ -614,7 +622,13 @@ function OpnameDetail({
 
       {/* Lock banner */}
       {session.status === "locked" &&
-        (role === "admin" ? (
+        // 2026-09-11: sebelumnya cek `role === "admin"`, jadi gudang
+        // (yang sekarang juga bisa akses halaman ini) kepeleset ke
+        // cabang "else" yang isinya UI khusus Super Admin (tombol "Edit
+        // Langsung" yang manggil RPC yang bakal ditolak RLS buat
+        // gudang). Sekarang cek berdasarkan isSuperAdmin biar admin
+        // maupun gudang sama-sama lihat pesan "terkunci" yang benar.
+        (!isSuperAdmin ? (
           <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
             <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
             <div>
