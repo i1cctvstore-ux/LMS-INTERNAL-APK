@@ -94,11 +94,15 @@ const KATEGORI_BADGE: Record<KasKecilKategori, string> = {
 const KATEGORI_LABEL_UM: Record<KasUmKategori, string> = {
   uangmakan: 'Uang Makan',
   reimburse: 'Reimburse',
+  material: 'Material',
+  lainlain: 'Lain-lain',
 }
 
 const KATEGORI_BADGE_UM: Record<KasUmKategori, string> = {
   uangmakan: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200',
   reimburse: 'bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200',
+  material: 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200',
+  lainlain: 'bg-neutral-100 text-neutral-600 ring-1 ring-inset ring-neutral-300',
 }
 
 function rupiah(n: number) {
@@ -390,10 +394,18 @@ export default function KasModule({
       const reimburse = list
         .filter((e) => e.type === 'keluar' && e.kategori === 'reimburse')
         .reduce((s, e) => s + e.jumlah, 0)
+      const material = list
+        .filter((e) => e.type === 'keluar' && e.kategori === 'material')
+        .reduce((s, e) => s + e.jumlah, 0)
+      const lainlain = list
+        .filter((e) => e.type === 'keluar' && e.kategori === 'lainlain')
+        .reduce((s, e) => s + e.jumlah, 0)
       return [
         { label: `Top Up Kas — ${label}`, value: rupiah(masuk) },
         { label: `Uang Makan — ${label}`, value: rupiah(uangmakan) },
         { label: `Reimburse — ${label}`, value: rupiah(reimburse) },
+        { label: `Material — ${label}`, value: rupiah(material) },
+        { label: `Lain-lain — ${label}`, value: rupiah(lainlain) },
       ]
     }
     const list = periodEntries as KasKecilEntry[]
@@ -1226,6 +1238,8 @@ export default function KasModule({
             <select value={sKategoriUm} onChange={(e) => setSKategoriUm(e.target.value as KasUmKategori)} className={inputCls}>
               <option value="uangmakan">Uang Makan</option>
               <option value="reimburse">Reimburse</option>
+              <option value="material">Material</option>
+              <option value="lainlain">Lain-lain</option>
             </select>
           </Field>
         )}
@@ -1396,6 +1410,8 @@ export default function KasModule({
                       <select value={eKategoriUm} onChange={(e) => setEKategoriUm(e.target.value as KasUmKategori)} className={inputCls}>
                         <option value="uangmakan">Uang Makan</option>
                         <option value="reimburse">Reimburse</option>
+                        <option value="material">Material</option>
+                        <option value="lainlain">Lain-lain</option>
                       </select>
                     </Field>
                     <Field label="Nama Karyawan">
