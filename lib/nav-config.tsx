@@ -22,6 +22,12 @@ import {
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/types'
 
+// UUID branch Jakarta -- sama persis dengan BR_JAKARTA di
+// lib/stok/api.ts / stok-module.tsx (CABANG_SOURCES). Dipakai buat
+// nge-gate menu yang "Jakarta doang dulu" (lihat `jakartaOnly` di
+// NavItem di bawah) tanpa perlu query tambahan ke tabel branches.
+const BR_JAKARTA = '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2'
+
 export type PageKey =
   | 'dashboard'
   | 'lms-materi'
@@ -50,6 +56,12 @@ export type NavItem = {
   // Kalau diisi, menu ini cuma muncul untuk role yang disebut di sini.
   // Kalau kosong/undefined, menu terbuka untuk semua role yang sudah login.
   roles?: Role[]
+  // Kalau true, menu ini cuma muncul untuk user yang branch_id-nya
+  // Jakarta (BR_JAKARTA) -- KECUALI super_admin, yang selalu lihat
+  // semua menu apapun cabangnya (owner/HQ butuh full access).
+  // Dipakai buat menu yang for-now cuma relevan/dites di Jakarta
+  // (Materi, Kalkulator Maintenance) -- lihat getVisibleNavItems().
+  jakartaOnly?: boolean
   // Kalau diisi, item ini BUKAN halaman internal React -- klik-nya buka
   // URL ini di tab baru (target="_blank"), BUKAN ganti `activePage`
   // seperti menu lain. Dipakai buat link ke halaman statis/publik yang
@@ -91,6 +103,9 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Materi',
     description: 'Materi pelatihan karyawan & pengajuan verifikasi',
     icon: BookOpen,
+    // 2026-09-11: disembunyiin dari cabang selain Jakarta dulu (belum
+    // relevan/dipakai di Solo/Bali/Purwokerto) -- lihat jakartaOnly.
+    jakartaOnly: true,
   },
   {
     key: 'lms-verifikasi',
@@ -109,6 +124,8 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Kalkulator Maintenance',
     description: 'Estimasi biaya Maintenance CCTV 12 bulan untuk customer',
     icon: Calculator,
+    // 2026-09-11: disembunyiin dari cabang selain Jakarta dulu -- lihat jakartaOnly.
+    jakartaOnly: true,
   },
   // ---------- Kas (Buku Kas & Kas Kecil & Kas UM/Reimburse) — 3 sub-menu,
   // dikelompokkan jadi 1 folder dropdown "Kas" di Sidebar lewat
@@ -163,9 +180,13 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Stock Opname',
     description: 'Sesi hitung fisik stok per cabang, bandingkan saldo sistem vs hasil hitung',
     icon: ClipboardCheck,
-    // Cuma admin & super_admin -- gudang/kasir/teknisi gak lihat menu
-    // ini sama sekali.
-    roles: ['super_admin', 'admin'],
+    // 2026-09-11: gudang ditambahin -- cabang Solo/Bali/Purwokerto cuma
+    // punya akun ber-role gudang (sama kayak alasan gudang ditambahin ke
+    // KAS_ROLES), jadi tanpa ini mereka gak akan pernah lihat menu ini
+    // sama sekali walau RLS di DB-nya sendiri sudah branch-based (bukan
+    // role-based) -- lihat stock-opname-page.tsx utk gate yang sama.
+    // kasir/teknisi tetap tidak lihat menu ini.
+    roles: ['super_admin', 'admin', 'gudang'],
   },
   // ---------- Servis (dulu 1 menu dengan tab di dalamnya, sekarang
   // 5 menu terpisah langsung di sidebar utama) ----------
@@ -221,9 +242,18 @@ export const NAV_ITEMS: NavItem[] = [
 ]
 
 // Dipakai di Sidebar & pengecekan akses halaman — daftar menu yang boleh
-// dilihat role tertentu.
-export function getVisibleNavItems(role: Role): NavItem[] {
-  return NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(role))
+// dilihat role & cabang tertentu.
+//
+// branchId: profile.branch_id user yang login (bisa null, mis. super_admin
+// tanpa cabang spesifik). Cuma dipakai buat filter item `jakartaOnly` --
+// super_admin SELALU lolos filter ini apapun branch_id-nya (owner butuh
+// full access ke semua menu dari cabang manapun dia login).
+export function getVisibleNavItems(role: Role, branchId?: string | null): NavItem[] {
+  return NAV_ITEMS.filter((item) => {
+    if (item.roles && !item.roles.includes(role)) return false
+    if (item.jakartaOnly && role !== 'super_admin' && branchId !== BR_JAKARTA) return false
+    return true
+  })
 }
 
 export type NavGroup = {
@@ -260,8 +290,8 @@ export const NAV_GROUPS: NavGroup[] = [
 
 // Halaman default waktu login/refresh — dashboard untuk yang boleh lihat,
 // kalau tidak (mis. gudang) jatuh ke menu pertama yang memang boleh diakses.
-export function getDefaultPage(role: Role): PageKey {
-  const visible = getVisibleNavItems(role)
+export function getDefaultPage(role: Role, branchId?: string | null): PageKey {
+  const visible = getVisibleNavItems(role, branchId)
   if (visible.some((item) => item.key === 'dashboard')) return 'dashboard'
   return visible[0]?.key ?? 'dashboard'
 }
