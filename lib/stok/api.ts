@@ -1355,6 +1355,19 @@ export type StokDiscontinueRow = {
 // tab Stok Cabang) ke snapshot refresh SEBELUMNYA -- deteksi transisi
 // naik/turun ambang <=1, catat ke menipis_kota_aktif. Dikirim per-batch
 // (bukan sekali ~5600 baris) biar aman ukuran payload RPC.
+// 2026-09-11: dipanggil SEBELUM refreshMenipisTracking() -- kembalikan
+// true cuma kalau hari ini (WIB) belum pernah direfresh, dan sekaligus
+// nyatet "sudah direfresh hari ini" secara atomic di sisi DB (row-lock).
+// Kalau false, SKIP refreshMenipisTracking, cukup baca data yang ada
+// (loadMenipisKotaAktif dkk) -- biar gak hitung ulang tiap tab dibuka,
+// cuma 1x per hari sesuai jadwal sync Stok Cabang.
+export async function shouldRefreshMenipisToday(): Promise<boolean> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('should_refresh_menipis_today')
+  if (error) throw new Error(error.message)
+  return Boolean(data)
+}
+
 export async function refreshMenipisTracking(items: { sku: string; kota: string; qty: number }[]): Promise<void> {
   const supabase = createClient()
   const CHUNK = 500
