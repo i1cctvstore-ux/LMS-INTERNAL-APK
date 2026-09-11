@@ -14,6 +14,10 @@ type AppShellProps = {
   userName: string
   userEmail: string
   userRole: Role
+  // 2026-09-11: branch_id user yang login -- diteruskan ke Sidebar
+  // supaya menu `jakartaOnly` (Materi, Kalkulator Maintenance) bisa
+  // disembunyikan buat cabang selain Jakarta. Lihat lib/nav-config.tsx.
+  userBranchId?: string | null
   children: React.ReactNode
 }
 
@@ -24,6 +28,7 @@ export function AppShell({
   userName,
   userEmail,
   userRole,
+  userBranchId,
   children,
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -36,6 +41,7 @@ export function AppShell({
         onNavigate={onNavigate}
         onLogout={onLogout}
         userRole={userRole}
+        userBranchId={userBranchId}
         mobileOpen={mobileOpen}
         onCloseMobile={() => setMobileOpen(false)}
       />
