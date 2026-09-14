@@ -221,7 +221,19 @@ export default function QuoteEditorPage({ quoteId: initialQuoteId, onBack, onDra
 
   // ---- initial load: branch, catalog, and either an existing quote or a fresh draft ----
   useEffect(() => {
-    if (!branchId) return;
+    if (!branchId) {
+      // 2026-09-14: SEBELUMNYA baris ini cuma `return` diam-diam --
+      // kalau akun yang login (misal super_admin) branch_id-nya kosong
+      // di tabel profiles, loadingInitial gak PERNAH di-set false,
+      // jadi spinner "Memuat penawaran..." muter selamanya tanpa
+      // pesan apapun. Sekarang minimal kasih tau kenapa, biar gak
+      // kelihatan kayak nge-hang/rusak.
+      setLoadError(
+        "Akun kamu belum terhubung ke cabang manapun (branch_id kosong), jadi katalog produk tidak bisa dimuat. Hubungi Super Admin untuk mengatur cabang akun ini, atau gunakan akun admin cabang untuk membuat penawaran."
+      );
+      setLoadingInitial(false);
+      return;
+    }
     let cancelled = false;
 
     async function load() {
