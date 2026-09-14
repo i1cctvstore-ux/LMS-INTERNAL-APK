@@ -17,6 +17,7 @@ import {
   HandCoins,
   PiggyBank,
   FileText,
+  FilePenLine,
   ClipboardCheck,
   type LucideIcon,
 } from 'lucide-react'
@@ -36,6 +37,7 @@ export type PageKey =
   | 'kas-buku'
   | 'kas-kecil'
   | 'kas-um'
+  | 'qb-daftar'
   | 'qb-katalog'
   | 'proyek'
   | 'stok'
@@ -152,9 +154,16 @@ export const NAV_ITEMS: NavItem[] = [
     icon: HandCoins,
     roles: KAS_ROLES,
   },
-  // ---------- Quote Builder -- baru "Katalog Produk" yang jadi,
-  // "Daftar Penawaran" & "Template Penawaran" nyusul kalau halamannya
-  // udah di-port. ----------
+  // ---------- Quote Builder -- "Daftar Penawaran" & "Katalog Produk"
+  // udah jadi. "Template Penawaran" nyusul kalau halamannya udah
+  // di-port. ----------
+  {
+    key: 'qb-daftar',
+    label: 'Daftar Penawaran',
+    description: 'Buat & kelola penawaran customer per cabang',
+    icon: FilePenLine,
+    roles: QB_ROLES,
+  },
   {
     key: 'qb-katalog',
     label: 'Katalog Produk',
