@@ -1974,6 +1974,47 @@ function StokMenipisTab() {
   const [message, setMessage] = useState<string | null>(null)
   const [didRefresh, setDidRefresh] = useState(false)
 
+  // 2026-09-14: sort per kolom (kartu 1 & kartu 3 punya sort terpisah,
+  // karena selection & isinya independen) + filter kota (dipakai bareng
+  // buat kartu 1 & kartu 3 -- kartu 2 gak ada konsep kota).
+  const [sortKey1, setSortKey1] = useState<string>('menipisSejak')
+  const [sortDir1, setSortDir1] = useState<'asc' | 'desc'>('desc')
+  const [sortKey3, setSortKey3] = useState<string>('menipisSejak')
+  const [sortDir3, setSortDir3] = useState<'asc' | 'desc'>('desc')
+  const [kotaFilter, setKotaFilter] = useState<string>('__all__')
+
+  function toggleSort1(key: string) {
+    if (sortKey1 === key) setSortDir1((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey1(key); setSortDir1('asc') }
+  }
+  function toggleSort3(key: string) {
+    if (sortKey3 === key) setSortDir3((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey3(key); setSortDir3('asc') }
+  }
+  function SortHeaderMenipis({ label, sortKeyName, active, dir, onClick, center }: { label: React.ReactNode; sortKeyName: string; active: boolean; dir: 'asc' | 'desc'; onClick: (key: string) => void; center?: boolean }) {
+    return (
+      <button onClick={() => onClick(sortKeyName)} className={`flex items-center gap-1 hover:text-slate-600 ${center ? 'mx-auto' : ''} ${active ? 'text-slate-700' : ''}`}>
+        {label}
+        {active ? (dir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : <ChevronsUpDown size={11} className="text-slate-300" />}
+      </button>
+    )
+  }
+  function sortGroups(list: MenipisSkuGroup[], key: string, dir: 'asc' | 'desc') {
+    const sorted = [...list].sort((a, b) => {
+      let av: string | number, bv: string | number
+      if (key === 'name') { av = a.name.toLowerCase(); bv = b.name.toLowerCase() }
+      else if (key === 'sku') { av = a.sku.toLowerCase(); bv = b.sku.toLowerCase() }
+      else if (key === 'kota') { av = a.kotaAktif.join(', ').toLowerCase(); bv = b.kotaAktif.join(', ').toLowerCase() }
+      else if (key === 'total') { av = a.total; bv = b.total }
+      else if (key === 'menipisSejak') { av = a.menipisSejak; bv = b.menipisSejak }
+      else if ((CITY_GROUPS as readonly string[]).includes(key)) { av = a.cityTotal[key] ?? 0; bv = b.cityTotal[key] ?? 0 }
+      else { av = ''; bv = '' }
+      if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av
+      return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
+    })
+    return sorted
+  }
+
   async function loadCardData() {
     setLoadingCards(true)
     try {
@@ -2051,19 +2092,20 @@ function StokMenipisTab() {
 
   // Kartu 1: kategori normal (bukan No Stock) DAN belum ditandai discontinue.
   const kartu1 = useMemo(() => {
-    return Array.from(groupedBySku.values())
+    const filtered = Array.from(groupedBySku.values())
       .filter((g) => {
         const row = rowBySku.get(normalizeSku(g.sku))
         const isNoStock = (row?.kategori || '').trim().toLowerCase() === 'no stock'
         return !isNoStock && !discontinueSkuSet.has(normalizeSku(g.sku))
       })
-      .sort((a, b) => b.menipisSejak.localeCompare(a.menipisSejak))
-  }, [groupedBySku, rowBySku, discontinueSkuSet])
+      .filter((g) => kotaFilter === '__all__' || g.kotaAktif.includes(kotaFilter))
+    return sortGroups(filtered, sortKey1, sortDir1)
+  }, [groupedBySku, rowBySku, discontinueSkuSet, kotaFilter, sortKey1, sortDir1])
 
   // Kartu 3: kategori No Stock ATAU udah ditandai discontinue, MINUS
   // yang kombinasi kota aktifnya SAMA PERSIS kayak yang udah di-dismiss.
   const kartu3 = useMemo(() => {
-    return Array.from(groupedBySku.values())
+    const filtered = Array.from(groupedBySku.values())
       .filter((g) => {
         const row = rowBySku.get(normalizeSku(g.sku))
         const isNoStock = (row?.kategori || '').trim().toLowerCase() === 'no stock'
@@ -2072,8 +2114,9 @@ function StokMenipisTab() {
         const dismiss = dismissed.find((d) => normalizeSku(d.sku) === normalizeSku(g.sku) && sameKotaSet(d.kotaSnapshot, g.kotaAktif))
         return !dismiss
       })
-      .sort((a, b) => b.menipisSejak.localeCompare(a.menipisSejak))
-  }, [groupedBySku, rowBySku, discontinueSkuSet, dismissed])
+      .filter((g) => kotaFilter === '__all__' || g.kotaAktif.includes(kotaFilter))
+    return sortGroups(filtered, sortKey3, sortDir3)
+  }, [groupedBySku, rowBySku, discontinueSkuSet, dismissed, kotaFilter, sortKey3, sortDir3])
 
   // Kartu 2: langsung dari daftar discontinue (read-only, gak ada bulk action).
   const kartu2 = useMemo(() => {
@@ -2136,6 +2179,24 @@ function StokMenipisTab() {
         </div>
       )}
 
+      {/* Filter kota -- ngaruh ke Kartu 1 & Kartu 3 (Kartu 2 gak ada konsep kota) */}
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-xs text-slate-400 font-medium">Filter kota:</span>
+        <select
+          value={kotaFilter}
+          onChange={(e) => setKotaFilter(e.target.value)}
+          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600"
+        >
+          <option value="__all__">Semua Kota</option>
+          {CITY_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+        </select>
+        {kotaFilter !== '__all__' && (
+          <button onClick={() => setKotaFilter('__all__')} className="text-xs text-slate-400 hover:text-slate-600 underline">
+            Reset
+          </button>
+        )}
+      </div>
+
       {/* Kartu 1 */}
       <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden mb-4">
         <div className="flex items-center justify-between gap-2.5 p-4 border-b border-slate-100 flex-wrap">
@@ -2170,12 +2231,26 @@ function StokMenipisTab() {
                       onChange={(e) => setSelected1(e.target.checked ? new Set(kartu1.map((k) => k.sku)) : new Set())}
                     />
                   </th>
-                  <th className="p-3">Nama Produk</th>
-                  <th className="p-3">SKU</th>
-                  <th className="p-3">Kota Menipis</th>
-                  {CITY_GROUPS.map((g) => <th key={g} className="p-3 text-center">{CITY_SHORT[g]}</th>)}
-                  <th className="p-3 text-center">Total</th>
-                  <th className="p-3">Menipis Sejak</th>
+                  <th className="p-3">
+                    <SortHeaderMenipis label="Nama Produk" sortKeyName="name" active={sortKey1 === 'name'} dir={sortDir1} onClick={toggleSort1} />
+                  </th>
+                  <th className="p-3">
+                    <SortHeaderMenipis label="SKU" sortKeyName="sku" active={sortKey1 === 'sku'} dir={sortDir1} onClick={toggleSort1} />
+                  </th>
+                  <th className="p-3">
+                    <SortHeaderMenipis label="Kota Menipis" sortKeyName="kota" active={sortKey1 === 'kota'} dir={sortDir1} onClick={toggleSort1} />
+                  </th>
+                  {CITY_GROUPS.map((g) => (
+                    <th key={g} className="p-3 text-center">
+                      <SortHeaderMenipis label={CITY_SHORT[g]} sortKeyName={g} active={sortKey1 === g} dir={sortDir1} onClick={toggleSort1} center />
+                    </th>
+                  ))}
+                  <th className="p-3 text-center">
+                    <SortHeaderMenipis label="Total" sortKeyName="total" active={sortKey1 === 'total'} dir={sortDir1} onClick={toggleSort1} center />
+                  </th>
+                  <th className="p-3">
+                    <SortHeaderMenipis label="Menipis Sejak" sortKeyName="menipisSejak" active={sortKey1 === 'menipisSejak'} dir={sortDir1} onClick={toggleSort1} />
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -2288,13 +2363,27 @@ function StokMenipisTab() {
                       onChange={(e) => setSelected3(e.target.checked ? new Set(kartu3.map((k) => k.sku)) : new Set())}
                     />
                   </th>
-                  <th className="p-3">Nama Produk</th>
-                  <th className="p-3">SKU</th>
+                  <th className="p-3">
+                    <SortHeaderMenipis label="Nama Produk" sortKeyName="name" active={sortKey3 === 'name'} dir={sortDir3} onClick={toggleSort3} />
+                  </th>
+                  <th className="p-3">
+                    <SortHeaderMenipis label="SKU" sortKeyName="sku" active={sortKey3 === 'sku'} dir={sortDir3} onClick={toggleSort3} />
+                  </th>
                   <th className="p-3">Status</th>
-                  <th className="p-3">Kota Menipis</th>
-                  {CITY_GROUPS.map((g) => <th key={g} className="p-3 text-center">{CITY_SHORT[g]}</th>)}
-                  <th className="p-3 text-center">Total</th>
-                  <th className="p-3">Menipis Sejak</th>
+                  <th className="p-3">
+                    <SortHeaderMenipis label="Kota Menipis" sortKeyName="kota" active={sortKey3 === 'kota'} dir={sortDir3} onClick={toggleSort3} />
+                  </th>
+                  {CITY_GROUPS.map((g) => (
+                    <th key={g} className="p-3 text-center">
+                      <SortHeaderMenipis label={CITY_SHORT[g]} sortKeyName={g} active={sortKey3 === g} dir={sortDir3} onClick={toggleSort3} center />
+                    </th>
+                  ))}
+                  <th className="p-3 text-center">
+                    <SortHeaderMenipis label="Total" sortKeyName="total" active={sortKey3 === 'total'} dir={sortDir3} onClick={toggleSort3} center />
+                  </th>
+                  <th className="p-3">
+                    <SortHeaderMenipis label="Menipis Sejak" sortKeyName="menipisSejak" active={sortKey3 === 'menipisSejak'} dir={sortDir3} onClick={toggleSort3} />
+                  </th>
                 </tr>
               </thead>
               <tbody>
