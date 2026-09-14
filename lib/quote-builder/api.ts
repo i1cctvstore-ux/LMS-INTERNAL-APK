@@ -129,11 +129,22 @@ export async function listQuotesForBranch(branchId: string): Promise<QuoteWithTo
   );
 }
 
-/** super_admin only — branch filter omitted to see every branch. */
+/**
+ * super_admin only — branch filter omitted to see every branch.
+ *
+ * 2026-09: super_admin bisa lihat baris yang soft-deleted lewat RLS
+ * (sengaja, biar bisa direstore -- lihat komentar policy quotes_select
+ * di 001_quote_builder_schema.sql), TAPI daftar aktif "Daftar
+ * Penawaran" harus filter itu di level app, bukan di RLS -- exact
+ * catatan yang ada di migration itu sendiri. Tanpa filter ini,
+ * penawaran yang sudah dihapus (soft-delete) muncul lagi di daftar
+ * untuk super_admin.
+ */
 export async function listAllQuotes(): Promise<QuoteWithTotal[]> {
   const { data, error } = await supabase
     .from("quotes")
     .select("*, quote_alternatives(*, quote_items(*))")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return ((data ?? []) as unknown as Array<QuoteRow & { quote_alternatives: Array<QuoteAlternativeRow & { quote_items: QuoteItemRow[] }> }>).map(
