@@ -570,25 +570,28 @@ function OpnameDetail({
     await load();
   }
 
-  function visibleItemsForExport(): OpnameItem[] {
-    let visible = items.filter((it) => selCategory.has(it.kategori));
-    if (hideZero) visible = visible.filter((it) => it.saldo_snapshot !== 0);
-    return visible;
-  }
-
+  // 2026-09: SEBELUMNYA "Cetak Semua" & "Cetak Selisih Saja" ikut
+  // kefilter oleh selCategory/hideZero (filter kategori & "sembunyikan
+  // saldo 0" yang dipakai buat browsing di tabel layar) lewat
+  // visibleItemsForExport(). Efeknya: kalau lagi nge-filter cuma
+  // sebagian kategori (mis. buat fokus liat 1 kategori di layar) lalu
+  // klik "Cetak Semua", yang kecetak diam-diam CUMA kategori yang
+  // sedang difilter itu -- bukan semua barang di sesi ini seperti
+  // namanya. Sekarang keduanya SELALU pakai `items` (seluruh barang di
+  // sesi, apapun filter tampilan yang aktif) -- filter kategori/hide-
+  // zero cuma ngaruh ke apa yang kelihatan di layar, bukan ke cetakan.
   function handleExportFull() {
-    const visible = visibleItemsForExport();
-    if (visible.length === 0) {
-      alert("Gak ada barang di kategori yang lagi difilter.");
+    if (items.length === 0) {
+      alert("Gak ada barang di sesi ini.");
       return;
     }
-    printItemList(session, visible, "Lembar Hitung Stock Opname", `${visible.length} barang`);
+    printItemList(session, items, "Lembar Hitung Stock Opname", `${items.length} barang`);
   }
 
   function handleExportSelisih() {
-    const visible = visibleItemsForExport().filter((it) => !computeStatus(it).checked);
+    const visible = items.filter((it) => !computeStatus(it).checked);
     if (visible.length === 0) {
-      alert("Semua barang di kategori yang dipilih sudah ✔ — gak ada selisih yang perlu dicetak ulang.");
+      alert("Semua barang di sesi ini sudah ✔ — gak ada selisih yang perlu dicetak ulang.");
       return;
     }
     printItemList(
