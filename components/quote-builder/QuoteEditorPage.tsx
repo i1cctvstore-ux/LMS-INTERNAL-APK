@@ -25,7 +25,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import html2pdf from "html2pdf.js";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -146,6 +145,14 @@ function QuotePreview({ alternatives, clientName, projectName, quoteDate, validD
     setIsExporting(true);
     const filename = `Penawaran_${safeFilePart(internalCode)}_${safeFilePart(clientName)}.pdf`;
     try {
+      // 2026-09: import dinamis, BUKAN import statis di atas file --
+      // html2pdf.js (dan html2canvas/jspdf di baliknya) menyentuh
+      // `self`/`window` di level modul, jadi kalau di-import statis,
+      // Next.js ikut mengevaluasinya waktu SSR/prerender halaman "/"
+      // (server tidak punya `self`) -> build gagal ("self is not
+      // defined"). Dynamic import di sini cuma jalan di browser saat
+      // tombol ini benar-benar diklik, jadi aman.
+      const html2pdf = (await import("html2pdf.js")).default;
       await (html2pdf() as any)
         .set({
           margin: [0, 0, 0, 0],
