@@ -71,7 +71,16 @@ export default function QuoteListPage({ onOpenQuote, onNewQuote }: QuoteListPage
   const [deleting, setDeleting] = useState<QuoteWithTotal | null>(null);
 
   useEffect(() => {
-    if (!hasAccess) return;
+    if (!hasAccess) {
+      // 2026-09-14: sebelumnya `return` diam-diam di sini juga bikin
+      // `loading` (default true) gak pernah di-set false kalau
+      // hasAccess ternyata false -- spinner "Memuat penawaran..."
+      // muter selamanya tanpa pesan. Sama kelasnya kayak bug
+      // branchId di QuoteEditorPage.tsx.
+      setLoadError("Akun kamu tidak punya akses ke Daftar Penawaran (butuh role admin atau super_admin).");
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     const request = isSuperAdmin ? listAllQuotes() : branchId ? listQuotesForBranch(branchId) : Promise.resolve([]);
