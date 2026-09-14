@@ -104,16 +104,30 @@ export async function getSessionDetail(
     .single();
   if (sessionErr) throw sessionErr;
 
-  const { data: items, error: itemsErr } = await supabase
-    .from("stock_opname_items")
-    .select("id, session_id, product_id, kategori, nama, saldo_snapshot, accounts, real")
-    .eq("session_id", sessionId)
-    .order("nama", { ascending: true });
-  if (itemsErr) throw itemsErr;
+  // 2026-09-14: SEBELUMNYA query ini query .eq("session_id",...) doang
+  // tanpa .range() -- Supabase/PostgREST defaultnya cuma balikin
+  // MAKSIMAL 1000 BARIS per query kalau gak dikasih range eksplisit.
+  // Sesi Jakarta sekarang ~4300 item (setelah fix "Tanpa Kategori"),
+  // jadi cuma 1000 item pertama (alfabetis) yang ke-load & ke-print --
+  // sisanya kepotong diam-diam tanpa error apapun. Sekarang di-loop per
+  // 1000 baris sampai semua ke-ambil.
+  const PAGE = 1000;
+  const items: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error: itemsErr } = await supabase
+      .from("stock_opname_items")
+      .select("id, session_id, product_id, kategori, nama, saldo_snapshot, accounts, real")
+      .eq("session_id", sessionId)
+      .order("nama", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (itemsErr) throw itemsErr;
+    items.push(...(page ?? []));
+    if (!page || page.length < PAGE) break;
+  }
 
   return {
     session: { ...(session as any), branch_nama: (session as any).branches?.name },
-    items: (items ?? []).map((it: any) => ({ ...it, accounts: it.accounts ?? {} })),
+    items: items.map((it: any) => ({ ...it, accounts: it.accounts ?? {} })),
   };
 }
 
