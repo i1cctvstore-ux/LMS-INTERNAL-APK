@@ -132,12 +132,19 @@ export async function listBranchAccounts(branchId: string): Promise<BranchAccoun
 /** Daftar kategori master, untuk sheet "Pilih Kategori" saat opname baru & filter kategori di halaman detail. */
 export async function listCatalogCategories(): Promise<string[]> {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("service_products")
-    .select("kategori")
-    .not("kategori", "is", null);
+  // 2026-09-14: SEBELUMNYA query ini .not("kategori","is",null) --
+  // produk dengan kategori kosong jadi gak pernah muncul sebagai
+  // pilihan scope, DAN (bug utamanya) di RPC stock_opname_create_session
+  // produk kayak ini gak pernah ke-include ke sesi opname manapun sama
+  // sekali, walau pilih "Semua Kategori" -- lihat migration
+  // 20260914000000_stock_opname_tanpa_kategori.sql. Sekarang produk
+  // tanpa kategori dikelompokkan sebagai "Tanpa Kategori" (string biasa,
+  // bukan NULL) supaya konsisten dipakai di seluruh filter/grouping yang
+  // sudah ada -- termasuk di sini, biar user bisa pilih scope itu secara
+  // spesifik kalau perlu.
+  const { data, error } = await supabase.from("service_products").select("kategori");
   if (error) throw error;
-  const set = new Set<string>((data ?? []).map((r: any) => r.kategori).filter(Boolean));
+  const set = new Set<string>((data ?? []).map((r: any) => (r.kategori ? r.kategori : "Tanpa Kategori")));
   return [...set].sort();
 }
 
