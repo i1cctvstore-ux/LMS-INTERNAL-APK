@@ -12,10 +12,13 @@ type SidebarNavProps = {
   onNavigate: (page: PageKey) => void
   onLogout: () => void
   userRole: Role
+  // 2026-09-11: dipakai getVisibleNavItems() buat filter menu `jakartaOnly`
+  // (Materi, Kalkulator Maintenance) -- lihat lib/nav-config.tsx.
+  userBranchId?: string | null
 }
 
-function SidebarContent({ activePage, onNavigate, onLogout, userRole }: SidebarNavProps) {
-  const visibleItems = getVisibleNavItems(userRole)
+function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranchId }: SidebarNavProps) {
+  const visibleItems = getVisibleNavItems(userRole, userBranchId)
   const visibleKeys = new Set(visibleItems.map((i) => i.key))
   // Grup yang dibuka manual lewat klik. Grup yang sedang berisi activePage
   // selalu ikut tampil terbuka juga, walau belum pernah diklik — supaya
@@ -185,6 +188,7 @@ export function Sidebar({
   onNavigate,
   onLogout,
   userRole,
+  userBranchId,
   mobileOpen,
   onCloseMobile,
 }: SidebarProps) {
@@ -198,6 +202,7 @@ export function Sidebar({
             onNavigate={onNavigate}
             onLogout={onLogout}
             userRole={userRole}
+            userBranchId={userBranchId}
           />
         </div>
       </aside>
@@ -244,6 +249,7 @@ export function Sidebar({
             }}
             onLogout={onLogout}
             userRole={userRole}
+            userBranchId={userBranchId}
           />
         </div>
       </div>
