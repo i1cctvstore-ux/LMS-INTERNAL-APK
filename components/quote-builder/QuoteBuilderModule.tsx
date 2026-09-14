@@ -15,22 +15,27 @@
 //     Kalau lupa bungkus ini, semua halaman Quote Builder bakal tampil
 //     TANPA styling sama sekali.
 //
-// "katalog" & "list" (Daftar Penawaran) udah di-port & bisa dipakai
-// sekarang. "template" (Template Penawaran) nunggu halamannya di-port.
+// "katalog", "list" (Daftar Penawaran), & sekarang editor penawaran-nya
+// (buat/edit) udah di-port & bisa dipakai. "template" (Template
+// Penawaran) masih nunggu halamannya di-port.
 //
-// 2026-09: "list" butuh 2 callback (buka penawaran / bikin baru) yang
-// SEHARUSNYA membuka halaman editor (Home.tsx yang di-port) -- tapi
-// editor itu BELUM di-port (baru "Daftar Penawaran" & "Katalog Produk"
-// yang jadi). Untuk sekarang kedua callback itu cuma kasih tau lewat
-// toast bahwa fiturnya nyusul, BUKAN error diam-diam -- ganti isi
-// handleOpenQuote/handleNewQuote di bawah begitu editor-nya di-port.
+// 2026-09: section "list" sekarang punya sub-navigasi INTERNAL (bukan
+// dari nav-config/page.tsx) -- persis pola StockOpnamePage (daftar sesi
+// vs detail sesi dalam 1 komponen, state lokal, bukan route Next.js).
+// `editingQuoteId` di bawah nyimpen 3 kemungkinan:
+//   - null       -> tampilin QuoteListPage
+//   - "new"      -> tampilin QuoteEditorPage mode "penawaran baru"
+//   - <uuid>     -> tampilin QuoteEditorPage mode edit penawaran itu
+// QuoteDetailPage (lihat detail tanpa langsung edit) BELUM di-port --
+// klik baris di daftar langsung buka editor buat sekarang.
 // =====================================================
 
-import { toast } from "sonner";
+import { useState } from "react";
 import type { Role } from "@/lib/supabase/types";
 import { AuthProvider } from "@/lib/quote-builder/auth";
 import ProductCatalogPage from "./ProductCatalogPage";
 import QuoteListPage from "./QuoteListPage";
+import QuoteEditorPage from "./QuoteEditorPage";
 
 export type QuoteBuilderSection = "list" | "katalog"; // nanti nambah "template"
 
@@ -49,15 +54,7 @@ export default function QuoteBuilderModule({
   currentUserRole,
   currentUserBranchId,
 }: QuoteBuilderModuleProps) {
-  // TODO(editor): ganti 2 handler ini begitu halaman editor (Home.tsx
-  // yang di-port) sudah ada -- buka editor dengan quoteId (existing)
-  // atau tanpa quoteId (draft baru), bukan toast.
-  const handleOpenQuote = (_quoteId: string) => {
-    toast.info("Halaman detail/edit penawaran belum di-port -- nyusul.");
-  };
-  const handleNewQuote = () => {
-    toast.info("Halaman bikin penawaran baru belum di-port -- nyusul.");
-  };
+  const [editingQuoteId, setEditingQuoteId] = useState<string | "new" | null>(null);
 
   return (
     <AuthProvider
@@ -68,7 +65,16 @@ export default function QuoteBuilderModule({
     >
       <div className="qb-root">
         {section === "katalog" && <ProductCatalogPage />}
-        {section === "list" && <QuoteListPage onOpenQuote={handleOpenQuote} onNewQuote={handleNewQuote} />}
+        {section === "list" && editingQuoteId === null && (
+          <QuoteListPage onOpenQuote={(id) => setEditingQuoteId(id)} onNewQuote={() => setEditingQuoteId("new")} />
+        )}
+        {section === "list" && editingQuoteId !== null && (
+          <QuoteEditorPage
+            quoteId={editingQuoteId === "new" ? null : editingQuoteId}
+            onBack={() => setEditingQuoteId(null)}
+            onDraftCreated={(id) => setEditingQuoteId(id)}
+          />
+        )}
       </div>
     </AuthProvider>
   );
