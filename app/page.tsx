@@ -216,6 +216,16 @@ export default function Page() {
             currentUserBranchId={profile!.branch_id}
           />
         )
+      case 'qb-daftar':
+        return (
+          <QuoteBuilderModule
+            section="list"
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
       case 'qb-katalog':
         return (
           <QuoteBuilderModule
