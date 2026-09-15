@@ -99,41 +99,72 @@ export async function syncPriceListForBranch(
     let productCount = 0
     let skippedNoSku = 0
 
-    for (const row of body.rows) {
+    // 2026-09: SEBELUMNYA upsert produk + insert harga dilakukan
+    // SATU-SATU per baris (await di dalam loop) -- buat 805 baris,
+    // itu ratusan round-trip berurutan ke Supabase, jauh melebihi
+    // limit waktu function di plan Vercel Hobby (~60 detik) -> selalu
+    // gagal 504 Gateway Timeout. Sekarang di-batch: upsert produk
+    // dalam beberapa panggilan besar, lalu insert harga dalam
+    // beberapa batch besar -- total cuma butuh belasan round-trip,
+    // bukan ribuan.
+    const validRows = body.rows.filter((row) => {
       const sku = row.sku.trim()
       if (!sku) {
         skippedNoSku++
-        continue
+        return false
       }
+      return true
+    })
 
-      const { data: productRow, error: productErr } = await supabase
+    const productUpserts = validRows.map((row) => ({
+      branch_id: config.branchId,
+      sku: row.sku.trim(),
+      name: row.name,
+      brand: row.brand || null,
+      category: row.category || null,
+      is_active: true,
+      source_updated_at: new Date().toISOString(),
+    }))
+
+    // Batch 500 baris per panggilan (bukan sekaligus semua -- jaga-
+    // jaga kalau row-nya nanti nambah banyak). `.select("id, sku")`
+    // langsung balikin id yang baru di-upsert, jadi gak perlu query
+    // terpisah buat dapetin product_id.
+    const BATCH = 500
+    const productIdBySku = new Map<string, string>()
+    for (let i = 0; i < productUpserts.length; i += BATCH) {
+      const chunk = productUpserts.slice(i, i + BATCH)
+      const { data: rows, error: productErr } = await supabase
         .from('products')
-        .upsert(
-          { branch_id: config.branchId, sku, name: row.name, brand: row.brand || null, category: row.category || null, is_active: true, source_updated_at: new Date().toISOString() },
-          { onConflict: 'branch_id,sku' },
-        )
-        .select('id')
-        .single()
-      if (productErr) throw new Error(`Gagal simpan produk "${row.name}" (baris ${row.rowNumber}): ${productErr.message}`)
-      const productId = productRow.id as string
-      productCount++
+        .upsert(chunk, { onConflict: 'branch_id,sku' })
+        .select('id, sku')
+      if (productErr) throw new Error(`Gagal simpan batch produk (baris ke-${i + 1} s.d. ${i + chunk.length}): ${productErr.message}`)
+      ;(rows ?? []).forEach((r: any) => productIdBySku.set(r.sku, r.id))
+      productCount += chunk.length
+    }
 
-      // Tier yang ditulis -- price_list, online, qty_discount, reseller_dpp,
-      // reseller_special. "modal" TIDAK ADA DI SINI SAMA SEKALI, sengaja.
-      const priceEntries: Array<[string, number | null]> = [
+    // Tier yang ditulis -- price_list, online, qty_discount, reseller_dpp,
+    // reseller_special. "modal" TIDAK ADA DI SINI SAMA SEKALI, sengaja.
+    const priceInserts: Array<{ product_id: string; price_tier: string; amount: number; sync_batch_id: string }> = []
+    for (const row of validRows) {
+      const productId = productIdBySku.get(row.sku.trim())
+      if (!productId) continue // seharusnya gak pernah terjadi, tapi jaga-jaga
+      const entries: Array<[string, number | null]> = [
         ['price_list', row.priceList],
         ['online', row.hargaOnline],
         ['qty_discount', row.qtyDiscount],
         ['reseller_dpp', row.resellerDpp],
         ['reseller_special', row.resellerSpecial],
       ]
-      const priceInserts = priceEntries
+      entries
         .filter(([, amount]) => amount !== null)
-        .map(([priceTier, amount]) => ({ product_id: productId, price_tier: priceTier, amount: amount as number, sync_batch_id: batchId }))
-      if (priceInserts.length > 0) {
-        const { error: priceErr } = await supabase.from('product_prices').insert(priceInserts)
-        if (priceErr) throw new Error(`Gagal simpan harga "${row.name}" (baris ${row.rowNumber}): ${priceErr.message}`)
-      }
+        .forEach(([priceTier, amount]) => priceInserts.push({ product_id: productId, price_tier: priceTier, amount: amount as number, sync_batch_id: batchId }))
+    }
+
+    for (let i = 0; i < priceInserts.length; i += BATCH) {
+      const chunk = priceInserts.slice(i, i + BATCH)
+      const { error: priceErr } = await supabase.from('product_prices').insert(chunk)
+      if (priceErr) throw new Error(`Gagal simpan batch harga (baris ke-${i + 1} s.d. ${i + chunk.length}): ${priceErr.message}`)
     }
 
     await supabase
