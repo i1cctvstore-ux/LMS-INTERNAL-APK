@@ -90,19 +90,23 @@ export async function listSyncBatches(branchId: string): Promise<SyncBatchRow[]>
 }
 
 /**
- * Triggers the price-list sync job. Requires a Supabase Edge Function named
- * "sync-price-list" that: reads the branch's Google Sheet (Jakarta) or other
- * source, validates it, and writes products/product_prices/sync_batches
- * using the service role key. That Edge Function is NOT part of this
- * handoff — build it separately per section 6 of the original handoff doc
- * ("Sync harus deterministik: Sheet → normalisasi → validasi → database").
- * This function only calls it and surfaces the result; it does not write
- * to products/product_prices/sync_batches directly (those have no client
- * insert policy on purpose — see 001_quote_builder_schema.sql).
+ * Triggers the price-list sync job — lewat Next.js API route
+ * app/api/quote-builder/sync-price-list/route.ts (bukan Supabase Edge
+ * Function — diganti 2026-09 biar deploy-nya cukup commit ke GitHub,
+ * gak perlu `supabase functions deploy`/CLI). Route itu yang baca
+ * Google Sheet cabang (via Apps Script Web App, lihat
+ * sync-price-list.gs) dan nulis products/product_prices/sync_batches
+ * pakai service role key (client tidak punya insert policy ke tabel
+ * itu — lihat 001_quote_builder_schema.sql).
  */
 export async function triggerManualSync(branchId: string) {
-  const { data, error } = await supabase.functions.invoke("sync-price-list", { body: { branchId } });
-  if (error) throw error;
+  const res = await fetch("/api/quote-builder/sync-price-list", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ branchId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || `Sync gagal (HTTP ${res.status})`);
   return data as { batchId: string; productCount: number; status: string };
 }
 
