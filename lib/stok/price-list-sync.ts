@@ -116,7 +116,20 @@ export async function syncPriceListForBranch(
       return true
     })
 
-    const productUpserts = validRows.map((row) => ({
+    // 2026-09: sheet-nya kadang punya SKU yang DIPAKAI ULANG buat
+    // produk berbeda (contoh nyata: "ACOME-BOHLAM" dipakai buat 3
+    // produk beda -- bohlam, PTZ, video call). Postgres nolak upsert
+    // kalau 1 statement ON CONFLICT nyoba update baris (branch_id,
+    // sku) yang SAMA lebih dari sekali ("cannot affect row a second
+    // time"). Dedup dari sumbernya (bukan cuma pas upsert produk) --
+    // SKU yang dobel diambil kemunculan TERAKHIR di sheet (dianggap
+    // paling update), biar harga yang ke-insert juga konsisten (gak
+    // 3x redundant buat SKU yang sama).
+    const dedupedRowsBySku = new Map<string, (typeof validRows)[number]>()
+    validRows.forEach((row) => dedupedRowsBySku.set(row.sku.trim(), row))
+    const dedupedRows = [...dedupedRowsBySku.values()]
+
+    const productUpserts = dedupedRows.map((row) => ({
       branch_id: config.branchId,
       sku: row.sku.trim(),
       name: row.name,
@@ -146,7 +159,7 @@ export async function syncPriceListForBranch(
     // Tier yang ditulis -- price_list, online, qty_discount, reseller_dpp,
     // reseller_special. "modal" TIDAK ADA DI SINI SAMA SEKALI, sengaja.
     const priceInserts: Array<{ product_id: string; price_tier: string; amount: number; sync_batch_id: string }> = []
-    for (const row of validRows) {
+    for (const row of dedupedRows) {
       const productId = productIdBySku.get(row.sku.trim())
       if (!productId) continue // seharusnya gak pernah terjadi, tapi jaga-jaga
       const entries: Array<[string, number | null]> = [
