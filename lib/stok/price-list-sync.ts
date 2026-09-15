@@ -97,7 +97,7 @@ export async function syncPriceListForBranch(
     }
 
     let productCount = 0
-    let skippedNoSku = 0
+    let skippedNoSku = 0 // 2026-09: sekarang cuma buat baris yang gak punya SKU MAUPUN nama (harusnya gak pernah kejadian)
 
     // 2026-09: SEBELUMNYA upsert produk + insert harga dilakukan
     // SATU-SATU per baris (await di dalam loop) -- buat 805 baris,
@@ -108,13 +108,15 @@ export async function syncPriceListForBranch(
     // beberapa batch besar -- total cuma butuh belasan round-trip,
     // bukan ribuan.
     const validRows = body.rows.filter((row) => {
-      const sku = row.sku.trim()
-      if (!sku) {
+      if (!row.name?.trim()) {
         skippedNoSku++
         return false
       }
       return true
     })
+
+    const rowsWithSku = validRows.filter((row) => row.sku.trim())
+    const rowsWithoutSku = validRows.filter((row) => !row.sku.trim())
 
     // 2026-09: sheet-nya kadang punya SKU yang DIPAKAI ULANG buat
     // produk berbeda (contoh nyata: "ACOME-BOHLAM" dipakai buat 3
@@ -125,8 +127,8 @@ export async function syncPriceListForBranch(
     // SKU yang dobel diambil kemunculan TERAKHIR di sheet (dianggap
     // paling update), biar harga yang ke-insert juga konsisten (gak
     // 3x redundant buat SKU yang sama).
-    const dedupedRowsBySku = new Map<string, (typeof validRows)[number]>()
-    validRows.forEach((row) => dedupedRowsBySku.set(row.sku.trim(), row))
+    const dedupedRowsBySku = new Map<string, (typeof rowsWithSku)[number]>()
+    rowsWithSku.forEach((row) => dedupedRowsBySku.set(row.sku.trim(), row))
     const dedupedRows = [...dedupedRowsBySku.values()]
 
     const productUpserts = dedupedRows.map((row) => ({
@@ -156,11 +158,65 @@ export async function syncPriceListForBranch(
       productCount += chunk.length
     }
 
+    // 2026-09: produk TANPA SKU (banyak dari kategori jasa/aksesoris
+    // generik -- "JASA INSTALASI...", "KABEL FO SINGLE CORE...", dst)
+    // SEBELUMNYA di-skip total dari sync. Sekarang tetap di-include,
+    // pakai (branch_id, name) sebagai identitas pengganti -- karena
+    // gak ada unique constraint buat itu (beda dari sku), upsert-nya
+    // dilakukan manual: cari dulu produk yang sudah ada dengan nama +
+    // sku kosong yang sama (buat DI-UPDATE, bukan bikin baris baru
+    // tiap kali sync), sisanya di-insert sebagai produk baru.
+    const dedupedRowsByName = new Map<string, (typeof rowsWithoutSku)[number]>()
+    rowsWithoutSku.forEach((row) => dedupedRowsByName.set(row.name, row))
+    const dedupedNoSkuRows = [...dedupedRowsByName.values()]
+
+    const productIdByName = new Map<string, string>()
+    if (dedupedNoSkuRows.length > 0) {
+      const names = dedupedNoSkuRows.map((r) => r.name)
+      const existingByName = new Map<string, string>()
+      for (let i = 0; i < names.length; i += BATCH) {
+        const chunkNames = names.slice(i, i + BATCH)
+        const { data: existingRows, error: existingErr } = await supabase
+          .from('products')
+          .select('id, name')
+          .eq('branch_id', config.branchId)
+          .is('sku', null)
+          .in('name', chunkNames)
+        if (existingErr) throw new Error(`Gagal cek produk tanpa SKU yang sudah ada: ${existingErr.message}`)
+        ;(existingRows ?? []).forEach((r: any) => existingByName.set(r.name, r.id))
+      }
+
+      const noSkuUpserts = dedupedNoSkuRows.map((row) => ({
+        ...(existingByName.has(row.name) ? { id: existingByName.get(row.name) } : {}),
+        branch_id: config.branchId,
+        sku: null,
+        name: row.name,
+        brand: row.brand || null,
+        category: row.category || null,
+        is_active: true,
+        source_updated_at: new Date().toISOString(),
+      }))
+
+      for (let i = 0; i < noSkuUpserts.length; i += BATCH) {
+        const chunk = noSkuUpserts.slice(i, i + BATCH)
+        // Gak perlu `onConflict` -- baris yang sudah ada (existing.id
+        // diset di atas) otomatis kena update lewat conflict primary
+        // key, baris baru (gak ada id) langsung insert biasa.
+        const { data: rows, error: noSkuErr } = await supabase.from('products').upsert(chunk).select('id, name')
+        if (noSkuErr) throw new Error(`Gagal simpan batch produk tanpa SKU (baris ke-${i + 1} s.d. ${i + chunk.length}): ${noSkuErr.message}`)
+        ;(rows ?? []).forEach((r: any) => productIdByName.set(r.name, r.id))
+        productCount += chunk.length
+      }
+    }
+
     // Tier yang ditulis -- price_list, online, qty_discount, reseller_dpp,
     // reseller_special. "modal" TIDAK ADA DI SINI SAMA SEKALI, sengaja.
     const priceInserts: Array<{ product_id: string; price_tier: string; amount: number; sync_batch_id: string }> = []
-    for (const row of dedupedRows) {
-      const productId = productIdBySku.get(row.sku.trim())
+    const allRowsWithProductId = [
+      ...dedupedRows.map((row) => ({ row, productId: productIdBySku.get(row.sku.trim()) })),
+      ...dedupedNoSkuRows.map((row) => ({ row, productId: productIdByName.get(row.name) })),
+    ]
+    for (const { row, productId } of allRowsWithProductId) {
       if (!productId) continue // seharusnya gak pernah terjadi, tapi jaga-jaga
       const entries: Array<[string, number | null]> = [
         ['price_list', row.priceList],
