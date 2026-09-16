@@ -53,5 +53,6 @@ export async function POST(request: Request) {
   const first = result.results?.[0]
   if (!first) return Response.json(result, { status: 400 })
   if (first.status === 'error') return Response.json({ message: first.message }, { status: 500 })
-  return Response.json({ batchId: first.batchId, productCount: first.productCount, status: 'success' })
+  const { status, ...rest } = first
+  return Response.json({ ...rest, status: 'success' })
 }
