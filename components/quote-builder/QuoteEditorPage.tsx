@@ -38,6 +38,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  Share2,
   Trash2,
   X,
 } from "lucide-react";
@@ -195,7 +196,68 @@ function QuotePreview({ alternatives, clientName, projectName, quoteDate, validD
     }
   };
 
-  return <div className="preview-mode"><header className="preview-toolbar"><button className="back-editor" onClick={onBack}><ArrowLeft size={17} /> Kembali ke editor</button><div className="preview-toolbar-actions"><span><CheckCircle2 size={15} /> Data dari draft aktif</span><button className="outline-button" onClick={() => window.print()}><Printer size={17} /> Cetak</button><button className="outline-button" onClick={exportPdf} disabled={isExporting} aria-busy={isExporting}><Printer size={17} /> {isExporting ? "Menyiapkan PDF…" : "Unduh PDF"}</button></div></header><main className="preview-canvas"><ProposalDocument alternatives={alternatives} clientName={clientName} projectName={projectName} quoteDate={quoteDate} validDate={validDate} notes={notes} branch={branch} documentRef={documentRef} /></main></div>;
+  // 2026-09-16: "Bagikan PDF" -- generate PDF sebagai Blob (bukan
+  // langsung .save() kayak exportPdf), lalu coba pakai Web Share API
+  // bawaan HP (navigator.share dengan files) -- ini yang bikin PDF
+  // BENERAN ke-attach otomatis ke WhatsApp/aplikasi lain dari menu
+  // Share HP, tanpa harus download manual dulu. TIDAK ADA cara resmi
+  // buat kirim file langsung ke WhatsApp tanpa lewat menu Share OS --
+  // WhatsApp gak punya API upload file dari web biasa (beda dari
+  // WhatsApp Business API yang berbayar & butuh infrastruktur
+  // terpisah). Kalau device/browser gak dukung Web Share dengan file
+  // (kebanyakan laptop/desktop Windows saat ini), fallback ke
+  // download PDF biasa + kasih tau lewat toast.
+  const [isSharing, setIsSharing] = useState(false);
+  const sharePdf = async () => {
+    if (!documentRef.current || isSharing) return;
+    setIsSharing(true);
+    const filename = `Penawaran_${safeFilePart(internalCode)}_${safeFilePart(clientName)}.pdf`;
+    try {
+      const html2pdf = (await import("html2pdf.js")).default;
+      const blob: Blob = await (html2pdf() as any)
+        .set({
+          margin: [0, 0, 0, 0],
+          filename,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+          pagebreak: { mode: ["css", "legacy"], avoid: [".proposal-alt", ".proposal-grand-total", ".proposal-notes", ".proposal-signature"] },
+        })
+        .from(documentRef.current)
+        .outputPdf("blob");
+
+      const file = new File([blob], filename, { type: "application/pdf" });
+      const nav = navigator as Navigator & { canShare?: (data?: ShareData) => boolean; share?: (data: ShareData) => Promise<void> };
+
+      if (nav.canShare && nav.canShare({ files: [file] }) && nav.share) {
+        await nav.share({ files: [file], title: `Penawaran ${internalCode}`, text: `Penawaran untuk ${clientName} — ${projectName}` });
+        // Tidak ada toast sukses di sini -- setelah nav.share() resolve,
+        // dialog share OS sudah tertutup TAPI itu tidak berarti pesannya
+        // sudah benar-benar terkirim (user masih bisa batal di aplikasi
+        // tujuan setelah ini). Toast "berhasil dikirim" di titik ini akan
+        // salah/menyesatkan.
+      } else {
+        const url = URL.createObjectURL(file);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+        toast.info("Perangkat/browser ini belum bisa langsung bagikan file.", { description: "PDF diunduh — lampirkan manual ke WhatsApp lewat tombol klip 📎.", duration: 7000 });
+      }
+    } catch (error) {
+      // User membatalkan dialog share OS juga melempar AbortError -- itu
+      // bukan kegagalan, jadi tidak perlu toast error.
+      if ((error as any)?.name !== "AbortError") {
+        console.error("PDF share failed", error);
+        toast.error("Gagal menyiapkan PDF untuk dibagikan.", { description: "Coba lagi, atau gunakan tombol Unduh PDF." });
+      }
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  return <div className="preview-mode"><header className="preview-toolbar"><button className="back-editor" onClick={onBack}><ArrowLeft size={17} /> Kembali ke editor</button><div className="preview-toolbar-actions"><span><CheckCircle2 size={15} /> Data dari draft aktif</span><button className="outline-button" onClick={() => window.print()}><Printer size={17} /> Cetak</button><button className="outline-button" onClick={sharePdf} disabled={isSharing} aria-busy={isSharing}><Share2 size={17} /> {isSharing ? "Menyiapkan…" : "Bagikan PDF"}</button><button className="outline-button" onClick={exportPdf} disabled={isExporting} aria-busy={isExporting}><Printer size={17} /> {isExporting ? "Menyiapkan PDF…" : "Unduh PDF"}</button></div></header><main className="preview-canvas"><ProposalDocument alternatives={alternatives} clientName={clientName} projectName={projectName} quoteDate={quoteDate} validDate={validDate} notes={notes} branch={branch} documentRef={documentRef} /></main></div>;
 }
 
 export type QuoteEditorPageProps = {
