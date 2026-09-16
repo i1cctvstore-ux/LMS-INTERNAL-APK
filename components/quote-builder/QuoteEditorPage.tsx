@@ -195,7 +195,7 @@ function QuotePreview({ alternatives, clientName, projectName, quoteDate, validD
     }
   };
 
-  return <div className="preview-mode"><header className="preview-toolbar"><button className="back-editor" onClick={onBack}><ArrowLeft size={17} /> Kembali ke editor</button><div className="preview-toolbar-actions"><span><CheckCircle2 size={15} /> Data dari draft aktif</span><button className="outline-button" onClick={exportPdf} disabled={isExporting} aria-busy={isExporting}><Printer size={17} /> {isExporting ? "Menyiapkan PDF…" : "Unduh PDF"}</button></div></header><main className="preview-canvas"><ProposalDocument alternatives={alternatives} clientName={clientName} projectName={projectName} quoteDate={quoteDate} validDate={validDate} notes={notes} branch={branch} documentRef={documentRef} /></main></div>;
+  return <div className="preview-mode"><header className="preview-toolbar"><button className="back-editor" onClick={onBack}><ArrowLeft size={17} /> Kembali ke editor</button><div className="preview-toolbar-actions"><span><CheckCircle2 size={15} /> Data dari draft aktif</span><button className="outline-button" onClick={() => window.print()}><Printer size={17} /> Cetak</button><button className="outline-button" onClick={exportPdf} disabled={isExporting} aria-busy={isExporting}><Printer size={17} /> {isExporting ? "Menyiapkan PDF…" : "Unduh PDF"}</button></div></header><main className="preview-canvas"><ProposalDocument alternatives={alternatives} clientName={clientName} projectName={projectName} quoteDate={quoteDate} validDate={validDate} notes={notes} branch={branch} documentRef={documentRef} /></main></div>;
 }
 
 export type QuoteEditorPageProps = {
