@@ -64,8 +64,15 @@ export default function ProductCatalogPage() {
     if (isSyncing || !branchId) return;
     setIsSyncing(true);
     try {
-      await triggerManualSync(branchId);
-      toast.success("Generate Sync Database selesai.");
+      const result = await triggerManualSync(branchId);
+      // 2026-09: kasih rincian tahap dedup di toast -- biar kelihatan
+      // PERSIS di mana angka produk berkurang dari total baris sheet
+      // (SKU duplikat vs produk tanpa SKU yang namanya dobel), bukan
+      // cuma angka akhir doang.
+      toast.success(`Sync selesai — ${result.productCount} produk tersimpan.`, {
+        description: `Sheet: ${result.totalRows} baris. SKU: ${result.rowsWithSkuCount} baris, ${result.duplicateSkuCount} duplikat. Tanpa SKU: ${result.rowsWithoutSkuCount} baris, ${result.duplicateNoSkuCount} duplikat.`,
+        duration: 15000,
+      });
       reload();
     } catch (err) {
       // Most likely cause on a fresh deploy: the "sync-price-list" Edge Function
