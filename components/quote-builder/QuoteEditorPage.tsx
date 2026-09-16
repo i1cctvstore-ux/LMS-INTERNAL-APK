@@ -163,30 +163,60 @@ function QuotePreview({ alternatives, clientName, projectName, quoteDate, validD
   const documentRef = useRef<HTMLElement>(null);
   const [isExporting, setIsExporting] = useState(false);
 
+  // 2026-09-16: html2pdf.js (dan versi html2canvas lama yang dia bawa)
+  // gagal total ("Attempting to parse an unsupported color function
+  // lab") begitu browser modern melaporkan sebagian warna terkomputasi
+  // dalam format CSS baru (lab()/oklch()) -- ini bug lama & dikenal di
+  // html2canvas versi lama, BUKAN soal kode kita. Diganti pakai
+  // `html2canvas-pro` (fork drop-in yang emang dibuat khusus buat
+  // nutup bug ini) + `jsPDF` langsung, gak lewat html2pdf.js lagi.
+  //
+  // Trade-off: html2pdf.js sebelumnya punya opsi `pagebreak.avoid`
+  // buat nyegah tabel/ALT kepotong pas ganti halaman PDF. jsPDF
+  // manual di sini TIDAK punya itu -- pembagian halamannya murni
+  // per-tinggi-gambar, jadi ada kemungkinan kecil 1 baris tabel
+  // kepotong di pergantian halaman kalau dokumennya panjang. Ini
+  // trade-off yang diterima demi PDF-nya beneran jalan lagi -- kalau
+  // nanti ganggu, bisa dirapikan lagi belakangan.
+  const buildPdfBlob = async (): Promise<Blob> => {
+    if (!documentRef.current) throw new Error("Dokumen belum siap dirender.");
+    const html2canvas = (await import("html2canvas-pro")).default;
+    const { jsPDF } = await import("jspdf");
+
+    const canvas = await html2canvas(documentRef.current, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false });
+    const imgData = canvas.toDataURL("image/jpeg", 0.98);
+
+    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    let heightLeft = imgHeight;
+    let position = 0;
+    pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
+    heightLeft -= pageHeight;
+    while (heightLeft > 0) {
+      position = -(imgHeight - heightLeft);
+      pdf.addPage();
+      pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+    }
+    return pdf.output("blob");
+  };
+
   const exportPdf = async () => {
     if (!documentRef.current || isExporting) return;
     setIsExporting(true);
     const filename = `Penawaran_${safeFilePart(internalCode)}_${safeFilePart(clientName)}.pdf`;
     try {
-      // 2026-09: import dinamis, BUKAN import statis di atas file --
-      // html2pdf.js (dan html2canvas/jspdf di baliknya) menyentuh
-      // `self`/`window` di level modul, jadi kalau di-import statis,
-      // Next.js ikut mengevaluasinya waktu SSR/prerender halaman "/"
-      // (server tidak punya `self`) -> build gagal ("self is not
-      // defined"). Dynamic import di sini cuma jalan di browser saat
-      // tombol ini benar-benar diklik, jadi aman.
-      const html2pdf = (await import("html2pdf.js")).default;
-      await (html2pdf() as any)
-        .set({
-          margin: [0, 0, 0, 0],
-          filename,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-          pagebreak: { mode: ["css", "legacy"], avoid: [".proposal-alt", ".proposal-grand-total", ".proposal-notes", ".proposal-signature"] },
-        })
-        .from(documentRef.current)
-        .save();
+      const blob = await buildPdfBlob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
       toast.success("PDF penawaran berhasil diunduh.", { description: filename });
     } catch (error) {
       console.error("PDF export failed", error);
@@ -197,7 +227,7 @@ function QuotePreview({ alternatives, clientName, projectName, quoteDate, validD
   };
 
   // 2026-09-16: "Bagikan PDF" -- generate PDF sebagai Blob (bukan
-  // langsung .save() kayak exportPdf), lalu coba pakai Web Share API
+  // langsung download kayak exportPdf), lalu coba pakai Web Share API
   // bawaan HP (navigator.share dengan files) -- ini yang bikin PDF
   // BENERAN ke-attach otomatis ke WhatsApp/aplikasi lain dari menu
   // Share HP, tanpa harus download manual dulu. TIDAK ADA cara resmi
@@ -213,19 +243,7 @@ function QuotePreview({ alternatives, clientName, projectName, quoteDate, validD
     setIsSharing(true);
     const filename = `Penawaran_${safeFilePart(internalCode)}_${safeFilePart(clientName)}.pdf`;
     try {
-      const html2pdf = (await import("html2pdf.js")).default;
-      const blob: Blob = await (html2pdf() as any)
-        .set({
-          margin: [0, 0, 0, 0],
-          filename,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-          pagebreak: { mode: ["css", "legacy"], avoid: [".proposal-alt", ".proposal-grand-total", ".proposal-notes", ".proposal-signature"] },
-        })
-        .from(documentRef.current)
-        .outputPdf("blob");
-
+      const blob = await buildPdfBlob();
       const file = new File([blob], filename, { type: "application/pdf" });
       const nav = navigator as Navigator & { canShare?: (data?: ShareData) => boolean; share?: (data: ShareData) => Promise<void> };
 
