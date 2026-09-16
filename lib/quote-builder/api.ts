@@ -58,25 +58,29 @@ export async function listBranches(): Promise<BranchRow[]> {
 // itu ngirim query string RAKSASA dan kerasa lambat banget dimuat.
 // Sekarang 1 query lewat RPC `get_active_catalog_for_branch` yang join
 // langsung di database.
-type CatalogRpcRow = { product_id: string; name: string; sku: string | null; brand: string | null; price_tier: string | null; amount: number | null };
+// 2026-09: RPC sekarang balikin 1 baris per PRODUK (harga digabung
+// jadi 1 kolom JSON), bukan lagi 1 baris per kombinasi produk-tier --
+// versi lama itu buat ~795 produk x ~4 tier = ~3180 baris, kepotong
+// limit default 1000 baris/response Supabase, jadi cuma ~250 produk
+// UNIK yang kebaca. Lihat migration fix-catalog-rpc-one-row-per-product.sql.
+type CatalogRpcRow = { product_id: string; name: string; sku: string | null; brand: string | null; prices: Record<string, number> | null };
 
 export async function listCatalog(branchId: string): Promise<Product[]> {
   const { data, error } = await supabase.rpc("get_active_catalog_for_branch", { p_branch_id: branchId });
   if (error) throw error;
 
   const rows = (data ?? []) as CatalogRpcRow[];
-  const byProduct = new Map<string, Product>();
-  const dbKeyToTier = new Map<string, PriceType>(Object.entries(PRICE_TIER_DB_KEY).map(([tier, dbKey]) => [dbKey, tier as PriceType]));
-
-  for (const row of rows) {
-    if (!byProduct.has(row.product_id)) {
-      byProduct.set(row.product_id, { id: row.product_id, name: row.name, sku: row.sku ?? "", brand: row.brand ?? "", prices: { net: 0, reseller: 0, special: 0 } });
-    }
-    const tier = row.price_tier ? dbKeyToTier.get(row.price_tier) : undefined;
-    if (tier && row.amount != null) byProduct.get(row.product_id)!.prices[tier] = Number(row.amount);
-  }
-
-  return [...byProduct.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return rows
+    .map((row) => {
+      const byTier: Record<PriceType, number> = { net: 0, reseller: 0, special: 0 };
+      for (const tier of Object.keys(PRICE_TIER_DB_KEY) as PriceType[]) {
+        const dbKey = PRICE_TIER_DB_KEY[tier];
+        const amount = row.prices?.[dbKey];
+        if (amount != null) byTier[tier] = Number(amount);
+      }
+      return { id: row.product_id, name: row.name, sku: row.sku ?? "", brand: row.brand ?? "", prices: byTier };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function listSyncBatches(branchId: string): Promise<SyncBatchRow[]> {
