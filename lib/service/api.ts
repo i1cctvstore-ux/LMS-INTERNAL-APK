@@ -611,7 +611,38 @@ async function syncClaims(branchId: string, prev: Claim[], next: Claim[], userId
   const tasks: Promise<{ error: any }>[] = []
   if (inserted.length)
     tasks.push(...chunkedInsertTasks(supabase, 'service_claims', inserted.map((c) => claimToRow(c, branchId, userId))))
-  updated.forEach((c) => tasks.push(supabase.from('service_claims').update(claimToRow(c, branchId)).eq('id', c.id)))
+
+  // 2026-09: SEBELUMNYA baris di bawah ngirim SELURUH field klaim
+  // (claimToRow(c, branchId) dengan c = versi lengkap dari `next`),
+  // bukan cuma field yang beneran berubah. Kalau tab/sesi ini punya
+  // data basi -- misal `status` klaim ini udah diubah jadi "Di
+  // Supplier" dari tab/device lain, tapi tab INI belum di-reload sejak
+  // itu -- begitu tab ini nyimpen perubahan APAPUN pada klaim yang
+  // sama (walau gak nyentuh status sama sekali, misal cuma nambah
+  // catatan), field status basi yang masih nyangkut di memory tab ini
+  // ikut ketulis balik ke database, NIMPA status yang sudah benar.
+  // Ini akar masalah laporan "sudah dikirim ke supplier, besok balik
+  // ke Perlu Dicek". Fix: cuma kirim field yang BENERAN beda dari
+  // sudut pandang tab ini sendiri (dibanding `prev` versi tab ini),
+  // biar field yang gak disentuh tab ini gak ikut kekirim & gak bisa
+  // nimpa apapun.
+  const prevById = new Map(prev.map((p) => [p.id, p]))
+  updated.forEach((c) => {
+    const before = prevById.get(c.id)
+    const patch: Record<string, unknown> = { id: c.id }
+    if (before) {
+      ;(Object.keys(c) as (keyof Claim)[]).forEach((key) => {
+        if (key === 'id') return
+        if (JSON.stringify((before as any)[key]) !== JSON.stringify((c as any)[key])) {
+          patch[key] = (c as any)[key]
+        }
+      })
+    } else {
+      Object.assign(patch, c)
+    }
+    tasks.push(supabase.from('service_claims').update(claimToRow(patch as Partial<Claim>, branchId)).eq('id', c.id))
+  })
+
   if (deletedIds.length) tasks.push(supabase.from('service_claims').delete().in('id', deletedIds))
   await runAndCheck(tasks)
 
