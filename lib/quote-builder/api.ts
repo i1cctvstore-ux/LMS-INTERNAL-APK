@@ -53,29 +53,30 @@ export async function listBranches(): Promise<BranchRow[]> {
 // ---------------------------------------------------------------------
 // Catalog (products + active prices), branch-scoped
 // ---------------------------------------------------------------------
+// 2026-09: SEBELUMNYA 2 query -- ambil semua produk, terus ambil harga
+// pakai `.in('product_id', [...ratusan UUID...])`. Buat ~800 produk,
+// itu ngirim query string RAKSASA dan kerasa lambat banget dimuat.
+// Sekarang 1 query lewat RPC `get_active_catalog_for_branch` yang join
+// langsung di database.
+type CatalogRpcRow = { product_id: string; name: string; sku: string | null; brand: string | null; price_tier: string | null; amount: number | null };
+
 export async function listCatalog(branchId: string): Promise<Product[]> {
-  const { data: products, error: productsError } = await supabase
-    .from("products")
-    .select("*")
-    .eq("branch_id", branchId)
-    .eq("is_active", true)
-    .order("name");
-  if (productsError) throw productsError;
+  const { data, error } = await supabase.rpc("get_active_catalog_for_branch", { p_branch_id: branchId });
+  if (error) throw error;
 
-  const productRows = (products ?? []) as ProductRow[];
-  if (productRows.length === 0) return [];
+  const rows = (data ?? []) as CatalogRpcRow[];
+  const byProduct = new Map<string, Product>();
+  const dbKeyToTier = new Map<string, PriceType>(Object.entries(PRICE_TIER_DB_KEY).map(([tier, dbKey]) => [dbKey, tier as PriceType]));
 
-  const { data: prices, error: pricesError } = await supabase
-    .from("active_product_prices")
-    .select("*")
-    .in(
-      "product_id",
-      productRows.map((p) => p.id),
-    );
-  if (pricesError) throw pricesError;
+  for (const row of rows) {
+    if (!byProduct.has(row.product_id)) {
+      byProduct.set(row.product_id, { id: row.product_id, name: row.name, sku: row.sku ?? "", brand: row.brand ?? "", prices: { net: 0, reseller: 0, special: 0 } });
+    }
+    const tier = row.price_tier ? dbKeyToTier.get(row.price_tier) : undefined;
+    if (tier && row.amount != null) byProduct.get(row.product_id)!.prices[tier] = Number(row.amount);
+  }
 
-  const priceRows = (prices ?? []) as ActiveProductPriceRow[];
-  return productRows.map((product) => mapProductRow(product, priceRows));
+  return [...byProduct.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function listSyncBatches(branchId: string): Promise<SyncBatchRow[]> {
