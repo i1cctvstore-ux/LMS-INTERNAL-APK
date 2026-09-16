@@ -1019,3 +1019,34 @@
   padding-top: 4px !important;
   padding-bottom: 16px !important;
 }
+
+/* 2026-09-15: fix SKU panjang (mis. "DAHUA-DH-XVR5104HS-4KL-I3-T") yang
+   "bocor" nutupin kolom harga di sebelahnya di tabel Katalog Produk --
+   sebelumnya cuma white-space:nowrap tanpa overflow/ellipsis, jadi teks
+   yang kepanjangan gak ke-clip, malah numpuk ke kolom Harga Online. */
+.qb-root .catalog-price-table td code {
+  display: block;
+  overflow: hidden;
+  max-width: 100%;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 2026-09-16: fix v2 -- fix sebelumnya (overflow di elemen <code>)
+   ternyata gak cukup, karena <td> di tabel dengan table-layout:fixed
+   gak otomatis "menghormati" lebar kolomnya sendiri buat constrain
+   anak-anaknya kecuali di-set overflow:hidden + max-width:0 di TD-nya
+   JUGA (bukan cuma di elemen <code> di dalamnya) -- ini trik standar
+   buat bikin ellipsis kerja di dalam tabel. Pakai !important biar
+   pasti menang di atas rule lain manapun. */
+.qb-root .catalog-price-table td:nth-child(3) {
+  overflow: hidden !important;
+  max-width: 0 !important;
+}
+.qb-root .catalog-price-table td:nth-child(3) code {
+  display: block !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis !important;
+  max-width: 100% !important;
+}
