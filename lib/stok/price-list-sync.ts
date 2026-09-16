@@ -68,7 +68,20 @@ type SheetRow = {
 }
 type SheetPayload = { sheetVersion: string; generatedAt: string; rowCount: number; rows: SheetRow[]; warnings: string[] }
 
-export type SyncResult = { branchName: string; batchId: string; productCount: number; skippedNoSku: number; warnings: string[] }
+export type SyncResult = {
+  branchName: string
+  batchId: string
+  productCount: number
+  skippedNoSku: number
+  warnings: string[]
+  // 2026-09: diagnostic -- biar kelihatan PERSIS di tahap mana angka
+  // produk berkurang dari total baris sheet, bukan cuma angka akhir.
+  totalRows: number
+  rowsWithSkuCount: number
+  duplicateSkuCount: number
+  rowsWithoutSkuCount: number
+  duplicateNoSkuCount: number
+}
 
 export async function syncPriceListForBranch(
   config: PriceListBranchConfig,
@@ -252,7 +265,18 @@ export async function syncPriceListForBranch(
       .update({ status: 'success', source_version: body.sheetVersion, product_count: productCount, finished_at: new Date().toISOString() })
       .eq('id', batchId)
 
-    return { branchName: config.branchName, batchId, productCount, skippedNoSku, warnings: body.warnings }
+    return {
+      branchName: config.branchName,
+      batchId,
+      productCount,
+      skippedNoSku,
+      warnings: body.warnings,
+      totalRows: body.rows.length,
+      rowsWithSkuCount: rowsWithSku.length,
+      duplicateSkuCount: rowsWithSku.length - dedupedRows.length,
+      rowsWithoutSkuCount: rowsWithoutSku.length,
+      duplicateNoSkuCount: rowsWithoutSku.length - dedupedNoSkuRows.length,
+    }
   } catch (err: any) {
     await supabase
       .from('sync_batches')
