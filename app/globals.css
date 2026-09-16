@@ -1075,3 +1075,29 @@
     height: 34px !important;
   }
 }
+
+/* 2026-09-16: kolom terakhir (row-menu-cell) di tabel Daftar
+   Penawaran sebelumnya SENGAJA disembunyikan (display:none!important)
+   waktu belum ada fungsi apa-apa di situ. Sekarang dipakai buat
+   tombol Hapus yang beneran jalan -- tampilin lagi. */
+.qb-root .concise-list-table th:last-child,
+.qb-root .concise-list-table td.row-menu-cell {
+  display: table-cell !important;
+  width: 44px !important;
+  min-width: 44px !important;
+  text-align: right !important;
+  padding-right: 14px !important;
+}
+.qb-root .concise-list-table td.row-menu-cell .icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: #9aa4b5;
+  background: transparent;
+}
+.qb-root .concise-list-table td.row-menu-cell .icon-button:hover {
+  color: #b64f3d;
+  background: #fff5f3;
+}
