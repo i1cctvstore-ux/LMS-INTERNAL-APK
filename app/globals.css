@@ -1050,3 +1050,28 @@
   text-overflow: ellipsis !important;
   max-width: 100% !important;
 }
+
+/* 2026-09-16: .company-mark tadinya kotak kecil 37x37 buat ikon doang
+   (dulu company-panel punya teks nama perusahaan terpisah di sebelah
+   ikon via <strong>/<b>). Sekarang logo kop surat (PT. Isatu Solusi
+   Utama / i1 CCTV) itu 1 gambar lockup utuh (ikon + teks nama jadi
+   satu), jadi kotaknya dilebarin biar teksnya kebaca, bukan lagi
+   kotak persegi kecil. object-fit:contain jaga aspect ratio asli
+   (gak distorsi/gak kepotong). */
+.qb-root .company-mark {
+  width: 150px !important;
+  height: 44px !important;
+  padding: 4px 8px !important;
+  border-radius: 6px !important;
+}
+.qb-root .company-mark img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+@media (max-width: 600px) {
+  .qb-root .company-mark {
+    width: 110px !important;
+    height: 34px !important;
+  }
+}
