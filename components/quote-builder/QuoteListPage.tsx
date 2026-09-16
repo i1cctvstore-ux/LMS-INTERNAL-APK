@@ -16,8 +16,8 @@
  *   Builder yang sudah kita buang juga (lihat app-shell/app-sidebar).
  */
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownUp, CalendarDays, CheckCircle2, CircleAlert, FilePenLine, Plus, Search, X } from "lucide-react";
-import { useQuoteBuilderAccess } from "@/lib/quote-builder/auth";
+import { ArrowDownUp, CalendarDays, CheckCircle2, CircleAlert, FilePenLine, Plus, Search, Trash2, X } from "lucide-react";
+import { useAuth, useQuoteBuilderAccess } from "@/lib/quote-builder/auth";
 import { listAllQuotes, listQuotesForBranch, softDeleteQuote, type QuoteWithTotal } from "@/lib/quote-builder/api";
 import { grandTotalFor } from "@/lib/quote-builder/pricing";
 import type { QuoteStatus } from "@/lib/quote-builder/database.types";
@@ -58,6 +58,7 @@ type QuoteListPageProps = {
 };
 
 export default function QuoteListPage({ onOpenQuote, onNewQuote }: QuoteListPageProps) {
+  const { session } = useAuth();
   const { branchId, isSuperAdmin, hasAccess, loading: authLoading } = useQuoteBuilderAccess();
   const [quotes, setQuotes] = useState<QuoteWithTotal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -198,10 +199,17 @@ export default function QuoteListPage({ onOpenQuote, onNewQuote }: QuoteListPage
           </div>
           <div className="quote-table-wrap">
             <table className="quote-list-table concise-list-table">
-              <thead><tr><Column label="Penawaran" value="code" /><Column label="Pelanggan" value="customer" /><Column label="Dibuat" value="createdAt" /><Column label="Nilai" value="total" /><Column label="Status" value="status" /><Column label="Terakhir diubah" value="updated" /></tr></thead>
+              <thead><tr><Column label="Penawaran" value="code" /><Column label="Pelanggan" value="customer" /><Column label="Dibuat" value="createdAt" /><Column label="Nilai" value="total" /><Column label="Status" value="status" /><Column label="Terakhir diubah" value="updated" /><th aria-label="Hapus" /></tr></thead>
               <tbody>
                 {shown.map((quote) => {
                   const info = statusMeta[quote.status];
+                  // 2026-09-16: hapus cuma boleh buat Super Admin ATAU
+                  // pembuat penawaran itu sendiri (created_by ===
+                  // session user id) -- sama persis aturan yang
+                  // ditegakkan di RLS/trigger DB, ditampilkan di sini
+                  // biar UI-nya konsisten (bukan cuma soal tampilan --
+                  // RLS tetap yang nolak beneran kalau ini kelewat).
+                  const canDelete = isSuperAdmin || quote.created_by === session?.user.id;
                   return (
                     <tr key={quote.id} className="quote-row-clickable" onClick={() => onOpenQuote(quote.id)}>
                       <td><div className="quote-name"><strong>{quote.internal_code ?? "—"}</strong><span>{quote.project_name}</span></div></td>
@@ -210,6 +218,18 @@ export default function QuoteListPage({ onOpenQuote, onNewQuote }: QuoteListPage
                       <td><strong className="table-money">{formatCurrency(quote.total)}</strong></td>
                       <td><div className={`status-stamp ${info.className}`}><span /><div><strong>{info.label}</strong><small>{info.helper}</small></div></div></td>
                       <td>{formatDateTime(quote.updated_at)}</td>
+                      <td className="row-menu-cell">
+                        {canDelete && quote.status !== "sent" && (
+                          <button
+                            className="icon-button danger-icon"
+                            title="Hapus penawaran"
+                            aria-label={`Hapus penawaran ${quote.internal_code ?? quote.project_name}`}
+                            onClick={(event) => { event.stopPropagation(); setDeleting(quote); }}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
