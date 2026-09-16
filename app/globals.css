@@ -1101,3 +1101,32 @@
   color: #b64f3d;
   background: #fff5f3;
 }
+
+/* 2026-09-16: tombol "Cetak" (window.print() langsung, gak lewat
+   download PDF). Trik standar: sembunyiin SEMUA elemen pas print,
+   terus tampilin lagi cuma .proposal-document (dan naikin dia ke
+   posisi absolute di atas) -- ini kerja walau .proposal-document
+   ada di dalam banyak lapisan wrapper (sidebar/topbar app, dsb) yang
+   gak semuanya kita tau nama class-nya. */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .proposal-document,
+  .proposal-document * {
+    visibility: visible !important;
+  }
+  .proposal-document {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 20px !important;
+    box-shadow: none !important;
+  }
+  .preview-toolbar,
+  .preview-canvas {
+    padding: 0 !important;
+  }
+}
