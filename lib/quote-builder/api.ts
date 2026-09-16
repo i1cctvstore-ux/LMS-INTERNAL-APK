@@ -108,7 +108,16 @@ export async function triggerManualSync(branchId: string) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.message || `Sync gagal (HTTP ${res.status})`);
-  return data as { batchId: string; productCount: number; status: string };
+  return data as {
+    batchId: string;
+    productCount: number;
+    status: string;
+    totalRows: number;
+    rowsWithSkuCount: number;
+    duplicateSkuCount: number;
+    rowsWithoutSkuCount: number;
+    duplicateNoSkuCount: number;
+  };
 }
 
 // ---------------------------------------------------------------------
