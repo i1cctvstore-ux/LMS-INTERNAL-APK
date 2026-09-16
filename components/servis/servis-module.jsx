@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import { toast } from "sonner";
 import {
   Plus, Search, Printer, Package, Truck, CheckCircle2, X, Upload,
   Pencil, Settings2, SlidersHorizontal, AlertTriangle, Loader2, Download,
@@ -1197,6 +1198,16 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
     } catch (e) {
       console.error("Gagal menyimpan data servis:", e);
       setLoadError(true);
+      // 2026-09: sebelum ini, satu-satunya tanda kalau gagal simpan
+      // cuma teks kecil "· gagal simpan" yang gampang kelewat --
+      // staf ngerasa "kadang-kadang gak ke-save" padahal sebenernya
+      // SELALU ada tandanya, cuma gak kelihatan. Toast ini gak bisa
+      // kelewat, dan nunjukin jelas kalau perubahan barusan BELUM
+      // tersimpan ke database (meski tampilan di layar udah berubah).
+      toast.error("Gagal menyimpan perubahan.", {
+        description: "Perubahan barusan belum tersimpan ke database — coba ulangi, dan pastikan koneksi internet stabil.",
+        duration: 8000,
+      });
       throw e;
     } finally {
       setSaving(false);
@@ -2742,6 +2753,13 @@ function ClaimsTab({ isDesktopLayout, ticketView, onSetTicketView, aktifCount, s
 function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, onGoToMaster, trackedProductIds, isDuplicateSN, onSubmit }) {
   const [customer, setCustomer] = useState({ name: "", phone: "", tanggalTerima: todayStr() });
   const [rows, setRows] = useState([emptyRow()]);
+  // 2026-09: klik ganda/cepat (misal di tablet, ke-tap 2x karena buru-
+  // buru) bisa mancing onSubmit() nyala 2x SEBELUM modal ini sempat
+  // ke-unmount -- bikin klaim yang sama masuk dobel/triple (ketahuan
+  // dari created_at yang identik sampai microsecond di beberapa klaim
+  // Solo). isSubmitting nge-block klik kedua begitu klik pertama
+  // masuk, sebelum React sempat re-render apapun.
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const updateRow = (rowId, patch) => setRows((rs) => rs.map((r) => (r.rowId === rowId ? { ...r, ...patch } : r)));
   const canSubmit = customer.name.trim() && rows.every((r) => r.brand && r.produk && r.snDiterima.trim() && r.garansi && r.kelengkapan.trim());
@@ -2820,7 +2838,7 @@ function AddClaimModal({ settings, onClose, onAddOption, onAddProduct, onGoToMas
 
       <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-slate-100">
         <button onClick={onClose} className={`px-4 py-2 text-sm ${btnSecondaryCls} border-none hover:bg-slate-50`}>Batal</button>
-        <button disabled={!canSubmit} onClick={() => onSubmit(customer, rows)}
+        <button disabled={!canSubmit || isSubmitting} onClick={() => { if (isSubmitting) return; setIsSubmitting(true); onSubmit(customer, rows); }}
           className={`px-4 py-2 text-sm ${btnPrimaryCls}`}>
           Simpan {rows.length > 1 ? `(${rows.length} produk)` : ""}
         </button>
