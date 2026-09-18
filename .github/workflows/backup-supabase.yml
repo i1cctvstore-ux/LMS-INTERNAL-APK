@@ -8,6 +8,11 @@ on:
     - cron: "0 19 * * *"
   workflow_dispatch: {}
 
+# 2026-09: tanpa ini, push balik ke repo kena 403 Permission denied --
+# GITHUB_TOKEN bawaan Actions defaultnya read-only di banyak repo.
+permissions:
+  contents: write
+
 jobs:
   backup:
     runs-on: ubuntu-latest
