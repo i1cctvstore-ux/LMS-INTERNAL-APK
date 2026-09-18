@@ -1,0 +1,46 @@
+name: Backup Database Supabase
+
+# Jalan otomatis tiap hari jam 02:00 WIB (19:00 UTC hari sebelumnya),
+# plus bisa dipicu manual lewat tab "Actions" di GitHub kalau perlu
+# backup dadakan.
+on:
+  schedule:
+    - cron: "0 19 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client (pg_dump)
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Dump database
+        env:
+          # Diambil dari GitHub Secret SUPABASE_DB_URL -- lihat catatan
+          # setup di bawah, JANGAN taro connection string langsung di
+          # file ini.
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          mkdir -p backups
+          FILENAME="backups/$(date -u +%Y-%m-%d).sql.gz"
+          pg_dump "$DATABASE_URL" --no-owner --no-privileges | gzip > "$FILENAME"
+          echo "Backup tersimpan: $FILENAME ($(du -h "$FILENAME" | cut -f1))"
+
+      - name: Hapus backup lama (simpan 30 hari terakhir doang)
+        run: |
+          cd backups
+          ls -1 *.sql.gz 2>/dev/null | sort | head -n -30 | xargs -r rm -f
+          cd ..
+
+      - name: Commit & push backup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backups/
+          git diff --staged --quiet && echo "Tidak ada perubahan backup." && exit 0
+          git commit -m "Backup database $(date -u +%Y-%m-%d)"
+          git push
