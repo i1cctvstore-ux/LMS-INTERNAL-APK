@@ -25,7 +25,15 @@ name: Backup Database Supabase
 #   PENTING: pakai Session pooler (port 5432, IPv4), BUKAN "Direct
 #   connection" (db.<ref>.supabase.co hanya IPv6, tidak bisa dijangkau
 #   runner GitHub) dan BUKAN Transaction pooler (port 6543, tidak cocok
-#   untuk pg_dump). Password dengan karakter khusus harus di-URL-encode.
+#   untuk pg_dump).
+#
+#   2 CARA menaruh password (pilih salah satu):
+#   (a) Password di dalam URI (menggantikan [YOUR-PASSWORD]). Karakter
+#       khusus (@ # / : dst) harus di-URL-encode.
+#   (b) [DISARANKAN] Password DIPISAH: URI tanpa password
+#       (postgresql://postgres.<ref>@aws-0-<region>.pooler.supabase.com:5432/postgres)
+#       + secret kedua bernama SUPABASE_DB_PASSWORD berisi password apa
+#       adanya. Tidak perlu URL-encode sama sekali.
 on:
   schedule:
     - cron: "0 19 * * *"
@@ -36,12 +44,62 @@ permissions:
 
 jobs:
   backup:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
         shell: bash # bash -e -o pipefail
     steps:
+      - name: Cek format secret SUPABASE_DB_URL
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SEPARATE_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          [ -n "${DATABASE_URL:-}" ] || fail "Secret SUPABASE_DB_URL kosong atau namanya tidak persis 'SUPABASE_DB_URL'."
+          case "$DATABASE_URL" in
+            postgresql://*|postgres://*) ;;
+            *) fail "Isi secret harus diawali postgresql:// (salin URI dari Supabase > Connect > Session pooler)." ;;
+          esac
+          case "$DATABASE_URL" in
+            *"[YOUR-PASSWORD]"*|*"YOUR-PASSWORD"*) fail "Secret masih berisi tulisan [YOUR-PASSWORD]. Ganti dengan password database yang asli." ;;
+          esac
+
+          # Bagian NON-rahasia saja (password tidak dicetak).
+          REST="${DATABASE_URL#*://}"
+          USERINFO="${REST%@*}"
+          HOSTPORT="${REST##*@}"
+          HOSTPORT="${HOSTPORT%%/*}"
+          HOST="${HOSTPORT%%:*}"
+          PORT="${HOSTPORT#*:}"; [ "$PORT" = "$HOSTPORT" ] && PORT="5432"
+          DBUSER="${USERINFO%%:*}"
+          echo "Host : $HOST"
+          echo "Port : $PORT"
+          echo "User : $DBUSER"
+
+          # Password: di dalam URI (ada ':' setelah user) ATAU di secret terpisah SUPABASE_DB_PASSWORD.
+          case "$USERINFO" in
+            *:*) echo "Password: di dalam URI" ;;
+            *)
+              [ -n "${SEPARATE_PASSWORD:-}" ] || fail "URI tidak berisi password dan secret SUPABASE_DB_PASSWORD juga kosong. Isi salah satunya."
+              echo "Password: dari secret SUPABASE_DB_PASSWORD" ;;
+          esac
+
+          case "$HOST" in
+            db.*.supabase.co) fail "Ini 'Direct connection' (hanya IPv6, tidak bisa dijangkau GitHub). Ganti dengan URI 'Session pooler' (host ...pooler.supabase.com)." ;;
+          esac
+          [ "$PORT" != "6543" ] || fail "Port 6543 = Transaction pooler, tidak cocok untuk pg_dump. Pakai Session pooler (port 5432)."
+          case "$HOST" in
+            *pooler.supabase.com)
+              case "$DBUSER" in
+                postgres.*) ;;
+                *) fail "Untuk pooler, user harus 'postgres.<project-ref>' (sekarang: '$DBUSER')." ;;
+              esac ;;
+          esac
+          echo "Format secret OK."
+
       - name: Install PostgreSQL 17 client (pg_dump)
         run: |
           sudo apt-get update
@@ -53,12 +111,11 @@ jobs:
       - name: Dump database
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # Dipakai libpq hanya kalau URI tidak memuat password (cara b).
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGCONNECT_TIMEOUT: "20"
         run: |
           set -euo pipefail
-          if [ -z "${DATABASE_URL:-}" ]; then
-            echo "::error::Secret SUPABASE_DB_URL belum diisi (lihat catatan SETUP di atas file ini)."
-            exit 1
-          fi
 
           mkdir -p backups
           FILENAME="backups/$(date -u +%Y-%m-%d).sql.gz"
