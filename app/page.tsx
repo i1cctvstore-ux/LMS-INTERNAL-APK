@@ -224,6 +224,7 @@ export default function Page() {
             currentUserName={profile!.name}
             currentUserRole={profile!.role}
             currentUserBranchId={profile!.branch_id}
+            onNavigate={setActivePage}
           />
         )
       case 'qb-template':
@@ -234,6 +235,7 @@ export default function Page() {
             currentUserName={profile!.name}
             currentUserRole={profile!.role}
             currentUserBranchId={profile!.branch_id}
+            onNavigate={setActivePage}
           />
         )
       case 'qb-katalog':
@@ -244,6 +246,7 @@ export default function Page() {
             currentUserName={profile!.name}
             currentUserRole={profile!.role}
             currentUserBranchId={profile!.branch_id}
+            onNavigate={setActivePage}
           />
         )
       case 'qb-info-cabang':
@@ -254,6 +257,7 @@ export default function Page() {
             currentUserName={profile!.name}
             currentUserRole={profile!.role}
             currentUserBranchId={profile!.branch_id}
+            onNavigate={setActivePage}
           />
         )
       default:
