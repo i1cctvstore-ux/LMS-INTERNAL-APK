@@ -236,6 +236,26 @@ export default function Page() {
             currentUserBranchId={profile!.branch_id}
           />
         )
+      case 'qb-template':
+        return (
+          <QuoteBuilderModule
+            section="template"
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
+      case 'qb-info-cabang':
+        return (
+          <QuoteBuilderModule
+            section="cabang"
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+          />
+        )
       default:
         return (
           activeItem && (
