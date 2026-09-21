@@ -32,6 +32,60 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 const ACCOUNT_BASE_URL = 'https://account.accurate.id'
 
+// =====================================================
+// 2026-09 -- KETAHANAN SYNC (3 masalah nyata yang ketemu di Riwayat Stok):
+//
+// 1. Error jaringan sesaat ("fetch failed") pas ambil detail 1 item
+//    dulunya MELEMPAR exception -> Promise.all gagal -> SELURUH sync
+//    cabang gagal, padahal logika retry (3 putaran) di bawah cuma
+//    menangani hasil `null`, bukan exception. Sekarang fetch detail
+//    yang gagal jaringan/timeout/non-JSON dianggap `null` -> ikut
+//    masuk putaran retry.
+// 2. Semua fetch tanpa timeout: 1 koneksi yang macet bikin sync
+//    menggantung sampai function dimatikan Vercel di 300 detik.
+//    Sekarang tiap panggilan BACA dibatasi API_READ_TIMEOUT_MS.
+//    (Panggilan token refresh SENGAJA tidak diberi timeout: Accurate
+//    merotasi refresh token, kalau request dibatalkan setelah server
+//    memproses tapi sebelum token baru tersimpan, rantai token putus.)
+// 3. Function yang dimatikan Vercel di 300 detik tidak sempat menulis
+//    status apa pun -> baris log nyangkut "Berjalan" selamanya. Sekarang
+//    (a) ada batas waktu internal (SYNC_TIME_BUDGET_MS) yang berhenti
+//    RAPI dan menulis status "Gagal" beserta progresnya, dan (b) tiap
+//    sync baru menutup baris "Berjalan" yang sudah > STALE_RUNNING_MINUTES
+//    menit sebagai gagal (sisa dari function yang dimatikan paksa).
+// =====================================================
+const API_READ_TIMEOUT_MS = 25_000
+const SYNC_TIME_BUDGET_MS = 270_000 // function Vercel maxDuration = 300 detik; sisakan ruang buat tulis status
+const STALE_RUNNING_MINUTES = 15
+
+function defaultDeadline(): number {
+  return Date.now() + SYNC_TIME_BUDGET_MS
+}
+
+function assertTimeLeft(deadlineAt: number, tahap: string, progres: string) {
+  if (Date.now() > deadlineAt) {
+    throw new Error(
+      `Waktu habis di tahap "${tahap}" (${progres}). Sync dihentikan rapi sebelum batas 300 detik server -- jalankan ulang; kalau selalu begini, artinya jumlah item terlalu banyak untuk 1 kali jalan.`,
+    )
+  }
+}
+
+// Tutup baris log "running" yang jelas-jelas sudah mati (function-nya
+// dimatikan paksa sebelum sempat menulis status akhir).
+async function closeStaleRunningLogs(supabase: ReturnType<typeof createAdminClient>) {
+  const cutoff = new Date(Date.now() - STALE_RUNNING_MINUTES * 60_000).toISOString()
+  await supabase
+    .from('stock_sync_log')
+    .update({
+      status: 'error',
+      error_message: 'Terhenti sebelum selesai (kemungkinan kena batas waktu server 300 detik). Dianggap gagal otomatis.',
+      finished_at: new Date().toISOString(),
+    })
+    .eq('source', 'accurate')
+    .eq('status', 'running')
+    .lt('started_at', cutoff)
+}
+
 const ACCURATE_BRANCH_MAP: { envDbIdKey: string; branchId: string; branchName: string }[] = [
   { envDbIdKey: 'ACCURATE_DB_ID_JAKARTA', branchId: '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2', branchName: 'Jakarta' },
   { envDbIdKey: 'ACCURATE_DB_ID_PURWOKERTO', branchId: '4c97b2cb-cf88-4e13-84c0-2f2cb8d9b612', branchName: 'Purwokerto' },
@@ -129,7 +183,10 @@ type OpenDbResult = { session: string; host: string }
 
 async function openDatabase(accessToken: string, dbId: string): Promise<OpenDbResult> {
   const params = new URLSearchParams({ id: dbId })
-  const res = await fetch(`${ACCOUNT_BASE_URL}/api/open-db.do?${params.toString()}`, { headers: { Authorization: `Bearer ${accessToken}` } })
+  const res = await fetch(`${ACCOUNT_BASE_URL}/api/open-db.do?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
+  })
   const body = await res.json()
   if (!res.ok || !body.s) throw new Error(`Gagal buka database Accurate (id ${dbId}): ${JSON.stringify(body)}`)
   return { session: body.session as string, host: body.host as string }
@@ -159,6 +216,7 @@ export async function fetchAllItemIds(conn: AccurateConnection): Promise<number[
     const params = new URLSearchParams({ 'sp.pageSize': String(PAGE_SIZE), 'sp.page': String(page), 'filter.itemType': 'INVENTORY' })
     const res = await fetch(`${conn.host}/accurate/api/item/list.do?${params.toString()}`, {
       headers: { Authorization: `Bearer ${conn.accessToken}`, 'X-Session-ID': conn.session },
+      signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
     })
     const body = await res.json()
     if (!res.ok || !body.s) throw new Error(`Gagal ambil daftar item Accurate (halaman ${page}): ${JSON.stringify(body)}`)
@@ -178,11 +236,19 @@ export async function fetchAllItemIds(conn: AccurateConnection): Promise<number[
 // field-field itu di akun ini.
 export async function fetchItemDetail(conn: AccurateConnection, itemId: number): Promise<{ no: string; name: string; balance: number; kategori: string | null } | null> {
   const params = new URLSearchParams({ id: String(itemId) })
-  const res = await fetch(`${conn.host}/accurate/api/item/detail.do?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${conn.accessToken}`, 'X-Session-ID': conn.session },
-  })
-  const body = await res.json()
-  if (!res.ok || !body.s) return null
+  let body: any
+  try {
+    const res = await fetch(`${conn.host}/accurate/api/item/detail.do?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${conn.accessToken}`, 'X-Session-ID': conn.session },
+      signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
+    })
+    body = await res.json()
+    if (!res.ok || !body?.s) return null
+  } catch {
+    // "fetch failed"/timeout/respons bukan JSON -> anggap gagal SEMENTARA
+    // (null), biar masuk putaran retry, bukan menggagalkan seluruh sync.
+    return null
+  }
   const no = body.d?.no
   const name = body.d?.name
   const balance = body.d?.balance
@@ -438,8 +504,12 @@ export async function syncAccurateForBranch(
   config: AccurateBranchConfig,
   triggeredBy: 'manual' | 'cron',
   createdBy?: string,
+  // Batas waktu (epoch ms) -- route yang menjalankan beberapa cabang
+  // berurutan dalam 1 function mengoper batas yang SAMA ke semua cabang.
+  deadlineAt: number = defaultDeadline(),
 ): Promise<SyncResult> {
   const supabase = createAdminClient()
+  await closeStaleRunningLogs(supabase)
 
   const { data: logRow, error: logInsertErr } = await supabase
     .from('stock_sync_log')
@@ -509,6 +579,7 @@ export async function syncAccurateForBranch(
     for (let attempt = 1; attempt <= 3; attempt++) {
       const stillFailed: number[] = []
       for (let i = 0; i < failedIds.length; i += CONCURRENCY) {
+        assertTimeLeft(deadlineAt, 'ambil detail item', `${allDetails.length} dari ${itemIds.length} item sudah terambil, putaran ke-${attempt}`)
         const batch = failedIds.slice(i, i + CONCURRENCY)
         const details = await Promise.all(batch.map((id) => fetchItemDetail(conn, id)))
         details.forEach((detail, idx) => {
@@ -795,6 +866,8 @@ export async function syncAccurateSoloMultiGudang(
   createdBy?: string,
 ): Promise<{ branchName: string; itemsUpdated: number; itemsSkipped: number }> {
   const supabase = createAdminClient()
+  const deadlineAt = defaultDeadline()
+  await closeStaleRunningLogs(supabase)
   const dbId = process.env.ACCURATE_DB_ID_SOLO
   if (!dbId) throw new Error('Env var ACCURATE_DB_ID_SOLO belum diisi.')
 
@@ -829,11 +902,17 @@ export async function syncAccurateSoloMultiGudang(
     type RawDetail = { no: string; name: string; warehouses: { name: string; balance: number }[] }
     async function fetchRawDetail(id: number): Promise<RawDetail | null> {
       const params = new URLSearchParams({ id: String(id) })
-      const res = await fetch(`${conn!.host}/accurate/api/item/detail.do?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${conn!.accessToken}`, 'X-Session-ID': conn!.session },
-      })
-      const body = await res.json()
-      if (!res.ok || !body.s || !body.d?.no) return null
+      let body: any
+      try {
+        const res = await fetch(`${conn!.host}/accurate/api/item/detail.do?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${conn!.accessToken}`, 'X-Session-ID': conn!.session },
+          signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
+        })
+        body = await res.json()
+        if (!res.ok || !body?.s || !body.d?.no) return null
+      } catch {
+        return null // gagal jaringan/timeout/non-JSON -> masuk putaran retry, bukan menggagalkan seluruh sync
+      }
       // SKU angka polos dikasih label akun (scopeNumericSku) di sini,
       // di SUMBERNYA — biar semua pemakaian d.no di bawah (pencocokan
       // katalog, bikin produk baru, dst) otomatis pakai versi yang
@@ -851,6 +930,7 @@ export async function syncAccurateSoloMultiGudang(
     for (let attempt = 1; attempt <= 3; attempt++) {
       const stillFailed: number[] = []
       for (let i = 0; i < failedIds.length; i += CONCURRENCY) {
+        assertTimeLeft(deadlineAt, 'ambil detail item Solo', `${allDetails.length} dari ${itemIds.length} item sudah terambil, putaran ke-${attempt}`)
         const batch = failedIds.slice(i, i + CONCURRENCY)
         const details = await Promise.all(batch.map((id) => fetchRawDetail(id)))
         details.forEach((d, idx) => {
