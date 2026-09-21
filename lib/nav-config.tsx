@@ -40,8 +40,8 @@ export type PageKey =
   | 'kas-kecil'
   | 'kas-um'
   | 'qb-daftar'
-  | 'qb-katalog'
   | 'qb-template'
+  | 'qb-katalog'
   | 'qb-info-cabang'
   | 'proyek'
   | 'stok'
@@ -158,9 +158,11 @@ export const NAV_ITEMS: NavItem[] = [
     icon: HandCoins,
     roles: KAS_ROLES,
   },
-  // ---------- Quote Builder -- Daftar Penawaran, Katalog Produk,
-  // Template Penawaran, dan Info Cabang (kop surat). Super Admin pilih
-  // cabang lewat tab di dalam halaman (sama kayak menu Kas). ----------
+  // ---------- Quote Builder -- 4 sub-menu, dikelompokkan jadi 1 folder
+  // dropdown "Penawaran" di Sidebar lewat NAV_GROUPS di bawah (pola sama
+  // persis kayak folder "Kas" & "Servis"). Semua sub-menu memakai
+  // komponen yang sama (QuoteBuilderModule), jadi cabang yang dipilih
+  // Super Admin ikut terbawa ke semua sub-menu. ----------
   {
     key: 'qb-daftar',
     label: 'Daftar Penawaran',
@@ -169,17 +171,17 @@ export const NAV_ITEMS: NavItem[] = [
     roles: QB_ROLES,
   },
   {
-    key: 'qb-katalog',
-    label: 'Katalog Produk',
-    description: 'Price list per cabang (read-only, sumbernya Google Sheet/Zoho)',
-    icon: FileText,
-    roles: QB_ROLES,
-  },
-  {
     key: 'qb-template',
     label: 'Template Penawaran',
     description: 'Paket produk siap pakai untuk mempercepat pembuatan penawaran per cabang',
     icon: LayoutTemplate,
+    roles: QB_ROLES,
+  },
+  {
+    key: 'qb-katalog',
+    label: 'Katalog Produk',
+    description: 'Price list per cabang (read-only, sumbernya Google Sheet/Zoho)',
+    icon: FileText,
     roles: QB_ROLES,
   },
   {
@@ -296,6 +298,12 @@ export type NavGroup = {
 // terdaftar sebagai NavItem biasa di NAV_ITEMS di atas, ini cuma metadata
 // tambahan buat cara Sidebar merender & mengelompokkannya secara visual.
 export const NAV_GROUPS: NavGroup[] = [
+  {
+    key: 'penawaran',
+    label: 'Penawaran',
+    icon: FilePenLine,
+    itemKeys: ['qb-daftar', 'qb-template', 'qb-katalog', 'qb-info-cabang'],
+  },
   {
     key: 'kas',
     label: 'Kas',
