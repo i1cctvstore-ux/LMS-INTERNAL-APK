@@ -84,7 +84,10 @@ export default function QuoteListPage({ onOpenQuote, onNewQuote }: QuoteListPage
     }
     let cancelled = false;
     setLoading(true);
-    const request = isSuperAdmin ? listAllQuotes() : branchId ? listQuotesForBranch(branchId) : Promise.resolve([]);
+    // 2026-09: daftar SELALU per cabang aktif (Super Admin pilih cabang lewat tab di
+    // QuoteBuilderModule, sama kayak menu Kas). listAllQuotes() cuma jadi cadangan
+    // kalau Super Admin belum punya cabang aktif.
+    const request = branchId ? listQuotesForBranch(branchId) : isSuperAdmin ? listAllQuotes() : Promise.resolve([]);
     request
       .then((rows) => { if (!cancelled) { setQuotes(rows); setLoadError(null); } })
       .catch((err: Error) => { if (!cancelled) setLoadError(err.message); })
