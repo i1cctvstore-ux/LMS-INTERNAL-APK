@@ -152,17 +152,21 @@ function ProposalDocument({ alternatives, clientName, projectName, quoteDate, va
   // 1 flag "placeholder" buat semuanya), dan pakai `||` (bukan `??`) supaya
   // string kosong "" juga dianggap belum diisi -- sebelumnya email yang
   // kosong tampil sebagai baris kosong, bukan pengingat.
-  const branding = branch as (BranchRow & { logo_ppn_data?: string | null; logo_non_ppn_data?: string | null; store_name?: string | null }) | null;
-  const phone = branding?.phone?.trim() || "";
-  const email = branding?.email?.trim() || "";
-  const address = branding?.address?.trim() || "";
-  const storeName = branding?.store_name?.trim() || "";
+  const branding = branch as (BranchRow & { logo_ppn_data?: string | null; logo_non_ppn_data?: string | null; store_name?: string | null; store_name_ppn?: string | null; address_ppn?: string | null; phone_ppn?: string | null; email_ppn?: string | null }) | null;
   const missingStyle = (value: string) => (value ? undefined : ({ color: "#c17a2f", fontStyle: "italic" } as const));
   // 2026-09-16: kop surat pakai identitas PT. Isatu Solusi Utama kalau
   // ADA minimal 1 ALT yang pakai PPN (vatMode !== "none") -- gak peduli
   // ALT itu masuk grand total atau opsional, karena identitas badan
   // usaha berlaku buat SATU dokumen secara keseluruhan, bukan per-ALT.
   const usesPpn = alternatives.some((alternative) => alternative.vatMode !== "none");
+  // Data kop dipilih sesuai versi dokumen: kop PPN memakai data khusus PPN
+  // (nama toko/alamat/telepon/email) kalau diisi di menu Info Cabang, dan
+  // jatuh ke data non-PPN kalau kolomnya kosong. Kop non-PPN selalu data utama.
+  const pickBranchInfo = (ppnValue?: string | null, baseValue?: string | null) => ((usesPpn ? ppnValue?.trim() || baseValue?.trim() : baseValue?.trim()) || "");
+  const phone = pickBranchInfo(branding?.phone_ppn, branding?.phone);
+  const email = pickBranchInfo(branding?.email_ppn, branding?.email);
+  const address = pickBranchInfo(branding?.address_ppn, branding?.address);
+  const storeName = pickBranchInfo(branding?.store_name_ppn, branding?.store_name);
   // Logo khusus cabang (PPN & non-PPN beda) kalau sudah diisi lewat menu
   // Info Cabang; kalau belum, jatuh ke logo bawaan di atas.
   const branchLogo = usesPpn ? branding?.logo_ppn_data : branding?.logo_non_ppn_data;
