@@ -10,6 +10,11 @@ import { createClient } from '@/lib/supabase/server'
 import { getAccurateBranchConfigs, syncAccurateForBranch } from '@/lib/stok/accurate-sync'
 
 async function runSync(branchIdFilter?: string, createdBy?: string) {
+  // 2026-09: SEMUA cabang jalan berurutan dalam 1 function (maxDuration
+  // 300 detik) -- batas waktunya dipakai bersama. Cabang yang kehabisan
+  // waktu berhenti rapi & tercatat "Gagal" di Riwayat Stok (bukan
+  // dimatikan paksa lalu nyangkut "Berjalan").
+  const deadlineAt = Date.now() + 270_000
   const configs = (await getAccurateBranchConfigs()).filter((c) => !branchIdFilter || c.branchId === branchIdFilter)
   if (configs.length === 0) {
     return { message: `Tidak ada konfigurasi Accurate yang cocok/siap untuk cabang ini.`, results: [] }
@@ -17,7 +22,7 @@ async function runSync(branchIdFilter?: string, createdBy?: string) {
   const results = []
   for (const config of configs) {
     try {
-      const r = await syncAccurateForBranch(config, branchIdFilter ? 'manual' : 'cron', createdBy)
+      const r = await syncAccurateForBranch(config, branchIdFilter ? 'manual' : 'cron', createdBy, deadlineAt)
       results.push({ ...r, status: 'success' as const })
     } catch (err: any) {
       results.push({ branchName: config.branchName, status: 'error' as const, message: String(err?.message || err) })
