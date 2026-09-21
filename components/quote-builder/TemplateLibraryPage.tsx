@@ -13,7 +13,7 @@
  *   cabang, atur qty, urutkan dengan drag (mouse & sentuh).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ChevronRight, GripVertical, LoaderCircle, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, FilePenLine, GripVertical, LoaderCircle, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useQuoteBuilderAccess } from "@/lib/quote-builder/auth";
 import {
@@ -46,7 +46,12 @@ type EditorState = {
 let itemKeyCounter = 0;
 const nextItemKey = () => `tpl-item-${Date.now()}-${itemKeyCounter++}`;
 
-export default function TemplateLibraryPage() {
+type TemplateLibraryPageProps = {
+  /** Dipanggil saat "Pakai di Penawaran" diklik -- QuoteBuilderModule membuka penawaran baru yang terisi template ini di Daftar Penawaran. */
+  onUseTemplate?: (templateId: string) => void;
+};
+
+export default function TemplateLibraryPage({ onUseTemplate }: TemplateLibraryPageProps) {
   const { session } = useAuth();
   const { branchId, hasAccess } = useQuoteBuilderAccess();
 
@@ -287,6 +292,16 @@ export default function TemplateLibraryPage() {
             </div>
             <div>
               {editor.templateId && <button className="delete-template-button" onClick={removeTemplate} disabled={saving}><Trash2 size={14} /> Hapus template</button>}
+              {editor.templateId && onUseTemplate && (
+                <button
+                  className="outline-button"
+                  onClick={() => onUseTemplate(editor.templateId as string)}
+                  disabled={saving || dirty || editorLoading || editor.items.length === 0}
+                  title={dirty ? "Simpan template dulu sebelum dipakai" : editor.items.length === 0 ? "Template masih kosong" : "Buat penawaran baru dari template ini"}
+                >
+                  <FilePenLine size={16} /> Pakai di Penawaran
+                </button>
+              )}
               <button className="save-button" onClick={save} disabled={saving || editorLoading}>{saving ? <LoaderCircle className="spin-icon" size={16} /> : null}{saving ? "Menyimpan…" : "Simpan Template"}</button>
             </div>
           </div>
