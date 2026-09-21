@@ -38,10 +38,83 @@ function mapProductRow(product: ProductRow, prices: ActiveProductPriceRow[]): Pr
 // ---------------------------------------------------------------------
 // Branches
 // ---------------------------------------------------------------------
-export async function getBranch(branchId: string): Promise<BranchRow> {
-  const { data, error } = await supabase.from("branches").select("*").eq("id", branchId).single();
+/** Identitas kop surat penawaran per cabang (tabel `branch_letterhead`, 1 baris per cabang). Logo = data URL base64. */
+export type BranchLetterheadRow = {
+  branch_id: string;
+  store_name: string | null;
+  logo_ppn_data: string | null;
+  logo_non_ppn_data: string | null;
+  updated_at: string;
+  updated_by: string | null;
+};
+
+/** Baris `branches` + nama toko & 2 logo dari `branch_letterhead` (digabung oleh getBranch). */
+export type BranchWithLetterhead = BranchRow & {
+  store_name?: string | null;
+  logo_ppn_data?: string | null;
+  logo_non_ppn_data?: string | null;
+};
+
+/**
+ * 2026-09: hasilnya = baris `branches` + identitas kop surat (nama toko & 2
+ * logo) dari tabel `branch_letterhead`. Query kop surat sengaja dibuat
+ * "boleh gagal" (.catch -> null): kalau migration branch_letterhead belum
+ * dijalankan, editor penawaran tetap jalan pakai logo bawaan, bukan error.
+ */
+export async function getBranch(branchId: string): Promise<BranchWithLetterhead> {
+  const [branchResult, letterhead] = await Promise.all([
+    supabase.from("branches").select("*").eq("id", branchId).single(),
+    getBranchLetterhead(branchId).catch(() => null),
+  ]);
+  if (branchResult.error) throw branchResult.error;
+  return {
+    ...(branchResult.data as BranchRow),
+    store_name: letterhead?.store_name ?? null,
+    logo_ppn_data: letterhead?.logo_ppn_data ?? null,
+    logo_non_ppn_data: letterhead?.logo_non_ppn_data ?? null,
+  };
+}
+
+export async function getBranchLetterhead(branchId: string): Promise<BranchLetterheadRow | null> {
+  const { data, error } = await supabase.from("branch_letterhead").select("*").eq("branch_id", branchId).maybeSingle();
   if (error) throw error;
-  return data as BranchRow;
+  return (data as BranchLetterheadRow | null) ?? null;
+}
+
+/** Info kontak cabang yang tampil di kop surat -- kolom tabel `branches` (RLS: hanya super_admin yang boleh mengubah). */
+export async function saveBranchInfo(
+  branchId: string,
+  input: { address: string; phone: string; email: string; signerName: string },
+) {
+  const { error } = await supabase
+    .from("branches")
+    .update({
+      address: input.address.trim() || null,
+      phone: input.phone.trim() || null,
+      email: input.email.trim() || null,
+      signer_name: input.signerName.trim() || null,
+    })
+    .eq("id", branchId);
+  if (error) throw error;
+}
+
+/** Nama toko + logo PPN/non-PPN cabang (tabel `branch_letterhead`, 1 baris per cabang). */
+export async function saveBranchLetterhead(
+  branchId: string,
+  input: { storeName: string; logoPpnData: string | null; logoNonPpnData: string | null },
+  updatedBy: string,
+) {
+  const { error } = await supabase.from("branch_letterhead").upsert(
+    {
+      branch_id: branchId,
+      store_name: input.storeName.trim() || null,
+      logo_ppn_data: input.logoPpnData,
+      logo_non_ppn_data: input.logoNonPpnData,
+      updated_by: updatedBy,
+    },
+    { onConflict: "branch_id" },
+  );
+  if (error) throw error;
 }
 
 export async function listBranches(): Promise<BranchRow[]> {
@@ -134,6 +207,11 @@ export async function listQuotesForBranch(branchId: string): Promise<QuoteWithTo
     .from("quotes")
     .select("*, quote_alternatives(*, quote_items(*))")
     .eq("branch_id", branchId)
+    // 2026-09: super_admin sekarang juga memakai fungsi ini (daftar per
+    // cabang terpilih). RLS membolehkan super_admin melihat baris
+    // soft-deleted, jadi filter harus di level app -- lihat catatan di
+    // listAllQuotes() di bawah.
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
   if (error) throw error;
 
@@ -385,6 +463,24 @@ export async function createTemplate(branchId: string, name: string, createdBy: 
     .single();
   if (error) throw error;
   return data as TemplateRow;
+}
+
+/** Jumlah item per template (buat kolom "Item" di daftar template). Hasil: { [templateId]: jumlah }. */
+export async function getTemplateItemCounts(templateIds: string[]): Promise<Record<string, number>> {
+  if (templateIds.length === 0) return {};
+  const { data, error } = await supabase.from("template_items").select("template_id").in("template_id", templateIds);
+  if (error) throw error;
+  const counts: Record<string, number> = {};
+  for (const row of (data ?? []) as Array<{ template_id: string }>) counts[row.template_id] = (counts[row.template_id] ?? 0) + 1;
+  return counts;
+}
+
+export async function updateTemplate(templateId: string, input: { name: string; description: string }) {
+  const { error } = await supabase
+    .from("templates")
+    .update({ name: input.name.trim(), description: input.description.trim() || null })
+    .eq("id", templateId);
+  if (error) throw error;
 }
 
 export async function renameTemplate(templateId: string, name: string) {
