@@ -297,11 +297,13 @@ export type QuoteEditorPageProps = {
   onBack: () => void;
   /** 2026-09: cabang aktif yang dipilih dari luar (Super Admin pilih cabang dulu, sama kayak modul Kas/Servis). Kalau tidak diisi, dipakai branch_id akun yang login. */
   branchId?: string | null;
+  /** 2026-09: penawaran BARU yang langsung diisi dari template ini (ALT 1 terisi item template, harga Reseller DPP). Diabaikan kalau quoteId terisi. */
+  initialTemplateId?: string | null;
   /** Dipanggil setelah draft baru pertama kali tersimpan (dapat id) -- QuoteBuilderModule pakai ini buat "upgrade" dari mode baru ke mode edit tanpa reload. */
   onDraftCreated?: (quoteId: string) => void;
 };
 
-export default function QuoteEditorPage({ quoteId: initialQuoteId, onBack, onDraftCreated, branchId: branchIdProp }: QuoteEditorPageProps) {
+export default function QuoteEditorPage({ quoteId: initialQuoteId, onBack, onDraftCreated, branchId: branchIdProp, initialTemplateId }: QuoteEditorPageProps) {
   const { session } = useAuth();
   const { role, branchId: accountBranchId, isSuperAdmin } = useQuoteBuilderAccess();
   const branchId = branchIdProp ?? accountBranchId;
@@ -379,7 +381,29 @@ export default function QuoteEditorPage({ quoteId: initialQuoteId, onBack, onDra
           setQuoteDate(todayISO());
           setValidDate(oneMonthLater(todayISO()));
           setNotes(fallbackNotes);
-          const first = emptyAlternative("alt-1", "Alternatif 1");
+          let first = emptyAlternative("alt-1", "Alternatif 1");
+          // Mulai dari template: isi ALT 1 dengan item template (harga mengikuti price list cabang, basis Reseller DPP).
+          if (initialTemplateId) {
+            try {
+              const rows = await getTemplateItems(initialTemplateId);
+              const chosen = templateRows.find((template) => template.id === initialTemplateId);
+              const items = rows.map((row) =>
+                makeItem(
+                  catalogRows.find((product) => product.id === row.product_id) ?? { id: row.product_id, name: row.products?.name ?? "(produk tidak ditemukan)", sku: row.products?.sku ?? "", brand: row.products?.brand ?? "", prices: { net: 0, reseller: 0, special: 0 } },
+                  Number(row.qty),
+                  "reseller",
+                ),
+              );
+              if (items.length > 0) {
+                first = { ...first, title: chosen?.name ?? first.title, description: chosen ? `Dari template ${chosen.name}` : first.description, items };
+              } else {
+                toast.info("Template itu masih kosong.", { description: "Penawaran dibuka tanpa item." });
+              }
+            } catch (err) {
+              toast.error("Template gagal dimuat, penawaran dibuka kosong.", { description: (err as Error).message });
+            }
+            if (cancelled) return;
+          }
           setAlternatives([first]);
           setActiveAltId(first.id);
           setReviewStatus("draft");
