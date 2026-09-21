@@ -401,6 +401,8 @@ export async function saveQuoteFull(
     validUntil: string | null;
     alternatives: Alternative[];
     notes: QuoteNote[];
+    /** Alamat pelanggan (tercetak di bawah nama pelanggan). undefined = tidak diubah. Ditulis terpisah dari RPC save_quote_full. */
+    clientAddress?: string;
   },
 ) {
   const { error } = await supabase.rpc("save_quote_full", {
@@ -413,7 +415,24 @@ export async function saveQuoteFull(
     p_notes: input.notes.map((note, index) => ({ sort_order: index, text: note.text })),
   });
   if (error) throw error;
+
+  if (input.clientAddress !== undefined) {
+    const { error: addressError } = await supabase
+      .from("quotes")
+      .update({ client_address: input.clientAddress.trim() || null })
+      .eq("id", quoteId);
+    if (addressError) {
+      throw new Error(
+        /client_address|schema cache|column/i.test(addressError.message)
+          ? `${addressError.message} — jalankan migration client_address di Supabase.`
+          : addressError.message,
+      );
+    }
+  }
 }
+
+/** QuoteRow + alamat pelanggan (kolom `quotes.client_address`, migration 20260921000003). Opsional supaya kode tetap jalan sebelum migration dijalankan. */
+export type QuoteWithAddress = QuoteRow & { client_address?: string | null };
 
 export async function updateQuoteStatus(quoteId: string, status: QuoteStatus) {
   const { error } = await supabase.from("quotes").update({ status }).eq("id", quoteId);
@@ -466,6 +485,7 @@ export async function duplicateQuote(quoteId: string, createdBy: string): Promis
     validUntil: draft.valid_until,
     alternatives: refreshedAlternatives,
     notes: full.notes,
+    clientAddress: (full.quote as QuoteWithAddress).client_address ?? undefined,
   });
 
   return draft;
