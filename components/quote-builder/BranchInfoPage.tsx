@@ -16,6 +16,12 @@
  *     bukan file eksternal supaya PDF penawaran tidak gagal render gambar).
  * Semua hanya bisa ditulis Super Admin (RLS branches & branch_letterhead).
  *
+ * BANNER PENUH: kalau gambar yang di-upload berbentuk banner kop (sangat lebar,
+ * rasio >= 4.5:1, mis. logo + nama + telepon + email + alamat sudah jadi satu
+ * gambar), otomatis dicentang "banner penuh" -> di penawaran gambar dicetak
+ * selebar kop dan teks kontak tidak dicetak lagi (sudah ada di gambar).
+ * Bisa dimatikan lewat centang di kartunya.
+ *
  * Kalau logo belum diisi, editor penawaran memakai logo bawaan
  * (LOGO_PPN_BASE64 / LOGO_NON_PPN_BASE64 di QuoteEditorPage.tsx).
  */
@@ -34,17 +40,19 @@ type FormState = {
   phone: string;
   email: string;
   logoNonPpn: string | null;
+  logoNonPpnBanner: boolean;
   // Kop PPN (kosong = ikut non-PPN)
   storeNamePpn: string;
   addressPpn: string;
   phonePpn: string;
   emailPpn: string;
   logoPpn: string | null;
+  logoPpnBanner: boolean;
 };
 
 const EMPTY_FORM: FormState = {
-  signerName: "", storeName: "", address: "", phone: "", email: "", logoNonPpn: null,
-  storeNamePpn: "", addressPpn: "", phonePpn: "", emailPpn: "", logoPpn: null,
+  signerName: "", storeName: "", address: "", phone: "", email: "", logoNonPpn: null, logoNonPpnBanner: false,
+  storeNamePpn: "", addressPpn: "", phonePpn: "", emailPpn: "", logoPpn: null, logoPpnBanner: false,
 };
 
 const PAGE_CSS = `
@@ -70,6 +78,10 @@ const PAGE_CSS = `
 .qb-root .branch-info-page .bi-preview div{display:grid;gap:3px;color:#555;font-size:9px;text-align:right;min-width:0}
 .qb-root .branch-info-page .bi-preview div strong{color:#1d2433;font-size:11px}
 .qb-root .branch-info-page .bi-preview div span.missing{color:#c17a2f;font-style:italic}
+.qb-root .branch-info-page .bi-preview.banner{display:block;padding:0;overflow:hidden}
+.qb-root .branch-info-page .bi-preview.banner img{width:100%;max-width:100%;height:auto}
+.qb-root .branch-info-page .bi-check{display:flex;align-items:flex-start;gap:8px;margin:0 0 14px;color:#4b5566;font-size:12px;line-height:1.5}
+.qb-root .branch-info-page .bi-check input{margin-top:2px}
 .qb-root .branch-info-page .bi-actions{display:flex;flex-wrap:wrap;gap:8px}
 .qb-root .branch-info-page .bi-savebar{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:18px;padding:14px 18px;border:1px solid #dce5f6;border-radius:16px;background:rgba(248,250,255,.97);backdrop-filter:blur(4px)}
 .qb-root .branch-info-page .bi-savebar span{color:#6d7d99;font-size:12px}
@@ -82,8 +94,15 @@ const PAGE_CSS = `
 }
 `;
 
-/** Kecilkan logo di browser (max 600px lebar, PNG) supaya ringan disimpan di database & aman untuk capture PDF. */
-async function fileToLogoDataUrl(file: File, maxWidth = 600, maxChars = 220_000): Promise<string> {
+const BANNER_MIN_ASPECT = 4.5; // lebar:tinggi -- di atas ini dianggap banner kop penuh, bukan logo
+
+/**
+ * Kecilkan gambar di browser supaya ringan disimpan di database & aman untuk capture PDF.
+ *  - Logo biasa : max 600px lebar, PNG (transparan tetap transparan).
+ *  - Banner kop : (rasio >= 4.5:1) max 1200px lebar, TIDAK diperbesar, JPEG kualitas tinggi
+ *                 di atas latar putih -- teks kecil di banner tetap terbaca & file kecil.
+ */
+async function fileToLogoDataUrl(file: File): Promise<{ dataUrl: string; isBanner: boolean }> {
   if (!file.type.startsWith("image/")) throw new Error("File harus berupa gambar (PNG, JPG, WebP, atau SVG).");
   const objectUrl = URL.createObjectURL(file);
   try {
@@ -95,7 +114,9 @@ async function fileToLogoDataUrl(file: File, maxWidth = 600, maxChars = 220_000)
     });
     const naturalWidth = img.naturalWidth || 480;
     const naturalHeight = img.naturalHeight || 140;
-    let width = Math.min(maxWidth, naturalWidth);
+    const isBanner = naturalWidth / naturalHeight >= BANNER_MIN_ASPECT;
+    const maxChars = isBanner ? 300_000 : 220_000;
+    let width = Math.min(isBanner ? 1200 : 600, naturalWidth);
     for (let attempt = 0; attempt < 6; attempt++) {
       const height = Math.max(1, Math.round((width * naturalHeight) / naturalWidth));
       const canvas = document.createElement("canvas");
@@ -103,13 +124,17 @@ async function fileToLogoDataUrl(file: File, maxWidth = 600, maxChars = 220_000)
       canvas.height = height;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Browser tidak mendukung pemrosesan gambar.");
+      if (isBanner) {
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, width, height);
+      }
       context.drawImage(img, 0, 0, width, height);
-      const dataUrl = canvas.toDataURL("image/png");
-      if (dataUrl.length <= maxChars) return dataUrl;
+      const dataUrl = isBanner ? canvas.toDataURL("image/jpeg", 0.92) : canvas.toDataURL("image/png");
+      if (dataUrl.length <= maxChars) return { dataUrl, isBanner };
       width = Math.round(width * 0.75);
       if (width < 160) break;
     }
-    throw new Error("Logo terlalu besar/detail untuk disimpan. Pakai gambar yang lebih sederhana.");
+    throw new Error("Gambar terlalu besar/detail untuk disimpan. Pakai gambar yang lebih sederhana.");
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
@@ -117,7 +142,14 @@ async function fileToLogoDataUrl(file: File, maxWidth = 600, maxChars = 220_000)
 
 type PreviewInfo = { storeName: string; phone: string; email: string; address: string };
 
-function LetterheadPreview({ logo, info }: { logo: string; info: PreviewInfo }) {
+function LetterheadPreview({ logo, info, banner }: { logo: string; info: PreviewInfo; banner?: boolean }) {
+  if (banner) {
+    return (
+      <div className="bi-preview banner" aria-label="Pratinjau kop surat (banner penuh)">
+        <img src={logo} alt="Pratinjau banner kop" />
+      </div>
+    );
+  }
   const line = (value: string, placeholder: string) => (value.trim() ? <span>{value.trim()}</span> : <span className="missing">{placeholder}</span>);
   return (
     <div className="bi-preview" aria-label="Pratinjau kop surat">
@@ -156,11 +188,13 @@ export default function BranchInfoPage({ branchName }: { branchName: string | nu
           phone: branch.phone ?? "",
           email: branch.email ?? "",
           logoNonPpn: branch.logo_non_ppn_data ?? null,
+          logoNonPpnBanner: Boolean(branch.logo_non_ppn_is_banner),
           storeNamePpn: branch.store_name_ppn ?? "",
           addressPpn: branch.address_ppn ?? "",
           phonePpn: branch.phone_ppn ?? "",
           emailPpn: branch.email_ppn ?? "",
           logoPpn: branch.logo_ppn_data ?? null,
+          logoPpnBanner: Boolean(branch.logo_ppn_is_banner),
         };
         setForm(next);
         setSaved(next);
@@ -178,8 +212,14 @@ export default function BranchInfoPage({ branchName }: { branchName: string | nu
     if (!file) return;
     setProcessingLogo(kind);
     try {
-      const dataUrl = await fileToLogoDataUrl(file);
-      set(kind === "ppn" ? "logoPpn" : "logoNonPpn", dataUrl);
+      const { dataUrl, isBanner } = await fileToLogoDataUrl(file);
+      setForm((current) => ({
+        ...current,
+        ...(kind === "ppn" ? { logoPpn: dataUrl, logoPpnBanner: isBanner } : { logoNonPpn: dataUrl, logoNonPpnBanner: isBanner }),
+      }));
+      if (isBanner) {
+        toast.info("Terdeteksi banner kop penuh.", { description: "Gambar dicetak selebar kop dan teks kontak tidak dicetak lagi. Bisa dimatikan lewat centang di kartu." });
+      }
     } catch (err) {
       toast.error("Logo tidak bisa dipakai.", { description: (err as Error).message });
     } finally {
@@ -208,6 +248,8 @@ export default function BranchInfoPage({ branchName }: { branchName: string | nu
           emailPpn: form.emailPpn,
           logoPpnData: form.logoPpn,
           logoNonPpnData: form.logoNonPpn,
+          logoPpnIsBanner: form.logoPpnBanner,
+          logoNonPpnIsBanner: form.logoNonPpnBanner,
         },
         session.user.id,
       );
@@ -248,6 +290,22 @@ export default function BranchInfoPage({ branchName }: { branchName: string | nu
     address: form.addressPpn.trim() || form.address,
   };
 
+  const bannerCheckbox = (kind: "ppn" | "nonppn") => {
+    const custom = kind === "ppn" ? form.logoPpn : form.logoNonPpn;
+    if (!custom) return null;
+    const checked = kind === "ppn" ? form.logoPpnBanner : form.logoNonPpnBanner;
+    return (
+      <label className="bi-check">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => set(kind === "ppn" ? "logoPpnBanner" : "logoNonPpnBanner", event.target.checked)}
+        />
+        <span>Gambar ini banner kop penuh (sudah berisi nama, telepon, email, alamat). Dicetak selebar kop, teks kontak di bawah tidak dipakai.</span>
+      </label>
+    );
+  };
+
   const logoActions = (kind: "ppn" | "nonppn") => {
     const custom = kind === "ppn" ? form.logoPpn : form.logoNonPpn;
     return (
@@ -263,7 +321,11 @@ export default function BranchInfoPage({ branchName }: { branchName: string | nu
           />
         </label>
         {custom && (
-          <button type="button" className="outline-button" onClick={() => set(kind === "ppn" ? "logoPpn" : "logoNonPpn", null)}>
+          <button
+            type="button"
+            className="outline-button"
+            onClick={() => setForm((current) => ({ ...current, ...(kind === "ppn" ? { logoPpn: null, logoPpnBanner: false } : { logoNonPpn: null, logoNonPpnBanner: false }) }))}
+          >
             <RotateCcw size={16} /> Pakai logo bawaan
           </button>
         )}
@@ -294,7 +356,7 @@ export default function BranchInfoPage({ branchName }: { branchName: string | nu
             <span className={form.logoNonPpn ? "bi-badge" : "bi-badge default"}>{form.logoNonPpn ? "Logo khusus cabang" : "Logo bawaan"}</span>
           </div>
           <p>Data utama cabang (alamat, telepon, dan email juga dipakai menu lain seperti Servis).</p>
-          <LetterheadPreview logo={form.logoNonPpn || LOGO_NON_PPN_BASE64} info={nonPpnInfo} />
+          <LetterheadPreview logo={form.logoNonPpn || LOGO_NON_PPN_BASE64} info={nonPpnInfo} banner={Boolean(form.logoNonPpn) && form.logoNonPpnBanner} />
           <div className="bi-fields">
             <label className="bi-field"><span>NAMA TOKO</span><input {...inputProps("storeName", { placeholder: "Mis. SOLO CCTV - CABANG BALI" })} /></label>
             <label className="bi-field"><span>ALAMAT</span><textarea {...inputProps("address", { placeholder: "Alamat lengkap cabang" })} /></label>
@@ -302,6 +364,7 @@ export default function BranchInfoPage({ branchName }: { branchName: string | nu
             <label className="bi-field"><span>EMAIL</span><input {...inputProps("email", { inputMode: "email", placeholder: "cabang@perusahaan.com" })} /></label>
           </div>
           {logoActions("nonppn")}
+          {bannerCheckbox("nonppn")}
         </section>
 
         <section className="bi-card">
@@ -310,7 +373,7 @@ export default function BranchInfoPage({ branchName }: { branchName: string | nu
             <span className={form.logoPpn ? "bi-badge" : "bi-badge default"}>{form.logoPpn ? "Logo khusus cabang" : "Logo bawaan"}</span>
           </div>
           <p>Isi hanya yang berbeda dari non-PPN. Kolom yang dikosongkan otomatis memakai data non-PPN (ditampilkan abu-abu sebagai petunjuk).</p>
-          <LetterheadPreview logo={form.logoPpn || LOGO_PPN_BASE64} info={ppnInfo} />
+          <LetterheadPreview logo={form.logoPpn || LOGO_PPN_BASE64} info={ppnInfo} banner={Boolean(form.logoPpn) && form.logoPpnBanner} />
           <div className="bi-fields">
             <label className="bi-field"><span>NAMA TOKO / BADAN USAHA</span><input {...inputProps("storeNamePpn", { placeholder: form.storeName || "Sama dengan non-PPN" })} /></label>
             <label className="bi-field"><span>ALAMAT</span><textarea {...inputProps("addressPpn", { placeholder: form.address || "Sama dengan non-PPN" })} /></label>
@@ -318,6 +381,7 @@ export default function BranchInfoPage({ branchName }: { branchName: string | nu
             <label className="bi-field"><span>EMAIL</span><input {...inputProps("emailPpn", { inputMode: "email", placeholder: form.email || "Sama dengan non-PPN" })} /></label>
           </div>
           {logoActions("ppn")}
+          {bannerCheckbox("ppn")}
         </section>
       </div>
 
