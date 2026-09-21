@@ -18,6 +18,8 @@ import {
   PiggyBank,
   FileText,
   FilePenLine,
+  LayoutTemplate,
+  BadgeInfo,
   ClipboardCheck,
   type LucideIcon,
 } from 'lucide-react'
@@ -39,6 +41,8 @@ export type PageKey =
   | 'kas-um'
   | 'qb-daftar'
   | 'qb-katalog'
+  | 'qb-template'
+  | 'qb-info-cabang'
   | 'proyek'
   | 'stok'
   | 'stok-opname'
@@ -154,9 +158,9 @@ export const NAV_ITEMS: NavItem[] = [
     icon: HandCoins,
     roles: KAS_ROLES,
   },
-  // ---------- Quote Builder -- "Daftar Penawaran" & "Katalog Produk"
-  // udah jadi. "Template Penawaran" nyusul kalau halamannya udah
-  // di-port. ----------
+  // ---------- Quote Builder -- Daftar Penawaran, Katalog Produk,
+  // Template Penawaran, dan Info Cabang (kop surat). Super Admin pilih
+  // cabang lewat tab di dalam halaman (sama kayak menu Kas). ----------
   {
     key: 'qb-daftar',
     label: 'Daftar Penawaran',
@@ -170,6 +174,21 @@ export const NAV_ITEMS: NavItem[] = [
     description: 'Price list per cabang (read-only, sumbernya Google Sheet/Zoho)',
     icon: FileText,
     roles: QB_ROLES,
+  },
+  {
+    key: 'qb-template',
+    label: 'Template Penawaran',
+    description: 'Paket produk siap pakai untuk mempercepat pembuatan penawaran per cabang',
+    icon: LayoutTemplate,
+    roles: QB_ROLES,
+  },
+  {
+    key: 'qb-info-cabang',
+    label: 'Info Cabang',
+    description: 'Nama toko, alamat, email, dan logo kop surat penawaran per cabang',
+    icon: BadgeInfo,
+    // Sama kayak Kelola Cabang: nulis ke tabel branches cuma boleh Super Admin (RLS).
+    roles: ['super_admin'],
   },
   {
     key: 'proyek',
