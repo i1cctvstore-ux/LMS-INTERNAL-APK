@@ -226,20 +226,20 @@ export default function Page() {
             currentUserBranchId={profile!.branch_id}
           />
         )
-      case 'qb-katalog':
+      case 'qb-template':
         return (
           <QuoteBuilderModule
-            section="katalog"
+            section="template"
             currentUserId={profile!.id}
             currentUserName={profile!.name}
             currentUserRole={profile!.role}
             currentUserBranchId={profile!.branch_id}
           />
         )
-      case 'qb-template':
+      case 'qb-katalog':
         return (
           <QuoteBuilderModule
-            section="template"
+            section="katalog"
             currentUserId={profile!.id}
             currentUserName={profile!.name}
             currentUserRole={profile!.role}
