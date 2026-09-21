@@ -1,51 +1,83 @@
 name: Backup Database Supabase
 
 # Jalan otomatis tiap hari jam 02:00 WIB (19:00 UTC hari sebelumnya),
-# plus bisa dipicu manual lewat tab "Actions" di GitHub kalau perlu
-# backup dadakan.
+# plus bisa dipicu manual lewat tab "Actions" di GitHub (Run workflow).
+#
+# 2026-09 -- DIPERBAIKI. Versi sebelumnya "sukses" tapi file backup-nya
+# KOSONG (0 byte setelah di-gunzip): `pg_dump ... | gzip > file` tanpa
+# `pipefail` -> kalau pg_dump gagal (koneksi/versi/password salah), gzip
+# tetap menulis file kosong dan langkahnya tetap hijau. Sekarang:
+#   1. pipefail aktif + isi dump DIVERIFIKASI (ukuran & baris penutup
+#      "dump complete"). Backup gagal/rusak = workflow MERAH + email GitHub.
+#   2. pg_dump versi 17 (Supabase memakai Postgres baru; pg_dump lama menolak
+#      dump dari server yang versinya lebih tinggi).
+#   3. Hasil disimpan sebagai ARTIFACT (retensi 30 hari), BUKAN di-commit ke
+#      repo. Dump berisi semua data (pelanggan, auth.users + hash password);
+#      kalau di-commit, isinya nempel selamanya di history git walau file
+#      lamanya dihapus, dan repo terus membengkak.
+#
+# SETUP (sekali saja) -- GitHub repo > Settings > Secrets and variables >
+# Actions > New repository secret:
+#   Nama : SUPABASE_DB_URL
+#   Isi  : connection string "Session pooler" dari Supabase (Project >
+#          Connect > Session pooler), formatnya:
+#          postgresql://postgres.<project-ref>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres
+#   PENTING: pakai Session pooler (port 5432, IPv4), BUKAN "Direct
+#   connection" (db.<ref>.supabase.co hanya IPv6, tidak bisa dijangkau
+#   runner GitHub) dan BUKAN Transaction pooler (port 6543, tidak cocok
+#   untuk pg_dump). Password dengan karakter khusus harus di-URL-encode.
 on:
   schedule:
     - cron: "0 19 * * *"
   workflow_dispatch: {}
 
-# 2026-09: tanpa ini, push balik ke repo kena 403 Permission denied --
-# GITHUB_TOKEN bawaan Actions defaultnya read-only di banyak repo.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   backup:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash # bash -e -o pipefail
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Install PostgreSQL client (pg_dump)
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install PostgreSQL 17 client (pg_dump)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: Dump database
         env:
-          # Diambil dari GitHub Secret SUPABASE_DB_URL -- lihat catatan
-          # setup di bawah, JANGAN taro connection string langsung di
-          # file ini.
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
+          set -euo pipefail
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::Secret SUPABASE_DB_URL belum diisi (lihat catatan SETUP di atas file ini)."
+            exit 1
+          fi
+
           mkdir -p backups
           FILENAME="backups/$(date -u +%Y-%m-%d).sql.gz"
-          pg_dump "$DATABASE_URL" --no-owner --no-privileges | gzip > "$FILENAME"
-          echo "Backup tersimpan: $FILENAME ($(du -h "$FILENAME" | cut -f1))"
+          /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" --no-owner --no-privileges | gzip > "$FILENAME"
 
-      - name: Hapus backup lama (simpan 30 hari terakhir doang)
-        run: |
-          cd backups
-          ls -1 *.sql.gz 2>/dev/null | sort | head -n -30 | xargs -r rm -f
-          cd ..
+          # Verifikasi: dump yang utuh selalu berukuran > beberapa KB dan
+          # diakhiri baris "PostgreSQL database dump complete".
+          SIZE="$(zcat "$FILENAME" | wc -c)"
+          zcat "$FILENAME" | tail -n 5 > /tmp/dump-tail.txt
+          if [ "$SIZE" -lt 5000 ] || ! grep -q "PostgreSQL database dump complete" /tmp/dump-tail.txt; then
+            echo "::error::Dump tidak valid (isi ${SIZE} byte / baris penutup tidak ada). Backup TIDAK disimpan."
+            exit 1
+          fi
+          echo "Backup OK: $FILENAME — ${SIZE} byte tidak terkompresi, $(du -h "$FILENAME" | cut -f1) terkompresi."
 
-      - name: Commit & push backup
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add backups/
-          git diff --staged --quiet && echo "Tidak ada perubahan backup." && exit 0
-          git commit -m "Backup database $(date -u +%Y-%m-%d)"
-          git push
+      - name: Simpan backup (artifact, 30 hari)
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-backup-${{ github.run_number }}
+          path: backups/*.sql.gz
+          retention-days: 30
+          if-no-files-found: error
