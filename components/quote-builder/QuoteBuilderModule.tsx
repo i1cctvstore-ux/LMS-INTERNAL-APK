@@ -6,9 +6,15 @@
 // beberapa menu sidebar yang beda.
 //
 //   "list"     -> Daftar Penawaran (+ editor penawaran, state lokal)
-//   "katalog"  -> Katalog Produk (price list)
 //   "template" -> Template Penawaran
+//   "katalog"  -> Katalog Produk (price list)
 //   "cabang"   -> Info Cabang (kop surat: nama toko, alamat, email, logo)
+//
+// Keempatnya jadi sub-menu di folder sidebar "Penawaran" (pola sama kayak
+// folder "Kas"). Cabang yang dipilih Super Admin SALING SINKRON antar
+// sub-menu: state-nya hidup di komponen ini (dipakai bersama), dan
+// diingat juga di sessionStorage supaya tetap sama walau pindah ke menu
+// lain (Dashboard, Stok, dst) lalu kembali.
 //
 // 3 tugas wrapper ini:
 //  1. <AuthProvider> -- nyediain useAuth()/useQuoteBuilderAccess() ke
@@ -48,7 +54,7 @@ import QuoteEditorPage from "./QuoteEditorPage";
 import TemplateLibraryPage from "./TemplateLibraryPage";
 import BranchInfoPage from "./BranchInfoPage";
 
-export type QuoteBuilderSection = "list" | "katalog" | "template" | "cabang";
+export type QuoteBuilderSection = "list" | "template" | "katalog" | "cabang";
 
 type QuoteBuilderModuleProps = {
   section: QuoteBuilderSection;
@@ -59,6 +65,9 @@ type QuoteBuilderModuleProps = {
 };
 
 type BranchOption = { id: string; name: string };
+
+// Cabang terakhir yang dipilih Super Admin (per tab browser) -- dibaca semua sub-menu Penawaran.
+const ACTIVE_BRANCH_KEY = "qb-active-branch";
 
 export default function QuoteBuilderModule({
   section,
@@ -86,7 +95,12 @@ export default function QuoteBuilderModule({
           .filter((branch) => branch.active !== false)
           .map((branch) => ({ id: branch.id, name: branch.name }));
         setBranches(active);
-        setActiveBranchId((current) => current ?? (active.find((b) => b.id === currentUserBranchId)?.id ?? active[0]?.id ?? null));
+        let remembered: string | null = null;
+        try { remembered = window.sessionStorage.getItem(ACTIVE_BRANCH_KEY); } catch { /* storage bisa diblokir -- abaikan */ }
+        setActiveBranchId((current) =>
+          current ??
+          (active.find((b) => b.id === remembered)?.id ?? active.find((b) => b.id === currentUserBranchId)?.id ?? active[0]?.id ?? null),
+        );
       })
       .catch((err: Error) => { if (!cancelled) setBranchError(err.message); })
       .finally(() => { if (!cancelled) setLoadingBranches(false); });
@@ -126,6 +140,7 @@ export default function QuoteBuilderModule({
     if (branchId === activeBranchId) return;
     setEditingQuoteId(null);
     setActiveBranchId(branchId);
+    try { window.sessionStorage.setItem(ACTIVE_BRANCH_KEY, branchId); } catch { /* abaikan */ }
   };
 
   return (
@@ -178,8 +193,8 @@ export default function QuoteBuilderModule({
             jadi tidak ada data cabang lama yang nyangkut. */}
         <div key={activeBranchId}>
           {section === "katalog" && <ProductCatalogPage />}
-          {section === "template" && <TemplateLibraryPage />}
           {section === "cabang" && <BranchInfoPage branchName={activeBranch?.name ?? null} />}
+          {section === "template" && <TemplateLibraryPage />}
           {section === "list" && editingQuoteId === null && (
             <QuoteListPage onOpenQuote={(id) => setEditingQuoteId(id)} onNewQuote={() => setEditingQuoteId("new")} />
           )}
