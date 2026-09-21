@@ -49,6 +49,9 @@ export type BranchLetterheadRow = {
   email_ppn: string | null;
   logo_ppn_data: string | null;
   logo_non_ppn_data: string | null;
+  /** true = gambar logo adalah BANNER kop penuh (sudah memuat nama & kontak): dicetak selebar kop, teks kontak tidak dicetak lagi. */
+  logo_ppn_is_banner: boolean;
+  logo_non_ppn_is_banner: boolean;
   updated_at: string;
   updated_by: string | null;
 };
@@ -62,6 +65,8 @@ export type BranchWithLetterhead = BranchRow & {
   email_ppn?: string | null;
   logo_ppn_data?: string | null;
   logo_non_ppn_data?: string | null;
+  logo_ppn_is_banner?: boolean;
+  logo_non_ppn_is_banner?: boolean;
 };
 
 /**
@@ -85,6 +90,8 @@ export async function getBranch(branchId: string): Promise<BranchWithLetterhead>
     email_ppn: letterhead?.email_ppn ?? null,
     logo_ppn_data: letterhead?.logo_ppn_data ?? null,
     logo_non_ppn_data: letterhead?.logo_non_ppn_data ?? null,
+    logo_ppn_is_banner: letterhead?.logo_ppn_is_banner ?? false,
+    logo_non_ppn_is_banner: letterhead?.logo_non_ppn_is_banner ?? false,
   };
 }
 
@@ -126,6 +133,8 @@ export async function saveBranchLetterhead(
     emailPpn: string;
     logoPpnData: string | null;
     logoNonPpnData: string | null;
+    logoPpnIsBanner: boolean;
+    logoNonPpnIsBanner: boolean;
   },
   updatedBy: string,
 ) {
@@ -138,6 +147,8 @@ export async function saveBranchLetterhead(
       phone_ppn: input.phonePpn.trim() || null,
       email_ppn: input.emailPpn.trim() || null,
       logo_ppn_data: input.logoPpnData,
+      logo_ppn_is_banner: input.logoPpnData ? input.logoPpnIsBanner : false,
+      logo_non_ppn_is_banner: input.logoNonPpnData ? input.logoNonPpnIsBanner : false,
       logo_non_ppn_data: input.logoNonPpnData,
       updated_by: updatedBy,
     },
