@@ -41,7 +41,12 @@ function mapProductRow(product: ProductRow, prices: ActiveProductPriceRow[]): Pr
 /** Identitas kop surat penawaran per cabang (tabel `branch_letterhead`, 1 baris per cabang). Logo = data URL base64. */
 export type BranchLetterheadRow = {
   branch_id: string;
+  /** Nama toko versi NON-PPN (sekaligus data utama). Kolom `*_ppn` = data khusus kop PPN; kosong = pakai data non-PPN. */
   store_name: string | null;
+  store_name_ppn: string | null;
+  address_ppn: string | null;
+  phone_ppn: string | null;
+  email_ppn: string | null;
   logo_ppn_data: string | null;
   logo_non_ppn_data: string | null;
   updated_at: string;
@@ -51,6 +56,10 @@ export type BranchLetterheadRow = {
 /** Baris `branches` + nama toko & 2 logo dari `branch_letterhead` (digabung oleh getBranch). */
 export type BranchWithLetterhead = BranchRow & {
   store_name?: string | null;
+  store_name_ppn?: string | null;
+  address_ppn?: string | null;
+  phone_ppn?: string | null;
+  email_ppn?: string | null;
   logo_ppn_data?: string | null;
   logo_non_ppn_data?: string | null;
 };
@@ -70,6 +79,10 @@ export async function getBranch(branchId: string): Promise<BranchWithLetterhead>
   return {
     ...(branchResult.data as BranchRow),
     store_name: letterhead?.store_name ?? null,
+    store_name_ppn: letterhead?.store_name_ppn ?? null,
+    address_ppn: letterhead?.address_ppn ?? null,
+    phone_ppn: letterhead?.phone_ppn ?? null,
+    email_ppn: letterhead?.email_ppn ?? null,
     logo_ppn_data: letterhead?.logo_ppn_data ?? null,
     logo_non_ppn_data: letterhead?.logo_non_ppn_data ?? null,
   };
@@ -98,16 +111,32 @@ export async function saveBranchInfo(
   if (error) throw error;
 }
 
-/** Nama toko + logo PPN/non-PPN cabang (tabel `branch_letterhead`, 1 baris per cabang). */
+/**
+ * Nama toko + logo + (khusus kop PPN) alamat/telepon/email cabang -- tabel
+ * `branch_letterhead`, 1 baris per cabang. Field `*Ppn` kosong = kop PPN
+ * memakai data non-PPN (kolom di `branches`).
+ */
 export async function saveBranchLetterhead(
   branchId: string,
-  input: { storeName: string; logoPpnData: string | null; logoNonPpnData: string | null },
+  input: {
+    storeName: string;
+    storeNamePpn: string;
+    addressPpn: string;
+    phonePpn: string;
+    emailPpn: string;
+    logoPpnData: string | null;
+    logoNonPpnData: string | null;
+  },
   updatedBy: string,
 ) {
   const { error } = await supabase.from("branch_letterhead").upsert(
     {
       branch_id: branchId,
       store_name: input.storeName.trim() || null,
+      store_name_ppn: input.storeNamePpn.trim() || null,
+      address_ppn: input.addressPpn.trim() || null,
+      phone_ppn: input.phonePpn.trim() || null,
+      email_ppn: input.emailPpn.trim() || null,
       logo_ppn_data: input.logoPpnData,
       logo_non_ppn_data: input.logoNonPpnData,
       updated_by: updatedBy,
