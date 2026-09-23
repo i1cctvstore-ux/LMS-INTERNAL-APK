@@ -158,10 +158,28 @@ export async function listCatalogCategories(): Promise<string[]> {
   // bukan NULL) supaya konsisten dipakai di seluruh filter/grouping yang
   // sudah ada -- termasuk di sini, biar user bisa pilih scope itu secara
   // spesifik kalau perlu.
-  const { data, error } = await supabase.from("service_products").select("kategori");
-  if (error) throw error;
-  const set = new Set<string>((data ?? []).map((r: any) => (r.kategori ? r.kategori : "Tanpa Kategori")));
-  return [...set].sort();
+  // 2026-09 -- BUG DITEMUKAN: query ini SEBELUMNYA cuma `.select("kategori")`
+  // tanpa pagination sama sekali. `service_products` tabelnya BESAR (di
+  // semua tempat LAIN yang query tabel ini di codebase SELALU pakai
+  // `.range()` berulang justru karena sudah tau ini) -- PostgREST diam-diam
+  // membatasi hasil ke 1000 baris pertama kalau tidak dikasih tahu utk ambil
+  // lebih. Kategori yang produknya kebetulan SEMUA ada di luar 1000 baris
+  // pertama (mis. HILOOK, ~67 produk, kemungkinan besar diinput belakangan
+  // jadi posisinya di ujung tabel) jadi TIDAK PERNAH muncul di pilihan
+  // kategori sama sekali -- bukan soal scroll, benar-benar tidak pernah
+  // ke-fetch. Fix: paginasi 1000 baris per halaman sampai tabelnya habis.
+  const PAGE_SIZE = 1000;
+  const allKategori: string[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("service_products")
+      .select("kategori")
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    (data ?? []).forEach((r: any) => allKategori.push(r.kategori ? r.kategori : "Tanpa Kategori"));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return [...new Set(allKategori)].sort();
 }
 
 // ============================================================
