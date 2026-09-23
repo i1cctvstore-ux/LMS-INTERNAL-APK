@@ -33,6 +33,7 @@ import {
   revertSession,
   scopeLabel,
   sessionProgress,
+  updateItemCatatan,
   updateItemReal,
   type BranchAccount,
   type OpnameItem,
@@ -246,6 +247,7 @@ export default function StockOpnamePage({
         sessionId={openId}
         role={currentUserRole}
         currentUserId={currentUserId}
+        currentUserName={currentUserName}
         onBack={() => {
           setOpenId(null);
           refreshList();
@@ -482,15 +484,25 @@ function NewSessionSheet({
 // ============================================================
 // Detail page
 // ============================================================
+// 2026-09 -- BUG DITEMUKAN (baru ketahuan setelah error-nya ditampilkan,
+// sebelumnya gagal diam-diam): komponen ini memakai `currentUserName` di
+// handleConfirm/handleRevert, tapi TIDAK PERNAH menerimanya sebagai prop --
+// setiap klik "Ya, Konfirmasi" ATAU "Ya, Buka Kunci" selalu gagal dengan
+// ReferenceError SEBELUM sempat menyentuh database sama sekali. Akibatnya
+// Stock Opname TIDAK PERNAH BISA benar-benar dikonfirmasi lewat UI ini,
+// dari awal. Fix: terima currentUserName sebagai prop (parent-nya sudah
+// punya nilainya, cuma belum diteruskan lewat JSX di atas).
 function OpnameDetail({
   sessionId,
   role,
   currentUserId,
+  currentUserName,
   onBack,
 }: {
   sessionId: string;
   role: Role;
   currentUserId: string;
+  currentUserName: string;
   onBack: () => void;
 }) {
   const [session, setSession] = useState<OpnameSession | null>(null);
@@ -564,6 +576,13 @@ function OpnameDetail({
     const v = value.trim() === "" ? null : Number(value);
     await updateItemReal(item.id, v);
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, real: v } : i)));
+  }
+
+  /** Keterangan/alasan selisih per barang -- opsional, diisi bebas (mis. "2 unit dipinjam servis"). */
+  async function handleCatatanChange(item: OpnameItem, value: string) {
+    if (value === (item.catatan ?? "")) return; // tidak berubah -- skip write
+    await updateItemCatatan(item.id, value);
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, catatan: value.trim() || null } : i)));
   }
 
   async function handleConfirm() {
@@ -748,6 +767,7 @@ function OpnameDetail({
               <Th label="Saldo" k="saldo_snapshot" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} />
               <Th label="Real" k="real" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} />
               <Th label="Selisih" k="selisih" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} />
+              <th className="border border-neutral-200 px-2 py-2 text-left align-middle">Keterangan</th>
               <Th label="✔" k="checked" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} />
             </tr>
           </thead>
@@ -803,6 +823,16 @@ function OpnameDetail({
                     >
                       {st.skip ? "-" : st.selisih === null ? "-" : st.selisih}
                     </span>
+                  </td>
+                  <td className="border border-neutral-200 px-2 py-2">
+                    <input
+                      type="text"
+                      defaultValue={item.catatan ?? ""}
+                      disabled={!editable}
+                      placeholder={typeof st.selisih === "number" && st.selisih !== 0 ? "Kenapa selisih?" : "-"}
+                      onBlur={(e) => handleCatatanChange(item, e.target.value)}
+                      className="w-36 rounded-md border border-neutral-300 bg-amber-50/40 px-1.5 py-1.5 text-[12.5px] disabled:border-transparent disabled:bg-transparent disabled:text-neutral-400"
+                    />
                   </td>
                   <td className="border border-neutral-200 px-2 py-2 text-center">
                     <span
