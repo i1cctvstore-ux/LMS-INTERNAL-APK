@@ -504,7 +504,9 @@ function OpnameDetail({
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [superEditing, setSuperEditing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [revertOpen, setRevertOpen] = useState(false);
+  const [reverting, setReverting] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
@@ -565,9 +567,23 @@ function OpnameDetail({
   }
 
   async function handleConfirm() {
-    await confirmSession({ sessionId, userId: currentUserId, userName: currentUserName });
-    setConfirmOpen(false);
-    await load();
+    // 2026-09 -- BUG DITEMUKAN: sebelumnya kalau confirmSession() gagal
+    // (mis. ditolak RLS, koneksi putus), errornya TIDAK PERNAH ditangkap
+    // -- klik "Ya, Konfirmasi" jadi kelihatan seperti tombolnya "gak
+    // aktif" (gak ada respon apa pun), padahal sebenarnya proses di
+    // belakang layar gagal diam-diam tanpa pesan apa pun ke user. Sekarang
+    // error yang sebenarnya ditampilkan, dan ada status "Menyimpan..."
+    // biar jelas prosesnya sedang jalan (bukan diam karena macet).
+    setConfirming(true);
+    try {
+      await confirmSession({ sessionId, userId: currentUserId, userName: currentUserName });
+      setConfirmOpen(false);
+      await load();
+    } catch (err: any) {
+      alert(`Gagal konfirmasi: ${err?.message || "Terjadi kesalahan tidak dikenal."}`);
+    } finally {
+      setConfirming(false);
+    }
   }
 
   // 2026-09: SEBELUMNYA "Cetak Semua" & "Cetak Selisih Saja" ikut
@@ -603,10 +619,19 @@ function OpnameDetail({
   }
 
   async function handleRevert() {
-    await revertSession({ sessionId, userId: currentUserId, userName: currentUserName });
-    setRevertOpen(false);
-    setSuperEditing(false);
-    await load();
+    // Sama kayak handleConfirm -- tangkap & tampilkan error (mis. RLS
+    // menolak kalau bukan super_admin) daripada gagal diam-diam.
+    setReverting(true);
+    try {
+      await revertSession({ sessionId, userId: currentUserId, userName: currentUserName });
+      setRevertOpen(false);
+      setSuperEditing(false);
+      await load();
+    } catch (err: any) {
+      alert(`Gagal membuka kunci: ${err?.message || "Terjadi kesalahan tidak dikenal."}`);
+    } finally {
+      setReverting(false);
+    }
   }
 
   return (
@@ -831,8 +856,8 @@ function OpnameDetail({
             <button className={SHEET_BTN.reset} onClick={() => setConfirmOpen(false)}>
               Batal
             </button>
-            <button className={SHEET_BTN.confirm} onClick={handleConfirm}>
-              <Check className="h-3.5 w-3.5" /> Ya, Konfirmasi
+            <button className={SHEET_BTN.confirm} onClick={handleConfirm} disabled={confirming}>
+              <Check className="h-3.5 w-3.5" /> {confirming ? "Menyimpan..." : "Ya, Konfirmasi"}
             </button>
           </SheetFooter>
         </Sheet>
@@ -848,8 +873,8 @@ function OpnameDetail({
             <button className={SHEET_BTN.reset} onClick={() => setRevertOpen(false)}>
               Batal
             </button>
-            <button className={SHEET_BTN.warn} onClick={handleRevert}>
-              <LockOpen className="h-3.5 w-3.5" /> Ya, Buka Kunci
+            <button className={SHEET_BTN.warn} onClick={handleRevert} disabled={reverting}>
+              <LockOpen className="h-3.5 w-3.5" /> {reverting ? "Membuka..." : "Ya, Buka Kunci"}
             </button>
           </SheetFooter>
         </Sheet>
