@@ -31,7 +31,17 @@ export interface OpnameItem {
   real: number | null;
   /** Alasan selisih / catatan bebas per barang (migration 20260923). */
   catatan: string | null;
+  /** Status keputusan buat barang yang selisih -- pilihan tertutup, lihat KEPUTUSAN_SELISIH_OPTIONS (migration 20260923000001). */
+  keputusan_selisih: string | null;
 }
+
+/** Pilihan tetap untuk dropdown "Keputusan" -- HARUS sama persis dengan CHECK constraint di migration 20260923000001_stock_opname_items_keputusan.sql. */
+export const KEPUTUSAN_SELISIH_OPTIONS = [
+  "Menunggu Keputusan",
+  "Dibuat SO",
+  "Benerin Dulu yang Ketuker",
+  "Coba Cek Ulang",
+] as const;
 
 export interface BranchAccount {
   code: string;
@@ -118,7 +128,7 @@ export async function getSessionDetail(
   for (let from = 0; ; from += PAGE) {
     const { data: page, error: itemsErr } = await supabase
       .from("stock_opname_items")
-      .select("id, session_id, product_id, kategori, nama, saldo_snapshot, accounts, real, catatan")
+      .select("id, session_id, product_id, kategori, nama, saldo_snapshot, accounts, real, catatan, keputusan_selisih")
       .eq("session_id", sessionId)
       .order("nama", { ascending: true })
       .range(from, from + PAGE - 1);
@@ -224,6 +234,16 @@ export async function updateItemCatatan(itemId: string, value: string): Promise<
   const { error } = await supabase
     .from("stock_opname_items")
     .update({ catatan: value.trim() || null })
+    .eq("id", itemId);
+  if (error) throw error;
+}
+
+/** Update kolom "keputusan_selisih" untuk satu item. value harus salah satu KEPUTUSAN_SELISIH_OPTIONS atau "" (kosongkan pilihan). RLS sama seperti updateItemReal. */
+export async function updateItemKeputusan(itemId: string, value: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("stock_opname_items")
+    .update({ keputusan_selisih: value || null })
     .eq("id", itemId);
   if (error) throw error;
 }
