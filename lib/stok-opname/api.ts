@@ -37,8 +37,7 @@ export interface OpnameItem {
 
 /** Pilihan tetap untuk dropdown "Keputusan" -- HARUS sama persis dengan CHECK constraint di migration 20260923000001_stock_opname_items_keputusan.sql. */
 export const KEPUTUSAN_SELISIH_OPTIONS = [
-  "Menunggu Keputusan",
-  "Dibuat SO",
+  "Dibuat SO nya",
   "Benerin Dulu yang Ketuker",
   "Coba Cek Ulang",
 ] as const;
