@@ -810,7 +810,7 @@ function OpnameDetail({
               <Th label="Real" k="real" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} />
               <Th label="Selisih" k="selisih" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} />
               <th className="border border-neutral-200 px-2 py-2 text-left align-middle">Keterangan</th>
-              <th className="border border-neutral-200 px-2 py-2 text-left align-middle">Keputusan</th>
+              <th className="border border-neutral-200 px-2 py-2 text-left align-middle">Menunggu Keputusan</th>
               <Th label="✔" k="checked" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} />
             </tr>
           </thead>
@@ -886,7 +886,7 @@ function OpnameDetail({
                         onChange={(e) => handleKeputusanChange(item, e.target.value)}
                         className="w-40 rounded-md border border-neutral-300 bg-amber-50/40 px-1.5 py-1.5 text-[12.5px] disabled:border-transparent disabled:bg-transparent disabled:text-neutral-400"
                       >
-                        <option value="">— Pilih —</option>
+                        <option value="">Menunggu Keputusan</option>
                         {KEPUTUSAN_SELISIH_OPTIONS.map((opt) => (
                           <option key={opt} value={opt}>
                             {opt}
