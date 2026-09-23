@@ -7041,6 +7041,33 @@ function jasaLinesFromInvoice(inv) {
   if (!inv) return [];
   return (inv.lines || []).filter((l) => !l.partId && !l.isBarangInfo).map((l) => ({ id: uid(), label: l.label, price: l.price }));
 }
+// 2026-09 -- BUG DITEMUKAN: sparepart/jasa hanya ke-seed dari `preselectIds`
+// AWAL (saat modal baru dibuka). Kalau user MENAMBAH barang lain ke invoice
+// yang sama lewat centang checkbox di dalam modal (bukan lewat preselectIds),
+// biaya sparepart/jasa punya barang itu TIDAK ikut ke invoice -- baris
+// barangnya tampil (tercatat sebagai "isBarangInfo"), tapi biaya sparepart-nya
+// (mis. baterai CMOS) hilang diam-diam dari invoice, sehingga TOTAL kurang
+// walau baris barangnya lengkap. Ini kejadian di SEMUA cabang (kode ini
+// dipakai bersama, tidak per-cabang) -- kena kalau menggabung >1 barang ke
+// satu invoice lewat centang manual di dalam modal, bukan lewat tombol
+// "Buat Invoice" yang sudah membawa semua barang sekaligus.
+//
+// Fix: 1 klaim -> 1 set baris (dipakai baik saat seed awal MAUPUN saat
+// toggleClaim menambah/menghapus klaim secara interaktif), supaya kedua
+// jalur selalu konsisten.
+function linesForClaim(c) {
+  const parts = (c.partsUsed || []).map((pu) => ({ id: uid(), claimId: c.id, locked: true, partId: pu.partId, qty: pu.qty, price: pu.price || 0 }));
+  const jasa = [];
+  if (Number(c.biayaJasaServis) > 0) {
+    jasa.push({ id: uid(), claimId: c.id, label: `Jasa Servis — ${c.brand} ${c.produk}`, price: c.biayaJasaServis });
+  } else if (c.jenis === "Ganti Baru" && Number(c.biayaToko) > 0 && (!c.partsUsed || c.partsUsed.length === 0)) {
+    jasa.push({ id: uid(), claimId: c.id, label: `Biaya Penggantian — ${c.brand} ${c.produk}`, price: c.biayaToko });
+  } else if (c.sumberPenyelesaian === "Supplier" && Number(c.biayaToko) > 0) {
+    jasa.push({ id: uid(), claimId: c.id, label: `Biaya Service — ${c.brand} ${c.produk}`, price: c.biayaToko });
+  }
+  return { parts, jasa };
+}
+
 function seedFromServiceClaims(claims, preselectIds, invoices) {
   const locked = [];
   const jasaSeed = [];
@@ -7049,16 +7076,9 @@ function seedFromServiceClaims(claims, preselectIds, invoices) {
     if (!c) return;
     const alreadyInvoiced = (invoices || []).some((inv) => (inv.claimIds || []).includes(id));
     if (alreadyInvoiced) return;
-    (c.partsUsed || []).forEach((pu) => {
-      locked.push({ id: uid(), locked: true, partId: pu.partId, qty: pu.qty, price: pu.price || 0 });
-    });
-    if (Number(c.biayaJasaServis) > 0) {
-      jasaSeed.push({ id: uid(), label: `Jasa Servis — ${c.brand} ${c.produk}`, price: c.biayaJasaServis });
-    } else if (c.jenis === "Ganti Baru" && Number(c.biayaToko) > 0 && (!c.partsUsed || c.partsUsed.length === 0)) {
-      jasaSeed.push({ id: uid(), label: `Biaya Penggantian — ${c.brand} ${c.produk}`, price: c.biayaToko });
-    } else if (c.sumberPenyelesaian === "Supplier" && Number(c.biayaToko) > 0) {
-      jasaSeed.push({ id: uid(), label: `Biaya Service — ${c.brand} ${c.produk}`, price: c.biayaToko });
-    }
+    const { parts, jasa } = linesForClaim(c);
+    locked.push(...parts);
+    jasaSeed.push(...jasa);
   });
   return { locked, jasaSeed };
 }
@@ -7081,6 +7101,8 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
 
   const [query, setQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState(() => preselectIds || []);
+  // Notice singkat pas toggleClaim otomatis menambah/melepas biaya (lihat catatan bug di linesForClaim/seedFromServiceClaims).
+  const [autoAddNotice, setAutoAddNotice] = useState("");
   const [customerName, setCustomerName] = useState(editingInvoice?.customerName || (claims.find((c) => (preselectIds || []).includes(c.id))?.customerName || ""));
   const [phone, setPhone] = useState(editingInvoice?.customerPhone || initialPhone || "");
   const [date, setDate] = useState(editingInvoice?.date || todayStr());
@@ -7102,12 +7124,25 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
   }, [eligibleClaims, query]);
 
   function toggleClaim(c) {
-    setSelectedIds((ids) => {
-      if (ids.includes(c.id)) return ids.filter((x) => x !== c.id);
-      if (!customerName) setCustomerName(c.customerName);
-      if (!phone) setPhone(c.customerPhone);
-      return [...ids, c.id];
-    });
+    const nowSelected = selectedIds.includes(c.id);
+    setSelectedIds((ids) => (nowSelected ? ids.filter((x) => x !== c.id) : [...ids, c.id]));
+    if (nowSelected) {
+      // Barang dilepas dari invoice -> lepas juga biaya sparepart/jasa yang otomatis
+      // ditambahkan untuknya. Baris yang locked dari invoice LAMA (sudah pernah tercatat
+      // sebelum sesi ini) tidak disentuh -- hanya baris yang ditambahkan lewat centang barusan.
+      setSparepartLines((lines) => lines.filter((l) => l.claimId !== c.id || !l.__autoAdded));
+      setJasaLines((lines) => lines.filter((l) => l.claimId !== c.id || !l.__autoAdded));
+      return;
+    }
+    if (!customerName) setCustomerName(c.customerName);
+    if (!phone) setPhone(c.customerPhone);
+    const { parts, jasa } = linesForClaim(c);
+    if (parts.length > 0) setSparepartLines((lines) => [...lines, ...parts.map((p) => ({ ...p, __autoAdded: true }))]);
+    if (jasa.length > 0) setJasaLines((lines) => [...lines, ...jasa.map((j) => ({ ...j, __autoAdded: true }))]);
+    if (parts.length > 0 || jasa.length > 0) {
+      const total = parts.reduce((sum, p) => sum + (Number(p.qty) || 0) * (Number(p.price) || 0), 0) + jasa.reduce((sum, j) => sum + (Number(j.price) || 0), 0);
+      setAutoAddNotice(`Biaya "${c.brand} ${c.produk}" otomatis ditambahkan (${rupiah(total)}) — cek di bagian Sparepart/Jasa di bawah sebelum simpan.`);
+    }
   }
 
   function addSparepartLine() {
@@ -7207,6 +7242,12 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
         {filteredClaims.length === 0 && <div className="p-4 text-sm text-slate-400">Tidak ada barang yang cocok / tersedia untuk diinvoice.</div>}
       </div>
 
+      {autoAddNotice && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          <span className="flex-1">{autoAddNotice}</span>
+          <button onClick={() => setAutoAddNotice("")} className="text-amber-400 hover:text-amber-600"><X size={13} /></button>
+        </div>
+      )}
       <div className="text-xs font-semibold text-slate-400 uppercase mb-2 mt-4">Sparepart</div>
       <div className="space-y-2 mb-2">
         {sparepartLines.map((l) => {
