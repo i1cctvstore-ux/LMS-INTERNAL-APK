@@ -412,6 +412,31 @@ export default function StockOpnamePage({
 // ============================================================
 // New session sheet
 // ============================================================
+// 2026-09 -- kategori produk (kolom `service_products.kategori`, ikut
+// data Accurate -- lihat catatan di lib/stok/accurate-sync.ts) banyak yang
+// kembar cuma beda huruf besar/kecil (mis. "HILOOK" & "Hilook", "ACCESS
+// CONTROL" & "Access Control"). Sebelum ini, tiap varian tampil sebagai
+// checkbox SENDIRI-SENDIRI -- gampang kecentang cuma salah satu varian,
+// jadi kelihatan "kategori X gak ada" padahal cuma kepencar checkbox-nya.
+// Sekarang varian yang cuma beda huruf besar/kecil DIGABUNG jadi 1
+// checkbox (aman & permanen -- ini di app, gak ketimpa sync Accurate).
+// TIDAK menggabungkan kategori yang beda KATA sama sekali (mis. produk
+// Hilook yang di Accurate malah dikategorikan "IP Camera"/"DISCONTINUE")
+// -- itu cuma bisa dibenerin di Accurate langsung, ganti kategori item
+// yang bersangkutan di sana.
+function groupCategoriesByCasing(categories: string[]): { key: string; label: string; variants: string[] }[] {
+  const groups = new Map<string, string[]>();
+  categories.forEach((c) => {
+    const key = c.trim().toLowerCase();
+    const list = groups.get(key);
+    if (list) list.push(c);
+    else groups.set(key, [c]);
+  });
+  return [...groups.entries()]
+    .map(([key, variants]) => ({ key, label: variants.find((v) => v === v.toUpperCase()) ?? variants[0], variants }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function NewSessionSheet({
   branchName,
   categories,
@@ -428,6 +453,7 @@ function NewSessionSheet({
   onStart: () => void;
 }) {
   const allChecked = selected.size === categories.length;
+  const groups = useMemo(() => groupCategoriesByCasing(categories), [categories]);
   return (
     <Sheet onClose={onCancel} title={`Opname Baru — ${branchName ?? ""}`} icon={<Calendar className="h-4.5 w-4.5" />}>
       <div className="flex flex-col gap-1">
@@ -443,24 +469,32 @@ function NewSessionSheet({
           />
           Semua Kategori
         </label>
-        {categories.map((c) => (
-          <label
-            key={c}
-            className="flex items-center gap-2.5 rounded-lg px-1 py-2 pl-7 text-[13px] active:bg-neutral-50"
-          >
-            <input
-              type="checkbox"
-              className="h-[18px] w-[18px] accent-indigo-600"
-              checked={selected.has(c)}
-              onChange={(e) => {
-                const next = new Set(selected);
-                e.target.checked ? next.add(c) : next.delete(c);
-                setSelected(next);
-              }}
-            />
-            {c}
-          </label>
-        ))}
+        {groups.map((g) => {
+          const groupChecked = g.variants.every((v) => selected.has(v));
+          return (
+            <label
+              key={g.key}
+              className="flex items-center gap-2.5 rounded-lg px-1 py-2 pl-7 text-[13px] active:bg-neutral-50"
+            >
+              <input
+                type="checkbox"
+                className="h-[18px] w-[18px] accent-indigo-600"
+                checked={groupChecked}
+                onChange={(e) => {
+                  const next = new Set(selected);
+                  g.variants.forEach((v) => (e.target.checked ? next.add(v) : next.delete(v)));
+                  setSelected(next);
+                }}
+              />
+              {g.label}
+              {g.variants.length > 1 && (
+                <span className="text-[10.5px] font-normal text-neutral-400">
+                  (gabungan {g.variants.length} varian penulisan)
+                </span>
+              )}
+            </label>
+          );
+        })}
         <div className="mt-3 flex gap-2 rounded-xl bg-neutral-50 p-2.5 text-[10.5px] text-neutral-500">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-400" />
           <span>
