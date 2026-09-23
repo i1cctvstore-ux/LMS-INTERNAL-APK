@@ -33,7 +33,9 @@ import {
   revertSession,
   scopeLabel,
   sessionProgress,
+  KEPUTUSAN_SELISIH_OPTIONS,
   updateItemCatatan,
+  updateItemKeputusan,
   updateItemReal,
   type BranchAccount,
   type OpnameItem,
@@ -619,6 +621,12 @@ function OpnameDetail({
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, catatan: value.trim() || null } : i)));
   }
 
+  /** Status keputusan (dropdown) buat barang yang masih selisih -- lacak sudah diputuskan mau diapakan. */
+  async function handleKeputusanChange(item: OpnameItem, value: string) {
+    await updateItemKeputusan(item.id, value);
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, keputusan_selisih: value || null } : i)));
+  }
+
   async function handleConfirm() {
     // 2026-09 -- BUG DITEMUKAN: sebelumnya kalau confirmSession() gagal
     // (mis. ditolak RLS, koneksi putus), errornya TIDAK PERNAH ditangkap
@@ -802,6 +810,7 @@ function OpnameDetail({
               <Th label="Real" k="real" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} />
               <Th label="Selisih" k="selisih" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} />
               <th className="border border-neutral-200 px-2 py-2 text-left align-middle">Keterangan</th>
+              <th className="border border-neutral-200 px-2 py-2 text-left align-middle">Keputusan</th>
               <Th label="✔" k="checked" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} />
             </tr>
           </thead>
@@ -867,6 +876,26 @@ function OpnameDetail({
                       onBlur={(e) => handleCatatanChange(item, e.target.value)}
                       className="w-36 rounded-md border border-neutral-300 bg-amber-50/40 px-1.5 py-1.5 text-[12.5px] disabled:border-transparent disabled:bg-transparent disabled:text-neutral-400"
                     />
+                  </td>
+                  <td className="border border-neutral-200 px-2 py-2">
+                    {/* Dropdown "Keputusan" cuma buat barang yang MASIH selisih (selisih != 0) -- kalau sudah cocok atau belum dihitung, gak relevan buat diputuskan. */}
+                    {typeof st.selisih === "number" && st.selisih !== 0 ? (
+                      <select
+                        defaultValue={item.keputusan_selisih ?? ""}
+                        disabled={!editable}
+                        onChange={(e) => handleKeputusanChange(item, e.target.value)}
+                        className="w-40 rounded-md border border-neutral-300 bg-amber-50/40 px-1.5 py-1.5 text-[12.5px] disabled:border-transparent disabled:bg-transparent disabled:text-neutral-400"
+                      >
+                        <option value="">— Pilih —</option>
+                        {KEPUTUSAN_SELISIH_OPTIONS.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-neutral-400">-</span>
+                    )}
                   </td>
                   <td className="border border-neutral-200 px-2 py-2 text-center">
                     <span
