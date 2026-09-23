@@ -4168,18 +4168,37 @@ function SendToSupplierModal({ claims, settings, preselectIds, onClose, onSend, 
   const [q, setQ] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
 
-  const available = claims.filter((c) => {
+  // 2026-09 -- BUG DITEMUKAN: filter brand/cari cuma menyaring TAMPILAN
+  // (`available` lama), sedangkan `picked` (barang yang benar-benar akan
+  // dikirim) adalah state terpisah yang TIDAK ikut disaring. Kalau user
+  // pernah "Pilih Semua" atau centang manual sebelum mengetik filter --
+  // atau ganti filter brand ke yang lain -- barang yang sudah tercentang
+  // dari brand LAIN jadi hilang dari daftar (ketutup filter) tapi TETAP
+  // ikut terkirim, karena filter dan status "sudah dicentang" tidak
+  // pernah disandingkan lagi. Baterai/HDD Seagate & Dahua di batch EZVIZ
+  // adalah kejadian ini -- bukan supplier ikut otomatis, barang itu memang
+  // sudah tercentang dari sebelumnya dan sekadar tersembunyi filter.
+  //
+  // Fix: barang yang SUDAH tercentang tetap ditampilkan (diberi label
+  // "di luar filter") walau tidak cocok filter brand/cari saat ini, jadi
+  // tidak ada lagi barang yang "ikut terkirim" tanpa kelihatan di daftar.
+  const eligible = claims.filter((c) => {
     const isServisBaru = c.status === "Baru" && c.jenis === "Servis";
     const isReimbursement = c.jenis === "Ganti Baru" && c.garansi === "Ya" && c.sumberPenyelesaian === "Stok Toko" && !c.stokReimbursed;
     const isPendingPreselected = (preselectIds || []).includes(c.id) && (c.status === "Menunggu Konfirmasi" || c.status === "Baru");
-    if (!isServisBaru && !isReimbursement && !isPendingPreselected) return false;
+    return isServisBaru || isReimbursement || isPendingPreselected;
+  });
+  const matchesFilter = (c) => {
     if (brandFilter && c.brand !== brandFilter) return false;
     if (q) {
       const hay = `${c.customerName} ${c.snDiterima} ${c.produk}`.toLowerCase();
       if (!hay.includes(q.toLowerCase())) return false;
     }
     return true;
-  });
+  };
+  const available = eligible.filter(matchesFilter); // dipakai "Pilih Semua" -- cuma yang cocok filter SAAT INI
+  const hiddenPicked = eligible.filter((c) => picked.includes(c.id) && !matchesFilter(c)); // sudah tercentang, tapi ketutup filter -- tetap ditampilkan
+  const visibleList = [...available, ...hiddenPicked];
   const toggle = (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
   const allAvailableChecked = available.length > 0 && available.every((c) => picked.includes(c.id));
   function toggleSelectAllAvailable() {
@@ -4257,21 +4276,29 @@ function SendToSupplierModal({ claims, settings, preselectIds, onClose, onSend, 
           Pilih Semua
         </label>
       </div>
+      {hiddenPicked.length > 0 && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span>{hiddenPicked.length} barang sudah tercentang dari luar filter saat ini (brand/cari beda) — tetap ditampilkan di bawah supaya tidak ikut terkirim tanpa sengaja.</span>
+        </div>
+      )}
       <div className="border border-slate-200 rounded-xl max-h-64 overflow-y-auto divide-y divide-slate-50">
-        {available.map((c) => {
+        {visibleList.map((c) => {
           const isReimbursement = c.jenis === "Ganti Baru";
+          const outsideFilter = !matchesFilter(c);
           return (
-            <label key={c.id} className="flex items-center gap-3 p-3 text-sm hover:bg-slate-50 cursor-pointer">
+            <label key={c.id} className={`flex items-center gap-3 p-3 text-sm hover:bg-slate-50 cursor-pointer ${outsideFilter ? "bg-amber-50/60" : ""}`}>
               <input type="checkbox" checked={picked.includes(c.id)} onChange={() => toggle(c.id)} />
               <span className="font-mono text-xs text-slate-500 w-32 truncate">{c.snDiterima}</span>
               <span className="flex-1">{c.customerName} — {c.brand} {c.produk}</span>
+              {outsideFilter && <span className="text-[11px] px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">Di luar filter</span>}
               <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${isReimbursement ? "bg-indigo-100 text-indigo-700" : "bg-blue-100 text-blue-700"}`}>
                 {isReimbursement ? "Klaim Balik" : "Servis"}
               </span>
             </label>
           );
         })}
-        {available.length === 0 && <div className="p-4 text-sm text-slate-400">Tidak ada barang yang perlu dikirim saat ini.</div>}
+        {visibleList.length === 0 && <div className="p-4 text-sm text-slate-400">Tidak ada barang yang perlu dikirim saat ini.</div>}
       </div>
 
       <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-slate-100">
