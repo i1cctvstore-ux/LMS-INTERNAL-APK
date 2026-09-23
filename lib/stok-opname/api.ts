@@ -29,6 +29,8 @@ export interface OpnameItem {
   saldo_snapshot: number;
   accounts: Record<string, number>;
   real: number | null;
+  /** Alasan selisih / catatan bebas per barang (migration 20260923). */
+  catatan: string | null;
 }
 
 export interface BranchAccount {
@@ -116,7 +118,7 @@ export async function getSessionDetail(
   for (let from = 0; ; from += PAGE) {
     const { data: page, error: itemsErr } = await supabase
       .from("stock_opname_items")
-      .select("id, session_id, product_id, kategori, nama, saldo_snapshot, accounts, real")
+      .select("id, session_id, product_id, kategori, nama, saldo_snapshot, accounts, real, catatan")
       .eq("session_id", sessionId)
       .order("nama", { ascending: true })
       .range(from, from + PAGE - 1);
@@ -194,6 +196,16 @@ export async function updateItemReal(itemId: string, value: number | null): Prom
   const { error } = await supabase
     .from("stock_opname_items")
     .update({ real: value })
+    .eq("id", itemId);
+  if (error) throw error;
+}
+
+/** Update kolom "catatan" (keterangan/alasan selisih) untuk satu item. RLS sama seperti updateItemReal. */
+export async function updateItemCatatan(itemId: string, value: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("stock_opname_items")
+    .update({ catatan: value.trim() || null })
     .eq("id", itemId);
   if (error) throw error;
 }
