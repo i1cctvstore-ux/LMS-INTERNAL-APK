@@ -7240,16 +7240,27 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
   // baru diketik di form (belum locked) tidak digabung ke baris hasil
   // seed dari klaim (locked), biar tetap jelas mana yang baru diedit.
   function mergeSparepartLines(rawLines) {
+    // CATATAN PERBAIKAN (invoice BU TITIN, 2026-09): sebelumnya kunci
+    // gabungan ikut membedakan `locked` (locked = baris hasil seed dari
+    // klaim, TIDAK locked = baris yang diketik manual lewat "+ Tambah
+    // sparepart" -- ini kejadian di invoice BU TITIN: CMOS klaim ke-2
+    // sempat ditambahkan MANUAL sebagai baris baru sebelum fix toggleClaim
+    // ada, jadi locked-nya beda dari CMOS klaim pertama meski partId SAMA
+    // -> gagal digabung. Sekarang digabung cuma berdasar partId; kalau ADA
+    // SALAH SATU baris dari klaim (locked), hasil gabungannya ikut
+    // ditandai locked -- lebih aman buat pencatatan pemakaian sparepart
+    // per klaim daripada dianggap baris manual biasa.
     const groups = [];
     const indexByKey = new Map();
     rawLines.forEach((l) => {
-      const key = `${l.partId}__${!!l.locked}`;
+      const key = String(l.partId);
       const qty = Number(l.qty) || 0;
       const amount = qty * (Number(l.price) || 0);
       if (indexByKey.has(key)) {
         const g = groups[indexByKey.get(key)];
         g.qty += qty;
         g.amount += amount;
+        g.locked = g.locked || !!l.locked;
       } else {
         indexByKey.set(key, groups.length);
         groups.push({ partId: l.partId, locked: !!l.locked, qty, amount });
