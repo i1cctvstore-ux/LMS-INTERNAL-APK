@@ -1465,7 +1465,16 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
       }
     }
     const finalPatch = { ...patch, updatedAt: patch.updatedAt || new Date().toISOString() };
-    if (original && original.status === "Menunggu Konfirmasi" && patch.jenis && !patch.status) {
+    // 2026-09 -- BUG DITEMUKAN: kondisi lama `!patch.status` gagal kalau patch
+    // datang dari form "Edit Data Lengkap" (EditClaimModal), karena form itu
+    // menyusun patch dari `{...claim}` -- SELALU membawa field `status` yang
+    // LAMA (tidak berubah), bukan `undefined`. Akibatnya kondisi `!patch.status`
+    // selalu gagal, dan klaim "Menunggu Konfirmasi" yang cuma diisi Jenis lewat
+    // Edit Data Lengkap TIDAK PERNAH auto-berubah jadi "Baru" -- tetap nyangkut
+    // di "Perlu Dicek" walau Jenis sudah diisi & disimpan, seolah tidak ke-save.
+    // Fix: anggap "tidak minta ganti status" kalau patch.status memang belum
+    // diisi ATAU nilainya SAMA dengan status asli (bukan cuma truthy/falsy).
+    if (original && original.status === "Menunggu Konfirmasi" && patch.jenis && (patch.status === undefined || patch.status === original.status)) {
       finalPatch.status = "Baru";
     }
     const nextClaims = claims.map((c) => (c.id === id ? { ...c, ...finalPatch } : c));
@@ -3174,12 +3183,22 @@ function ProgressItemPanel({ claim, settings, batches, hasInvoice, claimNeedsInv
             <option value="Ganti Baru">Ganti Baru</option>
             <option value="Servis">Servis</option>
           </select>
+          {jenisDraft && (
+            <button onClick={() => onSetJenis(jenisDraft)} className="w-full py-2 text-xs font-medium rounded-full border border-indigo-200 text-indigo-600 hover:bg-indigo-50">
+              Simpan Jenis dulu (belum pilih jalur — buat gabung ke 1 pengiriman/invoice nanti)
+            </button>
+          )}
         </div>
       )}
       {pending && claim.garansi !== "Ya" && (
-        <div className="mb-3 flex items-center gap-2 flex-wrap">
-          <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-medium">Jenis: Servis</span>
-          <span className="text-xs text-slate-400">otomatis — barang tanpa garansi tidak bisa ganti unit baru gratis</span>
+        <div className="space-y-2 mb-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-medium">Jenis: Servis</span>
+            <span className="text-xs text-slate-400">otomatis — barang tanpa garansi tidak bisa ganti unit baru gratis</span>
+          </div>
+          <button onClick={() => onSetJenis("Servis")} className="w-full py-2 text-xs font-medium rounded-full border border-indigo-200 text-indigo-600 hover:bg-indigo-50">
+            Simpan dulu (belum pilih jalur — buat gabung ke 1 pengiriman/invoice nanti)
+          </button>
         </div>
       )}
 
