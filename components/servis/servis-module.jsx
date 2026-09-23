@@ -3175,7 +3175,22 @@ function ProgressItemPanel({ claim, settings, batches, hasInvoice, claimNeedsInv
 
   return (
     <div>
-      {pending && claim.garansi === "Ya" && (
+      {/* 2026-09 -- PEMULIHAN BUG LAMA: sebelum fix, klaim yang Jenis-nya sudah
+          diisi lewat Edit Data Lengkap bisa nyangkut status "Menunggu Konfirmasi"
+          (statusnya tidak ikut ke-update walau Jenis sudah tersimpan). Kalau ada
+          klaim lama yang masih kena kondisi ini, tawarkan tombol pemulihan
+          langsung di sini -- tidak perlu trik "ubah dikit lalu simpan" lagi. */}
+      {pending && claim.jenis && (
+        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 space-y-2 mb-3">
+          <p className="text-sm text-amber-800">
+            Jenis penanganan sudah tercatat (<strong>{claim.jenis}</strong>) tapi status barang ini belum ikut berubah dari &quot;Perlu Dicek&quot; — sisa dari bug lama.
+          </p>
+          <button onClick={() => onSetJenis(claim.jenis)} className="w-full py-2 text-sm font-medium rounded-full bg-amber-500 text-white hover:bg-amber-600">
+            Perbarui Status Sekarang
+          </button>
+        </div>
+      )}
+      {pending && !claim.jenis && claim.garansi === "Ya" && (
         <div className="space-y-3 mb-3">
           <p className="text-sm text-slate-600">Tentukan jenis penanganan untuk barang ini:</p>
           <select className={inputCls} value={jenisDraft} onChange={(e) => { setJenisDraft(e.target.value); setPath(null); }}>
@@ -3190,7 +3205,7 @@ function ProgressItemPanel({ claim, settings, batches, hasInvoice, claimNeedsInv
           )}
         </div>
       )}
-      {pending && claim.garansi !== "Ya" && (
+      {pending && !claim.jenis && claim.garansi !== "Ya" && (
         <div className="space-y-2 mb-3">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-medium">Jenis: Servis</span>
@@ -7217,6 +7232,35 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
 
   const canSubmit = customerName.trim() && phone.trim() && (selectedIds.length > 0 || sparepartLines.some((l) => l.partId) || jasaLines.some((l) => l.label.trim()));
 
+  // 2026-09 -- kalau lebih dari 1 barang di invoice ini sama-sama pakai
+  // sparepart yang SAMA (mis. 2 unit yang masing-masing dipasangi 1 baterai
+  // CMOS), digabung jadi SATU baris di invoice (qty ditotal) supaya tidak
+  // tampil dobel dengan qty 1 masing-masing. Hanya digabung kalau
+  // partId & status "locked" (asal barisnya) sama -- baris manual yang
+  // baru diketik di form (belum locked) tidak digabung ke baris hasil
+  // seed dari klaim (locked), biar tetap jelas mana yang baru diedit.
+  function mergeSparepartLines(rawLines) {
+    const groups = [];
+    const indexByKey = new Map();
+    rawLines.forEach((l) => {
+      const key = `${l.partId}__${!!l.locked}`;
+      const qty = Number(l.qty) || 0;
+      const amount = qty * (Number(l.price) || 0);
+      if (indexByKey.has(key)) {
+        const g = groups[indexByKey.get(key)];
+        g.qty += qty;
+        g.amount += amount;
+      } else {
+        indexByKey.set(key, groups.length);
+        groups.push({ partId: l.partId, locked: !!l.locked, qty, amount });
+      }
+    });
+    return groups.map((g) => {
+      const part = (settings.spareParts || []).find((p) => p.id === g.partId);
+      return { label: part ? part.name : "Sparepart", sn: "", qty: g.qty, price: g.qty ? Math.round(g.amount / g.qty) : 0, amount: g.amount, partId: g.partId, locked: g.locked };
+    });
+  }
+
   function handleSubmit() {
     const lines = [
       ...selectedClaims.map((c) => ({
@@ -7224,10 +7268,7 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
         snPengganti: c.snPenggantiStock || c.snPenggantiSupplier || "",
         jenis: c.jenis, qty: 1, price: 0, amount: 0, isBarangInfo: true,
       })),
-      ...sparepartLines.filter((l) => l.partId).map((l) => {
-        const part = (settings.spareParts || []).find((p) => p.id === l.partId);
-        return { label: part ? part.name : "Sparepart", sn: "", qty: Number(l.qty) || 0, price: Number(l.price) || 0, amount: (Number(l.qty) || 0) * (Number(l.price) || 0), partId: l.partId, locked: !!l.locked };
-      }),
+      ...mergeSparepartLines(sparepartLines.filter((l) => l.partId)),
       ...jasaLines.filter((l) => l.label.trim()).map((l) => ({ label: l.label.trim(), sn: "", qty: 1, price: Number(l.price) || 0, amount: Number(l.price) || 0 })),
     ];
     const data = {
