@@ -21,6 +21,7 @@ import {
   LayoutTemplate,
   BadgeInfo,
   ClipboardCheck,
+  PackageSearch,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/types'
@@ -43,6 +44,9 @@ export type PageKey =
   | 'qb-template'
   | 'qb-katalog'
   | 'qb-info-cabang'
+  | 'paket-kalkulator'
+  | 'paket-riwayat'
+  | 'paket-harga'
   | 'proyek'
   | 'stok'
   | 'stok-opname'
@@ -86,6 +90,19 @@ const NON_GUDANG_ROLES: Role[] = ['super_admin', 'admin', 'kasir', 'teknisi']
 // HANDOFF_FEBRI.md, "role reviewer/sales/staff/viewer" di dokumen
 // awal belum ada di sistem role kita yang sebenarnya).
 const QB_ROLES: Role[] = ['super_admin', 'admin']
+
+// Paket CCTV (Kalkulator Paket, Riwayat Paket, Harga Komponen) -- sama
+// seperti Quote Builder, Admin hanya melihat/mengelola cabangnya sendiri
+// (branch_id di profil akun, bukan pilihan manual seperti Super Admin) --
+// ditegakkan di RLS (paket_branch_prices, paket_quotes), bukan cuma di
+// sini. Harga Komponen (yang menyingkap HPP) dikunci lebih ketat, lihat
+// PAKET_HARGA_ROLES di bawah.
+const PAKET_ROLES: Role[] = ['super_admin', 'admin']
+// Harga Komponen: super_admin saja -- ini satu-satunya layar yang perlu
+// membaca paket_branch_hpp (RLS tabel itu sendiri sudah menolak admin,
+// tapi menu ini tetap disembunyikan juga di sini biar tidak membingungkan
+// admin dengan layar yang isinya kosong/error).
+const PAKET_HARGA_ROLES: Role[] = ['super_admin']
 
 // Menu Kas (Buku Kas & Kas Kecil & Kas UM/Reimburse) untuk super_admin,
 // admin, DAN gudang -- kasir/teknisi tetap tidak melihat menu ini sama
@@ -132,6 +149,35 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Calculator,
     // 2026-09-11: disembunyiin dari cabang selain Jakarta dulu -- lihat jakartaOnly.
     jakartaOnly: true,
+  },
+  // ---------- Paket CCTV -- 3 sub-menu, dikelompokkan jadi 1 folder
+  // dropdown "Paket CCTV" di Sidebar lewat NAV_GROUPS di bawah, ditaruh
+  // tepat di bawah Kalkulator Maintenance (bukan sejajar Penawaran --
+  // ini modul yang sengaja terpisah dari Quote Builder, lihat catatan
+  // proyek). Ketiganya memakai komponen yang sama (PaketCctvModule),
+  // jadi cabang yang dipilih Super Admin ikut terbawa ke semua sub-menu,
+  // sama seperti pola Quote Builder & Kas. ----------
+  {
+    key: 'paket-kalkulator',
+    label: 'Kalkulator Paket',
+    description: 'Buat penawaran paket CCTV cepat per brand & jumlah kamera',
+    icon: PackageSearch,
+    roles: PAKET_ROLES,
+  },
+  {
+    key: 'paket-riwayat',
+    label: 'Riwayat Paket',
+    description: 'Cari, filter, cetak ulang, dan lanjutkan paket CCTV yang sudah dibuat',
+    icon: ClipboardCheck,
+    roles: PAKET_ROLES,
+  },
+  {
+    key: 'paket-harga',
+    label: 'Harga Komponen',
+    description: 'Kelola harga barang, brand, formula preset, dan tarif PPN per cabang',
+    icon: Settings2,
+    // Super Admin saja -- Admin cabang tidak boleh lihat/edit HPP & margin.
+    roles: PAKET_HARGA_ROLES,
   },
   // ---------- Kas (Buku Kas & Kas Kecil & Kas UM/Reimburse) — 3 sub-menu,
   // dikelompokkan jadi 1 folder dropdown "Kas" di Sidebar lewat
@@ -298,6 +344,12 @@ export type NavGroup = {
 // terdaftar sebagai NavItem biasa di NAV_ITEMS di atas, ini cuma metadata
 // tambahan buat cara Sidebar merender & mengelompokkannya secara visual.
 export const NAV_GROUPS: NavGroup[] = [
+  {
+    key: 'paket-cctv',
+    label: 'Paket CCTV',
+    icon: PackageSearch,
+    itemKeys: ['paket-kalkulator', 'paket-riwayat', 'paket-harga'],
+  },
   {
     key: 'penawaran',
     label: 'Penawaran',
