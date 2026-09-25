@@ -5,15 +5,12 @@
 // =====================================================
 // Implementasi bagian 6.3 handoff.
 //
-// Superadmin: defaultnya melihat cabang yang lagi aktif di tab
-// PaketCctvModule (konsisten dengan pola Kas/Quote Builder di app ini),
-// tapi bisa pindah ke "Semua cabang" lewat dropdown Cabang -- itu yang
-// dimaksud bagian 6.3 "Superadmin: semua cabang + filter cabang". Admin
-// tidak punya dropdown ini sama sekali (RLS juga menegakkan ini).
+// Cabang ditentukan sepenuhnya dari tab aktif di PaketCctvModule (konsisten
+// dengan pola Kas/Quote Builder di app ini) -- tidak ada dropdown cabang
+// terpisah lagi di halaman ini, karena dulu kelihatan dobel/membingungkan
+// dengan tab cabang yang sudah ada di atasnya.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { listBranches } from "@/lib/quote-builder/api";
-import type { BranchRow } from "@/lib/quote-builder/database.types";
+import { useCallback, useEffect, useState } from "react";
 import {
   type CustomerTypeKey,
   type ListQuotesFilter,
@@ -41,8 +38,6 @@ const STATUS_LABEL: Record<QuoteStatus, string> = { menunggu: "Menunggu", deal: 
 const STATUS_COLOR: Record<QuoteStatus, string> = { menunggu: "#8a5c10", deal: "#1a7f37", batal: "#b23b2c" };
 
 export default function RiwayatPage({ branchId, isSuperAdmin, currentUserId, onNavigate }: Props) {
-  const [branchFilter, setBranchFilter] = useState<string | "all">(branchId);
-  const [branches, setBranches] = useState<BranchRow[]>([]);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<NonNullable<ListQuotesFilter["sort"]>>("newest");
   const [status, setStatus] = useState<QuoteStatus | "all">("all");
@@ -61,24 +56,11 @@ export default function RiwayatPage({ branchId, isSuperAdmin, currentUserId, onN
   const [deleteArmedId, setDeleteArmedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setBranchFilter(branchId);
-  }, [branchId]);
-
-  useEffect(() => {
-    if (!isSuperAdmin) return;
-    listBranches()
-      .then((rows) => setBranches(rows as BranchRow[]))
-      .catch(() => {
-        /* dropdown cabang cuma kenyamanan -- gagal diam-diam, filter cabang aktif tetap jalan */
-      });
-  }, [isSuperAdmin]);
-
   const reload = useCallback(() => {
     setLoading(true);
     setLoadError(null);
     const filter: ListQuotesFilter = {
-      branchId: branchFilter === "all" ? undefined : branchFilter,
+      branchId,
       custTypeKey: custType === "all" ? undefined : custType,
       ppnMode: ppnMode === "all" ? undefined : ppnMode,
       status: status === "all" ? undefined : status,
@@ -92,13 +74,11 @@ export default function RiwayatPage({ branchId, isSuperAdmin, currentUserId, onN
       .then(setRows)
       .catch((err: Error) => setLoadError(err.message))
       .finally(() => setLoading(false));
-  }, [branchFilter, custType, ppnMode, status, dateFrom, dateTo, search, sort]);
+  }, [branchId, custType, ppnMode, status, dateFrom, dateTo, search, sort]);
 
   useEffect(() => {
     reload();
   }, [reload]);
-
-  const branchNameById = useMemo(() => new Map(branches.map((b) => [b.id, b.name])), [branches]);
 
   async function openDetail(id: string) {
     if (detailId === id) {
@@ -164,14 +144,6 @@ export default function RiwayatPage({ branchId, isSuperAdmin, currentUserId, onN
           onChange={(e) => setSearch(e.target.value)}
           style={{ ...inputStyle, width: 220 }}
         />
-        {isSuperAdmin && (
-          <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} style={inputStyle}>
-            <option value="all">Semua cabang</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
-        )}
         <select value={status} onChange={(e) => setStatus(e.target.value as QuoteStatus | "all")} style={inputStyle}>
           <option value="all">Semua status</option>
           <option value="menunggu">Menunggu</option>
@@ -212,9 +184,6 @@ export default function RiwayatPage({ branchId, isSuperAdmin, currentUserId, onN
               <div>
                 <strong style={{ fontSize: 13 }}>{r.no}</strong>
                 <span style={{ marginLeft: 8, color: "#4b5566" }}>{r.cust_name || "(tanpa nama)"}</span>
-                {isSuperAdmin && branchFilter === "all" && (
-                  <span style={{ marginLeft: 8, color: "#9aa1ac", fontSize: 11 }}>{branchNameById.get(r.branch_id) ?? ""}</span>
-                )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ fontSize: 11, color: "#9aa1ac" }}>{r.quote_date}</span>
