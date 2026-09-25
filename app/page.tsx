@@ -12,6 +12,7 @@ import StokModule from '@/components/stok/stok-module'
 import KasModule from '@/components/kas/kas-module'
 import KalkulatorMaintenance from '@/components/kalkulator/kalkulator-maintenance'
 import QuoteBuilderModule from '@/components/quote-builder/QuoteBuilderModule'
+import PaketCctvModule from '@/components/paket-cctv/PaketCctvModule'
 import StockOpnamePage from '@/components/stok-opname/stock-opname-page'
 import { LmsMaterials } from '@/components/lms/lms-materials'
 import { LmsVerifikasi } from '@/components/lms/lms-verifikasi'
@@ -253,6 +254,39 @@ export default function Page() {
         return (
           <QuoteBuilderModule
             section="cabang"
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+            onNavigate={setActivePage}
+          />
+        )
+      case 'paket-kalkulator':
+        return (
+          <PaketCctvModule
+            section="kalkulator"
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+            onNavigate={setActivePage}
+          />
+        )
+      case 'paket-riwayat':
+        return (
+          <PaketCctvModule
+            section="riwayat"
+            currentUserId={profile!.id}
+            currentUserName={profile!.name}
+            currentUserRole={profile!.role}
+            currentUserBranchId={profile!.branch_id}
+            onNavigate={setActivePage}
+          />
+        )
+      case 'paket-harga':
+        return (
+          <PaketCctvModule
+            section="harga"
             currentUserId={profile!.id}
             currentUserName={profile!.name}
             currentUserRole={profile!.role}
