@@ -150,35 +150,6 @@ export const NAV_ITEMS: NavItem[] = [
     // 2026-09-11: disembunyiin dari cabang selain Jakarta dulu -- lihat jakartaOnly.
     jakartaOnly: true,
   },
-  // ---------- Paket CCTV -- 3 sub-menu, dikelompokkan jadi 1 folder
-  // dropdown "Paket CCTV" di Sidebar lewat NAV_GROUPS di bawah, ditaruh
-  // tepat di bawah Kalkulator Maintenance (bukan sejajar Penawaran --
-  // ini modul yang sengaja terpisah dari Quote Builder, lihat catatan
-  // proyek). Ketiganya memakai komponen yang sama (PaketCctvModule),
-  // jadi cabang yang dipilih Super Admin ikut terbawa ke semua sub-menu,
-  // sama seperti pola Quote Builder & Kas. ----------
-  {
-    key: 'paket-kalkulator',
-    label: 'Kalkulator Paket',
-    description: 'Buat penawaran paket CCTV cepat per brand & jumlah kamera',
-    icon: PackageSearch,
-    roles: PAKET_ROLES,
-  },
-  {
-    key: 'paket-riwayat',
-    label: 'Riwayat Paket',
-    description: 'Cari, filter, cetak ulang, dan lanjutkan paket CCTV yang sudah dibuat',
-    icon: ClipboardCheck,
-    roles: PAKET_ROLES,
-  },
-  {
-    key: 'paket-harga',
-    label: 'Harga Komponen',
-    description: 'Kelola harga barang, brand, formula preset, dan tarif PPN per cabang',
-    icon: Settings2,
-    // Super Admin saja -- Admin cabang tidak boleh lihat/edit HPP & margin.
-    roles: PAKET_HARGA_ROLES,
-  },
   // ---------- Kas (Buku Kas & Kas Kecil & Kas UM/Reimburse) — 3 sub-menu,
   // dikelompokkan jadi 1 folder dropdown "Kas" di Sidebar lewat
   // NAV_GROUPS di bawah -- pola sama persis kayak folder "Servis".
@@ -237,6 +208,35 @@ export const NAV_ITEMS: NavItem[] = [
     icon: BadgeInfo,
     // Sama kayak Kelola Cabang: nulis ke tabel branches cuma boleh Super Admin (RLS).
     roles: ['super_admin'],
+  },
+  // ---------- Paket CCTV -- 3 sub-menu, dikelompokkan jadi 1 folder
+  // dropdown "Paket CCTV" di Sidebar lewat NAV_GROUPS di bawah, ditaruh
+  // tepat di bawah folder Penawaran (bukan sub-menu di dalamnya -- ini
+  // modul yang sengaja terpisah dari Quote Builder, lihat catatan
+  // proyek). Ketiganya memakai komponen yang sama (PaketCctvModule),
+  // jadi cabang yang dipilih Super Admin ikut terbawa ke semua sub-menu,
+  // sama seperti pola Quote Builder & Kas. ----------
+  {
+    key: 'paket-kalkulator',
+    label: 'Kalkulator Paket',
+    description: 'Buat penawaran paket CCTV cepat per brand & jumlah kamera',
+    icon: PackageSearch,
+    roles: PAKET_ROLES,
+  },
+  {
+    key: 'paket-riwayat',
+    label: 'Riwayat Paket',
+    description: 'Cari, filter, cetak ulang, dan lanjutkan paket CCTV yang sudah dibuat',
+    icon: ClipboardCheck,
+    roles: PAKET_ROLES,
+  },
+  {
+    key: 'paket-harga',
+    label: 'Harga Komponen',
+    description: 'Kelola harga barang, brand, formula preset, dan tarif PPN per cabang',
+    icon: Settings2,
+    // Super Admin saja -- Admin cabang tidak boleh lihat/edit HPP & margin.
+    roles: PAKET_HARGA_ROLES,
   },
   {
     key: 'proyek',
@@ -345,16 +345,16 @@ export type NavGroup = {
 // tambahan buat cara Sidebar merender & mengelompokkannya secara visual.
 export const NAV_GROUPS: NavGroup[] = [
   {
-    key: 'paket-cctv',
-    label: 'Paket CCTV',
-    icon: PackageSearch,
-    itemKeys: ['paket-kalkulator', 'paket-riwayat', 'paket-harga'],
-  },
-  {
     key: 'penawaran',
     label: 'Penawaran',
     icon: FilePenLine,
     itemKeys: ['qb-daftar', 'qb-template', 'qb-katalog', 'qb-info-cabang'],
+  },
+  {
+    key: 'paket-cctv',
+    label: 'Paket CCTV',
+    icon: PackageSearch,
+    itemKeys: ['paket-kalkulator', 'paket-riwayat', 'paket-harga'],
   },
   {
     key: 'kas',
