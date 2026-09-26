@@ -1450,14 +1450,27 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   }
 
   function handleUpdateClaim(id, patch) {
-    const original = claims.find((c) => c.id === id);
-    let nextSettings = settings;
+    // FIX 26 Sep 2026 -- BUG DITEMUKAN: fungsi ini baca `claims` & `settings`
+    // dari closure React state, BUKAN dari `dataRef.current` (sumber yang
+    // selalu paling baru, yang justru sudah disediakan `persist()` khusus
+    // buat menghindari race ini). Kalau 2 klaim diproses cepat berurutan
+    // (mis. 2 tiket BU TITIN yang sama-sama pakai baterai CMOS, disave
+    // hampir bersamaan) SEBELUM React sempat re-render di antara keduanya,
+    // panggilan kedua masih baca `settings.spareParts`/`claims` versi LAMA
+    // (sebelum update dari panggilan pertama kepakai) -- hasilnya update
+    // dari salah satu panggilan bisa ketimpa/hilang diam-diam walau
+    // masing-masing tetap kecatat benar di Riwayat Sparepart (makanya
+    // log & stok aktual bisa beda). Sekarang selalu baca dari
+    // dataRef.current, sama seperti yang sudah dilakukan persist().
+    const original = dataRef.current.claims.find((c) => c.id === id);
+    const baseSettings = dataRef.current.settings;
+    let nextSettings = baseSettings;
     if (patch.partsUsed && original) {
-      nextSettings = { ...settings, spareParts: applyPartsDelta(original.partsUsed, patch.partsUsed, settings.spareParts) };
+      nextSettings = { ...baseSettings, spareParts: applyPartsDelta(original.partsUsed, patch.partsUsed, baseSettings.spareParts) };
       const addedParts = patch.partsUsed.filter((p) => !(original.partsUsed || []).some((op) => op.partId === p.partId && op.qty === p.qty));
       if (addedParts.length) {
         const logItems = addedParts.map((p) => {
-          const part = (settings.spareParts || []).find((sp) => sp.id === p.partId);
+          const part = (baseSettings.spareParts || []).find((sp) => sp.id === p.partId);
           return { partId: p.partId, name: part ? part.name : "Sparepart", qty: p.qty };
         });
         const entry = logSparepartMovement("keluar", todayStr(), logItems, `Dipakai servis — ${original.customerName}`, [original.id]);
@@ -1477,7 +1490,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
     if (original && original.status === "Menunggu Konfirmasi" && patch.jenis && (patch.status === undefined || patch.status === original.status)) {
       finalPatch.status = "Baru";
     }
-    const nextClaims = claims.map((c) => (c.id === id ? { ...c, ...finalPatch } : c));
+    const nextClaims = dataRef.current.claims.map((c) => (c.id === id ? { ...c, ...finalPatch } : c));
     persist({ claims: nextClaims, settings: nextSettings });
   }
 
@@ -1613,42 +1626,48 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
     persist({ claims: claims.filter((c) => c.id !== claimId) });
   }
   function stockInSpareparts(tanggal, entries) {
+    // FIX 26 Sep 2026 -- baca dari dataRef.current, sama alasannya seperti
+    // fix di handleUpdateClaim (lihat catatan di sana).
+    const baseSettings = dataRef.current.settings;
     const byId = {};
     entries.forEach((e) => { byId[e.partId] = (byId[e.partId] || 0) + e.qty; });
-    const nextSpareParts = (settings.spareParts || []).map((p) => (byId[p.id] ? { ...p, qty: p.qty + byId[p.id] } : p));
+    const nextSpareParts = (baseSettings.spareParts || []).map((p) => (byId[p.id] ? { ...p, qty: p.qty + byId[p.id] } : p));
     const logItems = entries.map((e) => {
-      const part = (settings.spareParts || []).find((p) => p.id === e.partId);
+      const part = (baseSettings.spareParts || []).find((p) => p.id === e.partId);
       return { partId: e.partId, name: part ? part.name : "Sparepart", qty: e.qty };
     });
     const logEntry = logSparepartMovement("masuk", tanggal, logItems, "Barang Masuk");
-    persist({ settings: { ...settings, spareParts: nextSpareParts, sparepartStockLog: [...(settings.sparepartStockLog || []), logEntry] } });
+    persist({ settings: { ...baseSettings, spareParts: nextSpareParts, sparepartStockLog: [...(baseSettings.sparepartStockLog || []), logEntry] } });
   }
   function deleteSparepartStockInEntry(entryId) {
     if (role !== "pusat") return;
-    const entry = (settings.sparepartStockLog || []).find((e) => e.id === entryId);
+    const baseSettings = dataRef.current.settings;
+    const entry = (baseSettings.sparepartStockLog || []).find((e) => e.id === entryId);
     if (!entry || entry.type === "keluar") return;
     const byId = {};
     entry.items.forEach((it) => { if (it.partId) byId[it.partId] = (byId[it.partId] || 0) + it.qty; });
-    const nextSpareParts = (settings.spareParts || []).map((p) => (byId[p.id] ? { ...p, qty: Math.max(0, p.qty - byId[p.id]) } : p));
-    persist({ settings: { ...settings, spareParts: nextSpareParts, sparepartStockLog: (settings.sparepartStockLog || []).filter((e) => e.id !== entryId) } });
+    const nextSpareParts = (baseSettings.spareParts || []).map((p) => (byId[p.id] ? { ...p, qty: Math.max(0, p.qty - byId[p.id]) } : p));
+    persist({ settings: { ...baseSettings, spareParts: nextSpareParts, sparepartStockLog: (baseSettings.sparepartStockLog || []).filter((e) => e.id !== entryId) } });
   }
   function consumeSparepartsForInvoice(usageList, invoiceNo, customerName) {
     if (!usageList || usageList.length === 0) return;
+    const baseSettings = dataRef.current.settings;
     const usage = {};
     usageList.forEach((u) => { usage[u.partId] = (usage[u.partId] || 0) + u.qty; });
     const logItems = usageList.map((u) => {
-      const part = (settings.spareParts || []).find((p) => p.id === u.partId);
+      const part = (baseSettings.spareParts || []).find((p) => p.id === u.partId);
       return { partId: u.partId, name: part ? part.name : "Sparepart", qty: u.qty };
     });
     const entry = logSparepartMovement("keluar", todayStr(), logItems, `Invoice ${invoiceNo || ""} — ${customerName || ""}`.trim());
-    persist({ settings: { ...settings, spareParts: (settings.spareParts || []).map((p) => (usage[p.id] ? { ...p, qty: Math.max(0, p.qty - usage[p.id]) } : p)), sparepartStockLog: entry ? [...(settings.sparepartStockLog || []), entry] : settings.sparepartStockLog } });
+    persist({ settings: { ...baseSettings, spareParts: (baseSettings.spareParts || []).map((p) => (usage[p.id] ? { ...p, qty: Math.max(0, p.qty - usage[p.id]) } : p)), sparepartStockLog: entry ? [...(baseSettings.sparepartStockLog || []), entry] : baseSettings.sparepartStockLog } });
   }
   function reconcileSparepartsForInvoiceEdit(oldUsageList, newUsageList) {
+    const baseSettings = dataRef.current.settings;
     const delta = {};
     (oldUsageList || []).forEach((u) => { delta[u.partId] = (delta[u.partId] || 0) - u.qty; });
     (newUsageList || []).forEach((u) => { delta[u.partId] = (delta[u.partId] || 0) + u.qty; });
     if (Object.keys(delta).length === 0) return;
-    persist({ settings: { ...settings, spareParts: (settings.spareParts || []).map((p) => (delta[p.id] ? { ...p, qty: Math.max(0, p.qty - delta[p.id]) } : p)) } });
+    persist({ settings: { ...baseSettings, spareParts: (baseSettings.spareParts || []).map((p) => (delta[p.id] ? { ...p, qty: Math.max(0, p.qty - delta[p.id]) } : p)) } });
   }
 
   function addInvoiceRecord(data) {
@@ -2262,7 +2281,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
               return;
             }
             let finalData = data;
-            let nextClaims = claims;
+            let nextClaims = dataRef.current.claims;
             if (!data.claimIds || data.claimIds.length === 0) {
               const newClaim = {
                 id: uid(), groupId: uid(),
@@ -2279,22 +2298,25 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
                 sumberPenyelesaian: "Penjualan Sparepart", tanggalAmbilCustomer: "", metodeBayarAmbil: "",
                 updatedAt: dateToISO(data.date),
               };
-              nextClaims = [...claims, newClaim];
+              nextClaims = [...dataRef.current.claims, newClaim];
               finalData = { ...data, claimIds: [newClaim.id] };
             }
+            // FIX 26 Sep 2026 -- baca settings dari dataRef.current, sama
+            // alasannya seperti fix di handleUpdateClaim (lihat catatan di sana).
+            const baseSettings = dataRef.current.settings;
             const usage = {};
             (sparepartUsage || []).forEach((u) => { usage[u.partId] = (usage[u.partId] || 0) + u.qty; });
-            const nextSpareParts = (settings.spareParts || []).map((p) => (usage[p.id] ? { ...p, qty: Math.max(0, p.qty - usage[p.id]) } : p));
+            const nextSpareParts = (baseSettings.spareParts || []).map((p) => (usage[p.id] ? { ...p, qty: Math.max(0, p.qty - usage[p.id]) } : p));
             const logItems = (sparepartUsage || []).map((u) => {
-              const part = (settings.spareParts || []).find((p) => p.id === u.partId);
+              const part = (baseSettings.spareParts || []).find((p) => p.id === u.partId);
               return { partId: u.partId, name: part ? part.name : "Sparepart", qty: u.qty };
             });
             const logEntry = logSparepartMovement("keluar", todayStr(), logItems, `Invoice ${finalData.invoiceNo} — ${finalData.customerName}`, finalData.claimIds);
             const record = { id: uid(), verified: false, ...finalData };
             persist({
               claims: nextClaims,
-              settings: { ...settings, spareParts: nextSpareParts, sparepartStockLog: logEntry ? [...(settings.sparepartStockLog || []), logEntry] : settings.sparepartStockLog },
-              invoices: [...invoices, record],
+              settings: { ...baseSettings, spareParts: nextSpareParts, sparepartStockLog: logEntry ? [...(baseSettings.sparepartStockLog || []), logEntry] : baseSettings.sparepartStockLog },
+              invoices: [...dataRef.current.invoices, record],
             });
             setInvoiceData(record);
             setInvoiceBuilderConfig(null);
