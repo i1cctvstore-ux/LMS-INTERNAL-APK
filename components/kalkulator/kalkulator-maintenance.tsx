@@ -20,18 +20,140 @@
 //     tombol biar konsisten sama app.
 //  2. Auto-height: iframe-nya NGIKUTIN tinggi konten di dalamnya --
 //     TIDAK ADA scroll sendiri di dalam iframe, yang scroll cuma
-//     halaman app kita aja (1 scrollbar, bukan dobel). Konsekuensinya
-//     halaman app jadi lebih panjang karena semua langkah form
-//     kalkulator ke-render sekaligus -- itu wajar/gak masalah, sesuai
-//     yang diminta (cuma 1 scrollbar, bukan bounded-height).
+//     halaman app kita aja (1 scrollbar, bukan dobel).
+//
+// 2026-09 -- 3 tambahan (detail & alasan ada di
+// lib/kalkulator/kalkulator-enhance.ts):
+//  a. KOP SURAT quotation sekarang = kop app Penawaran (data cabang
+//     Jakarta dari Info Cabang), dengan pilihan kop PPN / Non-PPN.
+//  b. Tab langkah (1 Data proyek ... 4 Quotation) tampil juga di desktop
+//     -- sebelumnya cuma ada di mobile karena sidebar (tempat navigasi
+//     desktop) disembunyiin di sini.
+//  c. MODE CUSTOMER: cuma dokumen quotation yang tampil (tanpa margin,
+//     biaya, dan pengaturan internal) -- aman diperlihatkan ke customer.
+//  d. Fix auto-height: iframe sekarang bisa MENGECIL lagi (sebelumnya
+//     cuma bisa membesar karena tinggi ukurannya ikut tinggi iframe
+//     itu sendiri) -- perlu supaya Mode Customer nggak ninggalin ruang
+//     kosong panjang di bawah dokumen.
 // =====================================================
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { getBranch } from '@/lib/quote-builder/api'
+import { LOGO_NON_PPN_BASE64, LOGO_PPN_BASE64 } from '@/components/quote-builder/QuoteEditorPage'
+import {
+  goToQuotationStep,
+  installEnhancements,
+  resolveKop,
+  triggerOriginalPrint,
+  type EnhanceState,
+  type Enhancer,
+  type KopBranch,
+  type KopMode,
+  type ViewMode,
+} from '@/lib/kalkulator/kalkulator-enhance'
+
+// Kalkulator ini cuma dipakai cabang Jakarta (lihat `jakartaOnly` di lib/nav-config.tsx),
+// jadi kopnya selalu data cabang Jakarta. (Konstanta yang sama sudah ada di nav-config,
+// stok-module, dan price-list-sync -- sengaja tidak diekspor dari satu tempat, ikut pola yang ada.)
+const JAKARTA_BRANCH_ID = '5ad7239f-a7dd-47be-9ba2-c5667a3f76b2'
+const KOP_STORAGE_KEY = 'kalkulator-maintenance-kop'
+
+function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+}: {
+  value: T
+  options: Array<{ value: T; label: string }>
+  onChange: (value: T) => void
+  label: string
+}) {
+  return (
+    <div role="group" aria-label={label} className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+      {options.map((option) => {
+        const selected = option.value === value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(option.value)}
+            className={`rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
+              selected ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-white hover:text-slate-800'
+            }`}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 export default function KalkulatorMaintenance() {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const enhancerRef = useRef<Enhancer | null>(null)
   const [breakoutStyle, setBreakoutStyle] = useState<React.CSSProperties>({})
+
+  const [kop, setKop] = useState<KopMode>('ppn')
+  const [view, setView] = useState<ViewMode>('internal')
+  const [branch, setBranch] = useState<KopBranch | null>(null)
+  const [branchState, setBranchState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [branchError, setBranchError] = useState('')
+
+  // State terbaru untuk dibaca iframe (penyuntik DOM membaca ulang tiap dokumen berubah).
+  const enhanceState: EnhanceState = { kop, view, branch, fallbackLogoPpn: LOGO_PPN_BASE64, fallbackLogoNonPpn: LOGO_NON_PPN_BASE64 }
+  const stateRef = useRef<EnhanceState>(enhanceState)
+  // Harus didefinisikan SEBELUM effect refresh di bawah (effect jalan berurutan) supaya refresh membaca state terbaru.
+  useEffect(() => {
+    stateRef.current = enhanceState
+  })
+
+  // Pilihan kop diingat (per browser). Mode tampilan SENGAJA tidak diingat -- selalu mulai dari Internal.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(KOP_STORAGE_KEY)
+      if (saved === 'ppn' || saved === 'nonppn') setKop(saved)
+    } catch {
+      // storage diblokir -- pakai default
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    getBranch(JAKARTA_BRANCH_ID)
+      .then((row) => {
+        if (cancelled) return
+        setBranch(row as KopBranch)
+        setBranchState('ready')
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setBranchError(err.message)
+        setBranchState('error')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Pilihan/mode/data cabang berubah -> terapkan ulang ke dokumen iframe.
+  useEffect(() => {
+    const doc = iframeRef.current?.contentDocument
+    if (view === 'customer' && doc) goToQuotationStep(doc)
+    enhancerRef.current?.refresh()
+  }, [kop, view, branch])
+
+  const changeKop = useCallback((next: KopMode) => {
+    setKop(next)
+    try {
+      window.localStorage.setItem(KOP_STORAGE_KEY, next)
+    } catch {
+      // abaikan
+    }
+  }, [])
 
   // Breakout dari padding kiri-kanan shell app -- DIUKUR OTOMATIS dari
   // padding elemen induknya (bukan nebak angka vh/rem kayak sebelumnya,
@@ -51,6 +173,8 @@ export default function KalkulatorMaintenance() {
     return () => window.removeEventListener('resize', updateBreakout)
   }, [])
 
+  useEffect(() => () => enhancerRef.current?.dispose(), [])
+
   function setupIframe() {
     const iframe = iframeRef.current
     const doc = iframe?.contentDocument
@@ -60,6 +184,10 @@ export default function KalkulatorMaintenance() {
       const style = doc.createElement('style')
       style.textContent = `
         .ledger-sidebar { display: none !important; }
+        /* .app-shell aslinya min-height:100vh (= tinggi iframe itu sendiri) --
+           bikin tinggi konten nggak pernah bisa lebih kecil dari tinggi iframe
+           yang sekarang, jadi auto-height cuma bisa membesar. Dilepas. */
+        .app-shell { min-height: 0 !important; }
         .decision-cockpit { min-height: 64px !important; margin: 10px 0 14px !important; }
         .cockpit-price strong, .cockpit-metric strong { font-size: 16px !important; }
         .cockpit-price small, .cockpit-metric small,
@@ -155,11 +283,16 @@ export default function KalkulatorMaintenance() {
       // Gagal suntik CSS gapapa -- lanjut ke auto-height di bawah.
     }
 
+    // Pasang kop surat / tab desktop / mode customer (lihat lib/kalkulator/kalkulator-enhance.ts).
+    enhancerRef.current?.dispose()
+    enhancerRef.current = installEnhancements(doc, () => stateRef.current)
+    if (stateRef.current.view === 'customer') goToQuotationStep(doc)
+
     function resize() {
-      if (!iframe) return
-      const body = doc.body
-      const html = doc.documentElement
-      const h = Math.max(body?.scrollHeight || 0, html?.scrollHeight || 0, body?.offsetHeight || 0, html?.offsetHeight || 0)
+      if (!iframe || !doc) return
+      // Ukur tinggi konten SEBENARNYA lewat <body> (scrollHeight dokumen nggak pernah
+      // lebih kecil dari tinggi iframe sendiri, jadi dulu iframe hanya bisa membesar).
+      const h = Math.ceil(doc.body?.getBoundingClientRect().height || 0)
       if (h > 0) iframe.style.height = h + 'px'
     }
     resize()
@@ -176,15 +309,86 @@ export default function KalkulatorMaintenance() {
     }
   }
 
+  function printQuotation() {
+    const doc = iframeRef.current?.contentDocument
+    if (doc) triggerOriginalPrint(doc)
+  }
+
+  // Ringkasan status kop untuk baris info di bawah kontrol.
+  const kopLabel = kop === 'ppn' ? 'PPN' : 'Non-PPN'
+  let statusTone: 'muted' | 'warn' = 'muted'
+  let statusText = ''
+  if (branchState === 'loading') {
+    statusText = 'Memuat kop cabang…'
+  } else if (branchState === 'error') {
+    statusTone = 'warn'
+    statusText = `Kop cabang gagal dimuat (${branchError || 'tidak diketahui'}) — memakai kop bawaan kalkulator.`
+  } else {
+    const resolved = resolveKop(enhanceState)
+    const missing = [!resolved.storeName && 'nama toko', !resolved.phone && 'telepon', !resolved.email && 'email', !resolved.address && 'alamat'].filter(Boolean)
+    if (missing.length > 0) {
+      statusTone = 'warn'
+      statusText = `Kop ${kopLabel} belum lengkap (${missing.join(', ')}) — isi di menu Penawaran › Info Cabang.`
+    } else {
+      statusText = `Kop ${kopLabel}: ${resolved.storeName}${resolved.isBanner ? ' (logo banner)' : ''}`
+    }
+  }
+  if (view === 'customer') {
+    statusTone = 'muted'
+    statusText = 'Mode Customer — hanya dokumen quotation yang tampil. Kembali ke Internal untuk mengubah data atau harga.'
+  }
+
   return (
-    <div ref={wrapperRef} style={breakoutStyle}>
-      <iframe
-        ref={iframeRef}
-        onLoad={setupIframe}
-        src="/kalkulator-maintenance-workspace.html"
-        title="Kalkulator Estimasi Maintenance CCTV"
-        className="block w-full border-0"
-      />
-    </div>
+    <>
+      <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tampilan</span>
+          <Segmented<ViewMode>
+            label="Mode tampilan"
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'internal', label: 'Internal' },
+              { value: 'customer', label: 'Customer' },
+            ]}
+          />
+        </div>
+
+        {view === 'internal' ? (
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Kop surat</span>
+            <Segmented<KopMode>
+              label="Kop surat quotation"
+              value={kop}
+              onChange={changeKop}
+              options={[
+                { value: 'nonppn', label: 'Non-PPN' },
+                { value: 'ppn', label: 'PPN' },
+              ]}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={printQuotation}
+            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700"
+          >
+            Cetak Quotation
+          </button>
+        )}
+
+        <p className={`min-w-0 flex-1 text-xs ${statusTone === 'warn' ? 'text-amber-700' : 'text-slate-500'}`}>{statusText}</p>
+      </div>
+
+      <div ref={wrapperRef} style={breakoutStyle}>
+        <iframe
+          ref={iframeRef}
+          onLoad={setupIframe}
+          src="/kalkulator-maintenance-workspace.html"
+          title="Kalkulator Estimasi Maintenance CCTV"
+          className="block w-full border-0"
+        />
+      </div>
+    </>
   )
 }
