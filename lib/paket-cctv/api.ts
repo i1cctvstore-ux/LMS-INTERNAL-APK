@@ -101,6 +101,8 @@ export interface WorkingLine {
   harga_satuan: number; // sudah sesuai tier customer yang aktif
   hpp_satuan: number; // 0 kalau item custom tanpa HPP diisi (margin baris = nol, sesuai 5.8)
   sudah_ppn: boolean;
+  /** true = harga_satuan diubah manual di kalkulator; tidak ikut ditimpa saat Jenis Customer (tier) berganti. */
+  harga_manual?: boolean;
 }
 
 export interface QuoteRow {
