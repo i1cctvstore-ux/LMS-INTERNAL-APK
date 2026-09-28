@@ -48,6 +48,7 @@ import {
   listBranchHpp,
   listBranchPrices,
   listComponentSlots,
+  pickDvrForQty,
   resolveTierPrice,
   roundDisplayTotal,
   saveQuote,
@@ -94,6 +95,8 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
   // Pilihan preset (panel kiri)
   const [jenis, setJenis] = useState<Jenis>("analog");
   const [brandKey, setBrandKey] = useState<string>("");
+  // Preset (1/2/4/8/16 kamera) yang sedang aktif -- cuma buat penanda di panel kiri (sama seperti highlightPreset di mockup).
+  const [activePreset, setActivePreset] = useState<number | null>(null);
 
   // Form paket (panel kanan)
   const [custName, setCustName] = useState("");
@@ -193,6 +196,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
       if (quote.jenis) setJenis(quote.jenis);
       if (quote.brand_key) setBrandKey(quote.brand_key);
       setLines(asWorking);
+      setActivePreset(null);
       setEditingQuoteId(quote.id);
       setEditingQuoteNo(quote.no);
       setSavedNo(null);
@@ -258,6 +262,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
       .map(({ slot_key, qty }) => priceLineFromSlot(slot_key, qty))
       .filter((l): l is WorkingLine => l !== null);
     setLines(built);
+    setActivePreset(qtyPreset);
     setSavedNo(null);
     setEditingQuoteId(null);
     setEditingQuoteNo(null);
@@ -265,6 +270,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
   }
 
   function startEmpty() {
+    setActivePreset(null);
     setLines([]);
     setSavedNo(null);
     setEditingQuoteId(null);
@@ -274,6 +280,24 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
 
   function updateLineQty(id: string, qty: number) {
     setLines((current) => current.map((l) => (l.id === id ? { ...l, qty: Math.max(0, qty) } : l)));
+  }
+
+  /** Ubah harga satuan manual. Ditandai harga_manual supaya tidak ditimpa saat Jenis Customer berganti. */
+  function updateLinePrice(id: string, harga: number) {
+    setLines((current) => current.map((l) => (l.id === id ? { ...l, harga_satuan: Math.max(0, harga), harga_manual: true } : l)));
+  }
+
+  /** Kembalikan harga baris katalog ke harga tier customer yang aktif. */
+  function resetLinePrice(id: string) {
+    if (!custTypeDef) return;
+    setLines((current) =>
+      current.map((l) => {
+        if (l.id !== id || l.is_custom || !l.slot_key) return l;
+        const price = prices.get(l.slot_key);
+        if (!price) return l;
+        return { ...l, harga_satuan: resolveTierPrice(custTypeDef, l.hpp_satuan, price.harga_jual), harga_manual: false };
+      })
+    );
   }
 
   function removeLine(id: string) {
@@ -311,7 +335,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
     if (!custTypeDef) return;
     setLines((current) =>
       current.map((l) => {
-        if (l.is_custom || !l.slot_key) return l;
+        if (l.is_custom || !l.slot_key || l.harga_manual) return l;
         const price = prices.get(l.slot_key);
         if (!price) return l;
         return { ...l, harga_satuan: resolveTierPrice(custTypeDef, l.hpp_satuan, price.harga_jual) };
@@ -449,6 +473,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
                 setJenis(j);
                 const first = Object.keys(config.brands[j]?.brands ?? {})[0] ?? "";
                 setBrandKey(first);
+                setActivePreset(null);
               }}
               style={{
                 flex: 1,
@@ -461,6 +486,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
                 cursor: "pointer",
               }}
             >
+              {j === jenis ? "✓ " : ""}
               {config.brands[j]?.label ?? j}
             </button>
           ))}
@@ -472,7 +498,10 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
             <button
               key={key}
               type="button"
-              onClick={() => setBrandKey(key)}
+              onClick={() => {
+                setBrandKey(key);
+                setActivePreset(null);
+              }}
               style={{
                 textAlign: "left",
                 padding: "8px 10px",
@@ -483,33 +512,42 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
                 cursor: "pointer",
               }}
             >
+              {key === brandKey ? "✓ " : ""}
               {def.label}
             </button>
           ))}
         </div>
 
         <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Jumlah Kamera</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
-          {PRESET_QTYS.map((q) => (
-            <button
-              key={q}
-              type="button"
-              onClick={() => applyPreset(q)}
-              disabled={!brandKey}
-              style={{
-                padding: "10px 6px",
-                borderRadius: 8,
-                border: "1px solid #dfe5ed",
-                background: "#fff",
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: brandKey ? "pointer" : "not-allowed",
-                opacity: brandKey ? 1 : 0.5,
-              }}
-            >
-              {q} Kamera
-            </button>
-          ))}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+          {PRESET_QTYS.map((q) => {
+            const selected = activePreset === q;
+            const dvrOpt = jenisDef && brandKey ? pickDvrForQty(jenisDef.brands[brandKey]?.dvr ?? [], q) : null;
+            const dvrName = dvrOpt ? prices.get(dvrOpt.slot_key)?.nama ?? dvrOpt.slot_key : "Tanpa DVR/NVR (wifi)";
+            return (
+              <button
+                key={q}
+                type="button"
+                onClick={() => applyPreset(q)}
+                disabled={!brandKey}
+                aria-pressed={selected}
+                style={{
+                  textAlign: "left",
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: selected ? "2px solid #2f6fed" : "1px solid #dfe5ed",
+                  background: selected ? "#eaf1ff" : "#fff",
+                  cursor: brandKey ? "pointer" : "not-allowed",
+                  opacity: brandKey ? 1 : 0.5,
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 700 }}>
+                  {selected ? "✓ " : ""}Paket {q} Kamera {activeBrandLabel}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#6b7280", marginTop: 2 }}>{dvrName}</div>
+              </button>
+            );
+          })}
         </div>
         <button
           type="button"
@@ -599,7 +637,32 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
                     />
                   </td>
                   <td style={tdStyle}>{l.satuan}</td>
-                  <td style={tdStyle}>{currency(l.harga_satuan)}</td>
+                  <td style={tdStyle}>
+                    <input
+                      type="number"
+                      min={0}
+                      value={l.harga_satuan}
+                      disabled={excluded}
+                      onChange={(e) => updateLinePrice(l.id, Number(e.target.value))}
+                      title="Harga satuan bisa diedit"
+                      style={{
+                        width: 96,
+                        padding: "2px 4px",
+                        background: l.harga_manual ? "#fff8e8" : undefined,
+                        border: l.harga_manual ? "1px solid #e6b84a" : undefined,
+                      }}
+                    />
+                    {l.harga_manual && !l.is_custom && (
+                      <button
+                        type="button"
+                        onClick={() => resetLinePrice(l.id)}
+                        title="Kembalikan ke harga standar"
+                        style={{ marginLeft: 4, border: "none", background: "none", cursor: "pointer", color: "#8a5c10", fontSize: 13 }}
+                      >
+                        ↺
+                      </button>
+                    )}
+                  </td>
                   <td style={tdStyle}>{currency(subtotal)}</td>
                   {isSuperAdmin && <td style={tdStyle}>{currency(l.hpp_satuan)}</td>}
                   <td style={tdStyle}>
