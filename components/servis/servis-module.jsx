@@ -3966,14 +3966,33 @@ function SupplierTab({ batches, claims, settings, role, isDesktopLayout, onOpenS
   function handlePrintSuratJalanFromSelection() {
     const selectedClaims = claims.filter((c) => selected.includes(c.id));
     if (selectedClaims.length === 0) return;
-    const firstBatchId = selectedClaims[0].batchId || selectedClaims[0].stokReimbursedBatchId;
-    const batch = batches.find((b) => b.id === firstBatchId);
-    if (!batch) return;
-    // Kalau yang dipilih ternyata nyampur dari beberapa batch beda,
-    // cuma yang satu batch sama kayak item pertama yang ikut dicetak
-    // (surat jalan itu 1 dokumen = 1 pengiriman/batch).
-    const itemsInSameBatch = selectedClaims.filter((c) => (c.batchId || c.stokReimbursedBatchId) === firstBatchId);
-    onPrintSuratJalan(batch, itemsInSameBatch);
+    const batchIdOf = (c) => c.batchId || c.stokReimbursedBatchId;
+    const batchIds = [...new Set(selectedClaims.map(batchIdOf).filter(Boolean))];
+    const pickedBatches = batchIds.map((id) => batches.find((b) => b.id === id)).filter(Boolean);
+    if (pickedBatches.length === 0) return;
+
+    // FIX 28 Sep 2026 -- BUG DITEMUKAN: dulu yang dicetak cuma barang yang
+    // satu batch dengan barang PERTAMA yang dipilih, dan sisanya dibuang
+    // diam-diam. Padahal kode batch dibentuk dari tanggal + 6 huruf pertama
+    // nama supplier, jadi 2 pengiriman terpisah ke supplier yang sama di
+    // hari yang sama punya kode SAMA (tampak seperti 1 batch di tabel,
+    // padahal record batch-nya beda). Hasilnya: pilih 3 barang -> surat
+    // jalan cuma memuat 1.
+    // Sekarang: kalau semua batch yang dipilih supplier & tanggal kirimnya
+    // sama, digabung jadi 1 surat jalan. Kalau beda supplier/tanggal,
+    // tidak ada yang dibuang diam-diam -- user diberi tahu dan pilihan
+    // dipertahankan.
+    const first = pickedBatches[0];
+    const sameSupplierAndDate = pickedBatches.every((b) => b.supplier === first.supplier && b.tanggalKirim === first.tanggalKirim);
+    if (!sameSupplierAndDate) {
+      toast.error("Pilihan mencakup pengiriman yang berbeda.", {
+        description: "Surat jalan cuma bisa 1 supplier & 1 tanggal kirim. Pilih barang dari supplier dan tanggal yang sama.",
+        duration: 6000,
+      });
+      return;
+    }
+    const merged = { ...first, itemIds: selectedClaims.map((c) => c.id) };
+    onPrintSuratJalan(merged, selectedClaims);
     setSelected([]);
   }
 
