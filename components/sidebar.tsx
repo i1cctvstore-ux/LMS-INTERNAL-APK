@@ -19,9 +19,15 @@ type SidebarNavProps = {
   // desktop (lihat komponen Sidebar di bawah). Versi mobile/drawer selalu
   // full, gak pernah diciutin, jadi prop ini default false di situ.
   collapsed?: boolean
+  // 2026-09-29 (revisi): tombol ciut/buka dipindah ke header (ikon kecil
+  // di sebelah logo), BUKAN kotak melayang di paling bawah sidebar seperti
+  // sebelumnya -- kurang enak dilihat & kesannya nempel gak jelas. Cuma
+  // dikasih di versi desktop; drawer mobile gak dapet prop ini jadi ikon-nya
+  // gak muncul (mobile sudah punya tombol X sendiri buat nutup).
+  onToggleCollapsed?: () => void
 }
 
-function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranchId, collapsed = false }: SidebarNavProps) {
+function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranchId, collapsed = false, onToggleCollapsed }: SidebarNavProps) {
   const visibleItems = getVisibleNavItems(userRole, userBranchId)
   const visibleKeys = new Set(visibleItems.map((i) => i.key))
   // Grup yang dibuka manual lewat klik. Grup yang sedang berisi activePage
@@ -48,10 +54,21 @@ function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranch
           <ShieldCheck className="size-5" aria-hidden="true" />
         </div>
         {!collapsed && (
-          <div className="leading-tight">
+          <div className="min-w-0 flex-1 leading-tight">
             <p className="text-sm font-bold text-sidebar-foreground">i1 CCTV</p>
             <p className="text-xs text-sidebar-foreground/60">Internal System</p>
           </div>
+        )}
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-label={collapsed ? 'Buka sidebar' : 'Ciutkan sidebar'}
+            title={collapsed ? 'Buka sidebar' : 'Ciutkan sidebar'}
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            {collapsed ? <ChevronRight className="size-4" aria-hidden="true" /> : <ChevronLeft className="size-4" aria-hidden="true" />}
+          </button>
         )}
       </div>
 
@@ -270,38 +287,16 @@ export function Sidebar({
     <>
       {/* Sidebar tetap di desktop -- lebar berubah sesuai mode ciut */}
       <aside className={cn('hidden shrink-0 border-r border-sidebar-border transition-[width] duration-200 lg:block', collapsed ? 'w-16' : 'w-64')}>
-        <div className="sticky top-0 flex h-dvh flex-col">
-          <div className="min-h-0 flex-1">
-            <SidebarContent
-              activePage={activePage}
-              onNavigate={onNavigate}
-              onLogout={onLogout}
-              userRole={userRole}
-              userBranchId={userBranchId}
-              collapsed={collapsed}
-            />
-          </div>
-          {/* Tombol ciut/buka -- selalu di paling bawah, di luar area scroll menu.
-              Kontras dinaikkan (teks putih penuh + background pill saat hover/idle
-              samar) supaya kelihatan jelas, bukan cuma teks abu-abu tipis kayak
-              sebelumnya. */}
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            aria-label={collapsed ? 'Buka sidebar' : 'Ciutkan sidebar'}
-            title={collapsed ? 'Buka sidebar' : 'Ciutkan sidebar'}
-            className={cn(
-              'flex shrink-0 items-center gap-2 border-t border-sidebar-border py-3 text-xs font-semibold text-sidebar-foreground transition-colors hover:bg-sidebar-accent',
-              collapsed ? 'justify-center px-0' : 'mx-2 mb-2 justify-center rounded-lg bg-sidebar-accent/60 px-3 hover:bg-sidebar-accent',
-            )}
-          >
-            {collapsed ? <ChevronRight className="size-4" aria-hidden="true" /> : (
-              <>
-                <ChevronLeft className="size-4" aria-hidden="true" />
-                Ciutkan
-              </>
-            )}
-          </button>
+        <div className="sticky top-0 h-dvh">
+          <SidebarContent
+            activePage={activePage}
+            onNavigate={onNavigate}
+            onLogout={onLogout}
+            userRole={userRole}
+            userBranchId={userBranchId}
+            collapsed={collapsed}
+            onToggleCollapsed={toggleCollapsed}
+          />
         </div>
       </aside>
 
