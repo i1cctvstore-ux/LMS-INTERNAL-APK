@@ -41,15 +41,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getBranch } from '@/lib/quote-builder/api'
 import { LOGO_NON_PPN_BASE64, LOGO_PPN_BASE64 } from '@/components/quote-builder/QuoteEditorPage'
 import {
-  goToQuotationStep,
   installEnhancements,
   resolveKop,
-  triggerOriginalPrint,
   type EnhanceState,
   type Enhancer,
   type KopBranch,
   type KopMode,
-  type ViewMode,
 } from '@/lib/kalkulator/kalkulator-enhance'
 
 // Kalkulator ini cuma dipakai cabang Jakarta (lihat `jakartaOnly` di lib/nav-config.tsx),
@@ -98,13 +95,17 @@ export default function KalkulatorMaintenance() {
   const [breakoutStyle, setBreakoutStyle] = useState<React.CSSProperties>({})
 
   const [kop, setKop] = useState<KopMode>('ppn')
-  const [view, setView] = useState<ViewMode>('internal')
   const [branch, setBranch] = useState<KopBranch | null>(null)
   const [branchState, setBranchState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [branchError, setBranchError] = useState('')
 
-  // State terbaru untuk dibaca iframe (penyuntik DOM membaca ulang tiap dokumen berubah).
-  const enhanceState: EnhanceState = { kop, view, branch, fallbackLogoPpn: LOGO_PPN_BASE64, fallbackLogoNonPpn: LOGO_NON_PPN_BASE64 }
+  // "Tampilan: Internal/Customer" DIHAPUS dari sini (2026-09-29, permintaan
+  // user) -- dipindahkan jadi fitur Kalkulator Paket (lihat
+  // components/paket-cctv/KalkulatorPage.tsx), yang implementasinya lebih
+  // sederhana di situ (render React langsung, bukan suntik DOM ke iframe
+  // beku). `view` di EnhanceState dikunci 'internal' terus -- kop surat &
+  // tab langkah desktop (2 fitur lain di kalkulator-enhance.ts) TETAP jalan.
+  const enhanceState: EnhanceState = { kop, view: 'internal', branch, fallbackLogoPpn: LOGO_PPN_BASE64, fallbackLogoNonPpn: LOGO_NON_PPN_BASE64 }
   const stateRef = useRef<EnhanceState>(enhanceState)
   // Harus didefinisikan SEBELUM effect refresh di bawah (effect jalan berurutan) supaya refresh membaca state terbaru.
   useEffect(() => {
@@ -139,12 +140,10 @@ export default function KalkulatorMaintenance() {
     }
   }, [])
 
-  // Pilihan/mode/data cabang berubah -> terapkan ulang ke dokumen iframe.
+  // Pilihan kop / data cabang berubah -> terapkan ulang ke dokumen iframe.
   useEffect(() => {
-    const doc = iframeRef.current?.contentDocument
-    if (view === 'customer' && doc) goToQuotationStep(doc)
     enhancerRef.current?.refresh()
-  }, [kop, view, branch])
+  }, [kop, branch])
 
   const changeKop = useCallback((next: KopMode) => {
     setKop(next)
@@ -283,10 +282,9 @@ export default function KalkulatorMaintenance() {
       // Gagal suntik CSS gapapa -- lanjut ke auto-height di bawah.
     }
 
-    // Pasang kop surat / tab desktop / mode customer (lihat lib/kalkulator/kalkulator-enhance.ts).
+    // Pasang kop surat / tab desktop (lihat lib/kalkulator/kalkulator-enhance.ts).
     enhancerRef.current?.dispose()
     enhancerRef.current = installEnhancements(doc, () => stateRef.current)
-    if (stateRef.current.view === 'customer') goToQuotationStep(doc)
 
     function resize() {
       if (!iframe || !doc) return
@@ -309,11 +307,6 @@ export default function KalkulatorMaintenance() {
     }
   }
 
-  function printQuotation() {
-    const doc = iframeRef.current?.contentDocument
-    if (doc) triggerOriginalPrint(doc)
-  }
-
   // Ringkasan status kop untuk baris info di bawah kontrol.
   const kopLabel = kop === 'ppn' ? 'PPN' : 'Non-PPN'
   let statusTone: 'muted' | 'warn' = 'muted'
@@ -333,49 +326,21 @@ export default function KalkulatorMaintenance() {
       statusText = `Kop ${kopLabel}: ${resolved.storeName}${resolved.isBanner ? ' (logo banner)' : ''}`
     }
   }
-  if (view === 'customer') {
-    statusTone = 'muted'
-    statusText = 'Mode Customer — hanya dokumen quotation yang tampil. Kembali ke Internal untuk mengubah data atau harga.'
-  }
-
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tampilan</span>
-          <Segmented<ViewMode>
-            label="Mode tampilan"
-            value={view}
-            onChange={setView}
+          <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Kop surat</span>
+          <Segmented<KopMode>
+            label="Kop surat quotation"
+            value={kop}
+            onChange={changeKop}
             options={[
-              { value: 'internal', label: 'Internal' },
-              { value: 'customer', label: 'Customer' },
+              { value: 'nonppn', label: 'Non-PPN' },
+              { value: 'ppn', label: 'PPN' },
             ]}
           />
         </div>
-
-        {view === 'internal' ? (
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Kop surat</span>
-            <Segmented<KopMode>
-              label="Kop surat quotation"
-              value={kop}
-              onChange={changeKop}
-              options={[
-                { value: 'nonppn', label: 'Non-PPN' },
-                { value: 'ppn', label: 'PPN' },
-              ]}
-            />
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={printQuotation}
-            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700"
-          >
-            Cetak Quotation
-          </button>
-        )}
 
         <p className={`min-w-0 flex-1 text-xs ${statusTone === 'warn' ? 'text-amber-700' : 'text-slate-500'}`}>{statusText}</p>
       </div>
