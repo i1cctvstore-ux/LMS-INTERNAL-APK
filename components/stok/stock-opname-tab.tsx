@@ -625,7 +625,7 @@ function OpnameDetail({
 
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-neutral-200">
-        <table className="w-full min-w-[720px] border-collapse text-sm">
+        <table className="w-full border-collapse text-sm table-auto" style={{ minWidth: 900 }}>
           <thead>
             <tr className="bg-neutral-50 text-[10px] font-extrabold uppercase text-neutral-500">
               <Th label="Kategori" k="kategori" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} align="left" />
@@ -648,7 +648,10 @@ function OpnameDetail({
                   <td className="border border-neutral-200 px-2 py-2 text-left text-[11px] text-neutral-500">
                     {item.kategori}
                   </td>
-                  <td className="min-w-[320px] border border-neutral-200 px-3 py-2 text-left text-[12.5px] font-semibold">
+                  <td
+                    className="w-2/5 whitespace-normal break-words overflow-visible border border-neutral-200 px-3 py-2.5 text-left text-[12.5px] font-semibold align-top"
+                    style={{ minWidth: 420, whiteSpace: "normal", wordBreak: "break-word", overflow: "visible", textOverflow: "clip" }}
+                  >
                     {item.nama}
                   </td>
                   <td
