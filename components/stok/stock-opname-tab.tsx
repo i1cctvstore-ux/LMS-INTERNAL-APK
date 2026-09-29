@@ -216,6 +216,7 @@ export default function StockOpnameTab({
         sessionId={openId}
         role={currentUserRole}
         currentUserId={currentUserId}
+        currentUserName={currentUserName}
         onBack={() => {
           setOpenId(null);
           refreshList();
@@ -418,11 +419,13 @@ function OpnameDetail({
   sessionId,
   role,
   currentUserId,
+  currentUserName,
   onBack,
 }: {
   sessionId: string;
   role: Role;
   currentUserId: string;
+  currentUserName: string;
   onBack: () => void;
 }) {
   const [session, setSession] = useState<OpnameSession | null>(null);
@@ -504,6 +507,7 @@ function OpnameDetail({
   }
 
   function handleExportFull() {
+    if (!session) return;
     const visible = visibleItemsForExport();
     if (visible.length === 0) {
       alert("Gak ada barang di kategori yang lagi difilter.");
@@ -513,6 +517,7 @@ function OpnameDetail({
   }
 
   function handleExportSelisih() {
+    if (!session) return;
     const visible = visibleItemsForExport().filter((it) => !computeStatus(it).checked);
     if (visible.length === 0) {
       alert("Semua barang di kategori yang dipilih sudah ✔ — gak ada selisih yang perlu dicetak ulang.");
@@ -620,7 +625,7 @@ function OpnameDetail({
 
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-neutral-200">
-        <table className="w-full min-w-[520px] border-collapse text-sm">
+        <table className="w-full min-w-[720px] border-collapse text-sm">
           <thead>
             <tr className="bg-neutral-50 text-[10px] font-extrabold uppercase text-neutral-500">
               <Th label="Kategori" k="kategori" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} align="left" />
@@ -643,7 +648,7 @@ function OpnameDetail({
                   <td className="border border-neutral-200 px-2 py-2 text-left text-[11px] text-neutral-500">
                     {item.kategori}
                   </td>
-                  <td className="max-w-[180px] truncate border border-neutral-200 px-2 py-2 text-left text-[12.5px] font-semibold">
+                  <td className="min-w-[320px] border border-neutral-200 px-3 py-2 text-left text-[12.5px] font-semibold">
                     {item.nama}
                   </td>
                   <td
