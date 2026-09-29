@@ -711,7 +711,6 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
                       type="number"
                       min={0}
                       value={l.harga_satuan}
-                      disabled={excluded}
                       onChange={(e) => updateLinePrice(l.id, Number(e.target.value))}
                       title="Harga satuan bisa diedit"
                       style={{
