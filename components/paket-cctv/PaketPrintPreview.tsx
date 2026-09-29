@@ -100,6 +100,7 @@ export default function PaketPrintPreview({
 
   return (
     <div
+      className="paket-print-overlay"
       style={{
         position: "fixed",
         inset: 0,
@@ -111,7 +112,7 @@ export default function PaketPrintPreview({
         padding: 16,
       }}
     >
-      <div style={{ background: "#fff", borderRadius: 12, maxWidth: 720, width: "100%", maxHeight: "90vh", overflowY: "auto", padding: 20 }}>
+      <div className="paket-print-card" style={{ background: "#fff", borderRadius: 12, maxWidth: 720, width: "100%", maxHeight: "90vh", overflowY: "auto", padding: 20 }}>
         <div className="paket-print-toolbar" style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           <button type="button" onClick={() => setMode("total")} style={mode === "total" ? tabActive : tabInactive}>
             Total paket saja
@@ -210,7 +211,36 @@ export default function PaketPrintPreview({
         </article>
       </div>
 
-      <style>{`@media print { .paket-print-toolbar { display: none !important; } }`}</style>
+      <style>{`
+        @media print {
+          /* Toolbar tombol (tab Total/Rinci, Cetak, tutup) tidak ikut ke PDF. */
+          .paket-print-toolbar { display: none !important; }
+
+          /* BUG 29 Sep 2026: overlay gelap & kotak putih ini didesain buat
+             tampil di layar (position:fixed, tinggi dibatasi 90vh + scroll) --
+             dua-duanya kalau dibiarkan ikut ke-print, hasilnya (1) latar
+             gelap penuh ikut kecetak, dan (2) konten yang lebih panjang dari
+             1 layar KEPOTONG karena overflow:auto, bukan mengalir ke halaman
+             berikutnya. Di-reset total di sini, khusus mode print, jadi
+             dokumennya mengalir apa adanya lintas halaman A4. */
+          .paket-print-overlay {
+            position: static !important;
+            inset: auto !important;
+            background: none !important;
+            display: block !important;
+            padding: 0 !important;
+            z-index: auto !important;
+          }
+          .paket-print-card {
+            max-width: none !important;
+            max-height: none !important;
+            overflow: visible !important;
+            width: auto !important;
+            padding: 0 !important;
+            border-radius: 0 !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
