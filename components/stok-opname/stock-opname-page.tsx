@@ -826,7 +826,7 @@ function OpnameDetail({
                   <td className="border border-neutral-200 px-2 py-2 text-left text-[11px] text-neutral-500">
                     {item.kategori}
                   </td>
-                  <td className="max-w-[180px] truncate border border-neutral-200 px-2 py-2 text-left text-[12.5px] font-semibold">
+                  <td className="max-w-[340px] truncate border border-neutral-200 px-2 py-2 text-left text-[12.5px] font-semibold" title={item.nama}>
                     {item.nama}
                   </td>
                   {detailMode &&
