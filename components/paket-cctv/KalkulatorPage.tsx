@@ -118,6 +118,13 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
   const [priceDiff, setPriceDiff] = useState<{ oldTotal: number; newTotal: number } | null>(null);
   const [openQuoteError, setOpenQuoteError] = useState<string | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
+  // "Tampilan: Internal/Customer" -- dipindahkan dari Kalkulator Maintenance
+  // (permintaan user, 2026-09-29): mode Customer = cuma tampilkan dokumen
+  // preview/cetak (reuse PaketPrintPreview yang sudah ada), tanpa panel
+  // preset/harga/HPP internal. Beda dari Kalkulator Maintenance yang
+  // butuh suntik DOM ke iframe (file HTML beku) -- di sini murni render
+  // React biasa, jauh lebih sederhana & aman.
+  const [view, setView] = useState<"internal" | "customer">("internal");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
@@ -459,8 +466,70 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
   if (loadError) return <div style={{ padding: 24, color: "#b23b2c" }}>Gagal memuat: {loadError}</div>;
   if (!config) return null;
 
+  const viewToggle = (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px 0" }}>
+      <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: "#94a3b8" }}>Tampilan</span>
+      <div style={{ display: "inline-flex", borderRadius: 8, border: "1px solid #dfe5ed", background: "#f7f8fa", padding: 2 }}>
+        {(["internal", "customer"] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            aria-pressed={view === v}
+            onClick={() => setView(v)}
+            style={{
+              borderRadius: 6,
+              padding: "6px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              border: 0,
+              cursor: "pointer",
+              background: view === v ? "#4f46e5" : "transparent",
+              color: view === v ? "#fff" : "#64748b",
+            }}
+          >
+            {v === "internal" ? "Internal" : "Customer"}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  // Mode Customer: cuma dokumen preview/cetak yang tampil, tanpa panel
+  // preset/harga/HPP internal. Kembali ke Internal lewat tombol close
+  // bawaan PaketPrintPreview (onClose).
+  if (view === "customer") {
+    return (
+      <div>
+        {viewToggle}
+        <div style={{ padding: 20 }}>
+          {lines.length === 0 ? (
+            <p style={{ color: "#707786", fontSize: 13 }}>Belum ada item di paket ini. Kembali ke tampilan Internal untuk menyusun paket dulu.</p>
+          ) : (
+            <PaketPrintPreview
+              branchId={branchId}
+              jenis={jenis}
+              lines={lines}
+              custName={custName}
+              custAddress={custAddress}
+              quoteDate={quoteDate}
+              custTypeLabel={custTypeDef?.label ?? ""}
+              ppnMode={ppnMode}
+              ppnRatePercent={config.ppn_rate_percent}
+              rawTotal={rawTotal}
+              displayTotal={displayTotal}
+              quoteNo={editingQuoteNo}
+              onClose={() => setView("internal")}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 20, padding: 20 }}>
+    <div>
+      {viewToggle}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 20, padding: 20 }}>
       {/* ---------- Panel kiri: pilih preset ---------- */}
       <div style={{ flex: "0 0 280px", minWidth: 260 }}>
         <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Jenis Kamera</h3>
@@ -774,6 +843,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
           onClose={() => setPrintOpen(false)}
         />
       )}
+      </div>
     </div>
   );
 }
