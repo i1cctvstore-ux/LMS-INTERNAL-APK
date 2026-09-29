@@ -281,15 +281,18 @@ export function Sidebar({
               collapsed={collapsed}
             />
           </div>
-          {/* Tombol ciut/buka -- selalu di paling bawah, di luar area scroll menu. */}
+          {/* Tombol ciut/buka -- selalu di paling bawah, di luar area scroll menu.
+              Kontras dinaikkan (teks putih penuh + background pill saat hover/idle
+              samar) supaya kelihatan jelas, bukan cuma teks abu-abu tipis kayak
+              sebelumnya. */}
           <button
             type="button"
             onClick={toggleCollapsed}
             aria-label={collapsed ? 'Buka sidebar' : 'Ciutkan sidebar'}
             title={collapsed ? 'Buka sidebar' : 'Ciutkan sidebar'}
             className={cn(
-              'flex shrink-0 items-center gap-2 border-t border-sidebar-border py-2.5 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-              collapsed ? 'justify-center px-0' : 'justify-end px-3',
+              'flex shrink-0 items-center gap-2 border-t border-sidebar-border py-3 text-xs font-semibold text-sidebar-foreground transition-colors hover:bg-sidebar-accent',
+              collapsed ? 'justify-center px-0' : 'mx-2 mb-2 justify-center rounded-lg bg-sidebar-accent/60 px-3 hover:bg-sidebar-accent',
             )}
           >
             {collapsed ? <ChevronRight className="size-4" aria-hidden="true" /> : (
