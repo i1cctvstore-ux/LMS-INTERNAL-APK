@@ -97,7 +97,7 @@ const QB_ROLES: Role[] = ['super_admin', 'admin']
 // ditegakkan di RLS (paket_branch_prices, paket_quotes), bukan cuma di
 // sini. Harga Komponen (yang menyingkap HPP) dikunci lebih ketat, lihat
 // PAKET_HARGA_ROLES di bawah.
-const PAKET_ROLES: Role[] = ['super_admin', 'admin']
+const PAKET_ROLES: Role[] = ['super_admin', 'admin', 'kasir', 'gudang']
 // Harga Komponen: super_admin saja -- ini satu-satunya layar yang perlu
 // membaca paket_branch_hpp (RLS tabel itu sendiri sudah menolak admin,
 // tapi menu ini tetap disembunyikan juga di sini biar tidak membingungkan
