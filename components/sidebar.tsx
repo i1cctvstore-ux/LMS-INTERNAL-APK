@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { ShieldCheck, LogOut, X, ChevronDown, ExternalLink } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ShieldCheck, LogOut, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { getVisibleNavItems, NAV_GROUPS, type PageKey } from '@/lib/nav-config'
@@ -15,9 +15,13 @@ type SidebarNavProps = {
   // 2026-09-11: dipakai getVisibleNavItems() buat filter menu `jakartaOnly`
   // (Materi, Kalkulator Maintenance) -- lihat lib/nav-config.tsx.
   userBranchId?: string | null
+  // 2026-09-29: mode ciut (ikon doang, tanpa label) -- CUMA dipakai versi
+  // desktop (lihat komponen Sidebar di bawah). Versi mobile/drawer selalu
+  // full, gak pernah diciutin, jadi prop ini default false di situ.
+  collapsed?: boolean
 }
 
-function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranchId }: SidebarNavProps) {
+function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranchId, collapsed = false }: SidebarNavProps) {
   const visibleItems = getVisibleNavItems(userRole, userBranchId)
   const visibleKeys = new Set(visibleItems.map((i) => i.key))
   // Grup yang dibuka manual lewat klik. Grup yang sedang berisi activePage
@@ -39,14 +43,16 @@ function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranch
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex items-center gap-3 border-b border-sidebar-border px-5 py-5">
-        <div className="flex size-10 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
+      <div className={cn('flex items-center gap-3 border-b border-sidebar-border py-5', collapsed ? 'justify-center px-3' : 'px-5')}>
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
           <ShieldCheck className="size-5" aria-hidden="true" />
         </div>
-        <div className="leading-tight">
-          <p className="text-sm font-bold text-sidebar-foreground">i1 CCTV</p>
-          <p className="text-xs text-sidebar-foreground/60">Internal System</p>
-        </div>
+        {!collapsed && (
+          <div className="leading-tight">
+            <p className="text-sm font-bold text-sidebar-foreground">i1 CCTV</p>
+            <p className="text-xs text-sidebar-foreground/60">Internal System</p>
+          </div>
+        )}
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4" aria-label="Menu utama">
@@ -59,6 +65,41 @@ function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranch
             // sebagai tombol folder yang bisa dibuka/tutup.
             if (renderedGroupKeys.has(group.key)) return null
             renderedGroupKeys.add(group.key)
+
+            // Mode ciut: gak ada tempat buat nampilin folder+label, jadi
+            // anggota grup dirender rata (flat) sebagai tombol ikon biasa
+            // -- tetap bisa diklik langsung, cuma gak dikelompokkan.
+            if (collapsed) {
+              return (
+                <div key={group.key} className="space-y-1">
+                  {group.itemKeys
+                    .filter((key) => visibleKeys.has(key))
+                    .map((key) => {
+                      const child = visibleItems.find((i) => i.key === key)
+                      if (!child) return null
+                      const ChildIcon = child.icon
+                      const isActive = child.key === activePage
+                      return (
+                        <button
+                          key={child.key}
+                          type="button"
+                          onClick={() => onNavigate(child.key)}
+                          aria-current={isActive ? 'page' : undefined}
+                          title={child.label}
+                          className={cn(
+                            'flex w-full items-center justify-center rounded-lg px-2 py-3 transition-colors',
+                            isActive
+                              ? 'bg-sidebar-primary text-sidebar-primary-foreground'
+                              : 'text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                          )}
+                        >
+                          <ChildIcon className="size-5 shrink-0" aria-hidden="true" />
+                        </button>
+                      )
+                    })}
+                </div>
+              )
+            }
 
             const isActiveInside = group.itemKeys.includes(activePage)
             const isOpen = isActiveInside || openGroups.has(group.key)
@@ -130,14 +171,20 @@ function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranch
                 href={item.externalUrl}
                 target="_blank"
                 rel="noreferrer"
+                title={collapsed ? item.label : undefined}
                 className={cn(
-                  'flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition-colors',
+                  'flex w-full items-center gap-3 rounded-lg py-3 text-left text-sm font-medium transition-colors',
+                  collapsed ? 'justify-center px-2' : 'px-3',
                   'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                 )}
               >
                 <Icon className="size-5 shrink-0" aria-hidden="true" />
-                <span className="flex-1">{item.label}</span>
-                <ExternalLink className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
+                {!collapsed && (
+                  <>
+                    <span className="flex-1">{item.label}</span>
+                    <ExternalLink className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
+                  </>
+                )}
               </a>
             )
           }
@@ -149,15 +196,17 @@ function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranch
               type="button"
               onClick={() => onNavigate(item.key)}
               aria-current={isActive ? 'page' : undefined}
+              title={collapsed ? item.label : undefined}
               className={cn(
-                'flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition-colors',
+                'flex w-full items-center gap-3 rounded-lg py-3 text-left text-sm font-medium transition-colors',
+                collapsed ? 'justify-center px-2' : 'px-3',
                 isActive
                   ? 'bg-sidebar-primary text-sidebar-primary-foreground'
                   : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
               )}
             >
               <Icon className="size-5 shrink-0" aria-hidden="true" />
-              <span>{item.label}</span>
+              {!collapsed && <span>{item.label}</span>}
             </button>
           )
         })}
@@ -168,10 +217,11 @@ function SidebarContent({ activePage, onNavigate, onLogout, userRole, userBranch
           type="button"
           variant="ghost"
           onClick={onLogout}
-          className="w-full justify-start gap-3 text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          title={collapsed ? 'Keluar' : undefined}
+          className={cn('w-full text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground', collapsed ? 'justify-center px-0' : 'justify-start gap-3')}
         >
           <LogOut className="size-5" aria-hidden="true" />
-          Keluar
+          {!collapsed && 'Keluar'}
         </Button>
       </div>
     </div>
@@ -192,18 +242,63 @@ export function Sidebar({
   mobileOpen,
   onCloseMobile,
 }: SidebarProps) {
+  // Ciut/buka SIDEBAR DESKTOP -- disimpan di localStorage per browser,
+  // jadi pilihan user tetap sama walau reload/pindah menu. Cuma buat versi
+  // desktop; drawer mobile gak punya mode ciut (SidebarContent di situ
+  // dipanggil tanpa prop `collapsed`, jadi selalu full).
+  const [collapsed, setCollapsed] = useState(false)
+  useEffect(() => {
+    try {
+      setCollapsed(window.localStorage.getItem('sidebar-collapsed') === '1')
+    } catch {
+      // localStorage gak ada (mis. private browsing ketat) -- default buka.
+    }
+  }, [])
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev
+      try {
+        window.localStorage.setItem('sidebar-collapsed', next ? '1' : '0')
+      } catch {
+        // gagal simpan preferensi gapapa -- toggle tetap jalan untuk sesi ini.
+      }
+      return next
+    })
+  }
+
   return (
     <>
-      {/* Sidebar tetap di desktop */}
-      <aside className="hidden w-64 shrink-0 border-r border-sidebar-border lg:block">
-        <div className="sticky top-0 h-dvh">
-          <SidebarContent
-            activePage={activePage}
-            onNavigate={onNavigate}
-            onLogout={onLogout}
-            userRole={userRole}
-            userBranchId={userBranchId}
-          />
+      {/* Sidebar tetap di desktop -- lebar berubah sesuai mode ciut */}
+      <aside className={cn('hidden shrink-0 border-r border-sidebar-border transition-[width] duration-200 lg:block', collapsed ? 'w-16' : 'w-64')}>
+        <div className="sticky top-0 flex h-dvh flex-col">
+          <div className="min-h-0 flex-1">
+            <SidebarContent
+              activePage={activePage}
+              onNavigate={onNavigate}
+              onLogout={onLogout}
+              userRole={userRole}
+              userBranchId={userBranchId}
+              collapsed={collapsed}
+            />
+          </div>
+          {/* Tombol ciut/buka -- selalu di paling bawah, di luar area scroll menu. */}
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? 'Buka sidebar' : 'Ciutkan sidebar'}
+            title={collapsed ? 'Buka sidebar' : 'Ciutkan sidebar'}
+            className={cn(
+              'flex shrink-0 items-center gap-2 border-t border-sidebar-border py-2.5 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+              collapsed ? 'justify-center px-0' : 'justify-end px-3',
+            )}
+          >
+            {collapsed ? <ChevronRight className="size-4" aria-hidden="true" /> : (
+              <>
+                <ChevronLeft className="size-4" aria-hidden="true" />
+                Ciutkan
+              </>
+            )}
+          </button>
         </div>
       </aside>
 
