@@ -213,16 +213,25 @@ export default function PaketPrintPreview({
 
       <style>{`
         @media print {
-          /* Toolbar tombol (tab Total/Rinci, Cetak, tutup) tidak ikut ke PDF. */
+          /* BUG 29 Sep 2026 (revisi ke-2): reset kotak previewnya sendiri
+             (position:static, tinggi/scroll dilepas) TERNYATA BELUM CUKUP --
+             sisa halaman di belakangnya (sidebar, panel Kalkulator Paket)
+             tetap ada di DOM & tetap ke-print, cuma urutannya jadi SEBELUM
+             dokumen ini. Makanya halaman 1 kelihatan kosong -- itu bukan
+             kosong, itu ruang sisa dari sidebar/panel yang harusnya gak
+             usah keprint sama sekali, dan dokumen aslinya baru mulai di
+             halaman 2 atau 3.
+             Fixed dengan pola standar "print 1 elemen doang": SEMUANYA di
+             <body> disembunyikan (visibility:hidden, bukan display:none --
+             biar layout & page break box ini sendiri gak ikut kacau), lalu
+             cuma .paket-print-card & isinya yang divisibility:visible lagi
+             dan dipaksa position:fixed nempel di pojok kiri-atas halaman.
+             Hasilnya CUMA dokumen ini yang keprint, mulai dari halaman 1. */
+          body * { visibility: hidden !important; }
+          .paket-print-card, .paket-print-card * { visibility: visible !important; }
+
           .paket-print-toolbar { display: none !important; }
 
-          /* BUG 29 Sep 2026: overlay gelap & kotak putih ini didesain buat
-             tampil di layar (position:fixed, tinggi dibatasi 90vh + scroll) --
-             dua-duanya kalau dibiarkan ikut ke-print, hasilnya (1) latar
-             gelap penuh ikut kecetak, dan (2) konten yang lebih panjang dari
-             1 layar KEPOTONG karena overflow:auto, bukan mengalir ke halaman
-             berikutnya. Di-reset total di sini, khusus mode print, jadi
-             dokumennya mengalir apa adanya lintas halaman A4. */
           .paket-print-overlay {
             position: static !important;
             inset: auto !important;
@@ -232,10 +241,13 @@ export default function PaketPrintPreview({
             z-index: auto !important;
           }
           .paket-print-card {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
             max-width: none !important;
             max-height: none !important;
             overflow: visible !important;
-            width: auto !important;
+            width: 100% !important;
             padding: 0 !important;
             border-radius: 0 !important;
           }
