@@ -625,7 +625,15 @@ function OpnameDetail({
 
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-neutral-200">
-        <table className="w-full border-collapse text-sm table-auto" style={{ minWidth: 900 }}>
+        <table className="w-full border-collapse text-sm" style={{ minWidth: 980, tableLayout: "fixed" }}>
+          <colgroup>
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "46%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "8%" }} />
+          </colgroup>
           <thead>
             <tr className="bg-neutral-50 text-[10px] font-extrabold uppercase text-neutral-500">
               <Th label="Kategori" k="kategori" sortKey={sortKey} sortDir={sortDir} onClick={sortBy} align="left" />
@@ -649,10 +657,28 @@ function OpnameDetail({
                     {item.kategori}
                   </td>
                   <td
-                    className="w-2/5 whitespace-normal break-words overflow-visible border border-neutral-200 px-3 py-2.5 text-left text-[12.5px] font-semibold align-top"
-                    style={{ minWidth: 420, whiteSpace: "normal", wordBreak: "break-word", overflow: "visible", textOverflow: "clip" }}
+                    className="border border-neutral-200 px-3 py-2.5 text-left text-[12.5px] font-semibold align-top"
+                    style={{
+                      overflow: "visible",
+                      width: "46%",
+                      minWidth: 450,
+                    }}
                   >
-                    {item.nama}
+                    <div
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        whiteSpace: "normal",
+                        wordBreak: "break-word",
+                        overflowWrap: "break-word",
+                        overflow: "visible",
+                        textOverflow: "clip",
+                        maxWidth: "none",
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {item.nama}
+                    </div>
                   </td>
                   <td
                     className={`border border-neutral-200 px-2 py-2 text-center ${
