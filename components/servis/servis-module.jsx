@@ -1099,6 +1099,10 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   const [invoices, setInvoices] = useState([]);
   const [setoranList, setSetoranList] = useState([]);
   const [invoiceData, setInvoiceData] = useState(null);
+  // FIX 30 Sep 2026 -- tiket asal waktu user klik "Lihat Invoice", supaya
+  // pas modal invoice ditutup, balik ke tiket YANG SAMA (bukan claimIds[0]
+  // invoice itu -- bisa punya customer lain / klaimnya sudah dihapus).
+  const [invoiceReturnClaimId, setInvoiceReturnClaimId] = useState(null);
   const [pickupGroup, setPickupGroup] = useState(null);
   const [previewPhone, setPreviewPhone] = useState(null);
   // "role" di sini TETAP dipakai persis seperti kode aslinya di bawah
@@ -1230,7 +1234,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   }
 
   async function importBrands(rows) {
-    const list = settings.brands || [];
+    const list = dataRef.current.settings.brands || [];
     const existing = new Set(list.map((b) => b.trim().toLowerCase()));
     const additions = [];
     rows.forEach((r) => {
@@ -1242,7 +1246,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
       additions.push(name);
     });
     if (additions.length === 0) return;
-    const next = { ...settings, brands: [...list, ...additions] };
+    const next = { ...dataRef.current.settings, brands: [...list, ...additions] };
     await persist({ settings: next });
   }
 
@@ -1276,7 +1280,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
     });
   }
   async function importSuppliers(rows) {
-    const list = settings.supplierDetails || [];
+    const list = dataRef.current.settings.supplierDetails || [];
     const existingNames = new Set(list.map((s) => s.name.trim().toLowerCase()));
     const additions = [];
     rows.forEach((r) => {
@@ -1289,7 +1293,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
     });
     if (additions.length === 0) return;
     const nextDetails = [...list, ...additions];
-    const next = { ...settings, supplierDetails: nextDetails, suppliers: nextDetails.map((s) => s.name) };
+    const next = { ...dataRef.current.settings, supplierDetails: nextDetails, suppliers: nextDetails.map((s) => s.name) };
     await persist({ settings: next });
   }
 
@@ -1326,7 +1330,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
 
   function findCustomerByName(name) {
     const n = (name || "").trim().toLowerCase();
-    return (settings.customers || []).find((c) => c.name.trim().toLowerCase() === n);
+    return (dataRef.current.settings.customers || []).find((c) => c.name.trim().toLowerCase() === n);
   }
   function addOrUpdateCustomerFromIntake(name, phone) {
     const trimmedName = (name || "").trim();
@@ -1401,7 +1405,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   function isDuplicateSN(sn, excludeId) {
     const s = (sn || "").trim().toLowerCase();
     if (!s) return false;
-    return claims.some((c) => c.id !== excludeId && c.snDiterima.trim().toLowerCase() === s);
+    return dataRef.current.claims.some((c) => c.id !== excludeId && c.snDiterima.trim().toLowerCase() === s);
   }
 
   function handleAddClaims(customer, rows) {
@@ -1431,7 +1435,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
       tanggalKembaliSupplier: "", hasilSupplier: "", snPenggantiSupplier: "", biayaSupplier: "",
       sumberPenyelesaian: "", tanggalAmbilCustomer: "", metodeBayarAmbil: "",
     }));
-    persist({ claims: [...claims, ...newItems] });
+    persist({ claims: [...dataRef.current.claims, ...newItems] });
     addOrUpdateCustomerFromIntake(customer.name, customer.phone);
     setShowAdd(false);
     setTicketDetailId(newItems[0].id);
@@ -1497,23 +1501,23 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   function addSparePart(part) {
     const name = (part.name || "").trim();
     if (!name) return;
-    const exists = (settings.spareParts || []).some((p) => p.name.trim().toLowerCase() === name.toLowerCase());
+    const exists = (dataRef.current.settings.spareParts || []).some((p) => p.name.trim().toLowerCase() === name.toLowerCase());
     if (exists) return; // sudah ada (mungkin ditambahkan cabang lain) — jangan bikin duplikat
-    persist({ settings: { ...settings, spareParts: [...(settings.spareParts || []), { id: uid(), ...part, name }] } });
+    persist({ settings: { ...dataRef.current.settings, spareParts: [...(dataRef.current.settings.spareParts || []), { id: uid(), ...part, name }] } });
   }
   function updateSparePart(id, patch) {
     if (role !== "pusat") return;
-    persist({ settings: { ...settings, spareParts: (settings.spareParts || []).map((p) => (p.id === id ? { ...p, ...patch } : p)) } });
+    persist({ settings: { ...dataRef.current.settings, spareParts: (dataRef.current.settings.spareParts || []).map((p) => (p.id === id ? { ...p, ...patch } : p)) } });
   }
   function removeSparePart(id) {
     if (role !== "pusat") return;
-    persist({ settings: { ...settings, spareParts: (settings.spareParts || []).filter((p) => p.id !== id) } });
+    persist({ settings: { ...dataRef.current.settings, spareParts: (dataRef.current.settings.spareParts || []).filter((p) => p.id !== id) } });
   }
   // ---------- Import massal (paste dari Excel/Sheets) ----------
   // Ketiganya menghindari duplikat (dicek dari nama, atau SKU untuk
   // produk) dan cuma sekali persist() per batch import, bukan satu-satu.
   async function importProducts(rows) {
-    const list = settings.products || [];
+    const list = dataRef.current.settings.products || [];
     const existingNames = new Set(list.map((p) => p.name.trim().toLowerCase()));
     const existingSkus = new Set(list.map((p) => (p.sku || "").trim().toLowerCase()));
     const additions = [];
@@ -1529,11 +1533,11 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
       additions.push({ id: uid(), sku, name });
     });
     if (additions.length === 0) return;
-    const next = { ...settings, products: [...list, ...additions] };
+    const next = { ...dataRef.current.settings, products: [...list, ...additions] };
     await persist({ settings: next });
   }
   async function importSpareParts(rows) {
-    const list = settings.spareParts || [];
+    const list = dataRef.current.settings.spareParts || [];
     const existingNames = new Set(list.map((p) => p.name.trim().toLowerCase()));
     const additions = [];
     rows.forEach((r) => {
@@ -1545,11 +1549,11 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
       additions.push({ id: uid(), name, unit: (r.unit || "pcs").trim() || "pcs", qty: Number(r.qty) || 0 });
     });
     if (additions.length === 0) return;
-    const next = { ...settings, spareParts: [...list, ...additions] };
+    const next = { ...dataRef.current.settings, spareParts: [...list, ...additions] };
     await persist({ settings: next });
   }
   async function importCustomers(rows) {
-    const list = settings.customers || [];
+    const list = dataRef.current.settings.customers || [];
     const existingNames = new Set(list.map((c) => c.name.trim().toLowerCase()));
     const additions = [];
     rows.forEach((r) => {
@@ -1561,18 +1565,18 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
       additions.push({ id: uid(), name, phone: (r.phone || "").trim(), alamat: (r.alamat || "").trim() });
     });
     if (additions.length === 0) return;
-    const next = { ...settings, customers: [...list, ...additions] };
+    const next = { ...dataRef.current.settings, customers: [...list, ...additions] };
     await persist({ settings: next });
   }
   function uploadTandaTerimaPhoto(claimIds, dataUrl) {
-    persist({ claims: claims.map((c) => (claimIds.includes(c.id) ? { ...c, fotoTandaTerimaCustomer: dataUrl } : c)) });
+    persist({ claims: dataRef.current.claims.map((c) => (claimIds.includes(c.id) ? { ...c, fotoTandaTerimaCustomer: dataUrl } : c)) });
   }
   function uploadBatchDoc(batchId, docKey, dataUrl) {
-    persist({ batches: batches.map((b) => (b.id === batchId ? { ...b, [docKey]: dataUrl } : b)) });
+    persist({ batches: dataRef.current.batches.map((b) => (b.id === batchId ? { ...b, [docKey]: dataUrl } : b)) });
   }
   function updateBatch(batchId, patch) {
-    const nextBatches = batches.map((b) => (b.id === batchId ? { ...b, ...patch } : b));
-    const nextClaims = claims.map((c) => {
+    const nextBatches = dataRef.current.batches.map((b) => (b.id === batchId ? { ...b, ...patch } : b));
+    const nextClaims = dataRef.current.claims.map((c) => {
       if (c.batchId === batchId) {
         return {
           ...c,
@@ -1593,14 +1597,14 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   }
   function canDeleteBatch(batch) {
     if (!batch) return false;
-    const items = claimsInBatch(claims, batch.id);
+    const items = claimsInBatch(dataRef.current.claims, batch.id);
     return items.length > 0 && items.every((c) => !isDoneState(batchItemState(c)));
   }
   function deleteBatchAndRevert(batchId) {
     if (role !== "pusat") return;
-    const batch = batches.find((b) => b.id === batchId);
+    const batch = dataRef.current.batches.find((b) => b.id === batchId);
     if (!canDeleteBatch(batch)) return;
-    const nextClaims = claims.map((c) => {
+    const nextClaims = dataRef.current.claims.map((c) => {
       if (c.batchId === batchId) {
         return { ...c, batchId: "", supplier: "", tanggalKirimSupplier: "", status: "Baru", updatedAt: new Date().toISOString() };
       }
@@ -1609,7 +1613,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
       }
       return c;
     });
-    persist({ claims: nextClaims, batches: batches.filter((b) => b.id !== batchId) });
+    persist({ claims: nextClaims, batches: dataRef.current.batches.filter((b) => b.id !== batchId) });
   }
   function canDeleteClaim(claim) {
     // Per keputusan terbaru: SEMUA role boleh hapus, di STATUS APA PUN
@@ -1621,9 +1625,9 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
     return !!claim;
   }
   function deleteClaim(claimId) {
-    const claim = claims.find((c) => c.id === claimId);
+    const claim = dataRef.current.claims.find((c) => c.id === claimId);
     if (!canDeleteClaim(claim)) return;
-    persist({ claims: claims.filter((c) => c.id !== claimId) });
+    persist({ claims: dataRef.current.claims.filter((c) => c.id !== claimId) });
   }
   function stockInSpareparts(tanggal, entries) {
     // FIX 26 Sep 2026 -- baca dari dataRef.current, sama alasannya seperti
@@ -1672,41 +1676,41 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
 
   function addInvoiceRecord(data) {
     const record = { id: uid(), verified: false, ...data };
-    persist({ invoices: [...invoices, record] });
+    persist({ invoices: [...dataRef.current.invoices, record] });
     return record;
   }
   function updateInvoiceRecord(invoiceId, data) {
-    const existing = invoices.find((inv) => inv.id === invoiceId);
+    const existing = dataRef.current.invoices.find((inv) => inv.id === invoiceId);
     if (!existing) return null;
     const record = { ...existing, ...data, id: existing.id, invoiceNo: existing.invoiceNo, date: existing.date };
-    persist({ invoices: invoices.map((inv) => (inv.id === invoiceId ? record : inv)) });
+    persist({ invoices: dataRef.current.invoices.map((inv) => (inv.id === invoiceId ? record : inv)) });
     return record;
   }
   function updateInvoiceMetodeBayar(invoiceId, metodeBayar) {
     if (role !== "pusat") return;
-    persist({ invoices: invoices.map((inv) => (inv.id === invoiceId ? { ...inv, metodeBayar } : inv)) });
+    persist({ invoices: dataRef.current.invoices.map((inv) => (inv.id === invoiceId ? { ...inv, metodeBayar } : inv)) });
   }
   function setInvoiceMetodeBayarIfUnset(invoiceId, metodeBayar) {
-    const inv = invoices.find((i) => i.id === invoiceId);
+    const inv = dataRef.current.invoices.find((i) => i.id === invoiceId);
     if (!inv || inv.metodeBayar) return;
-    persist({ invoices: invoices.map((i) => (i.id === invoiceId ? { ...i, metodeBayar } : i)) });
+    persist({ invoices: dataRef.current.invoices.map((i) => (i.id === invoiceId ? { ...i, metodeBayar } : i)) });
   }
   function toggleInvoiceVerified(invoiceId) {
-    const inv = invoices.find((i) => i.id === invoiceId);
+    const inv = dataRef.current.invoices.find((i) => i.id === invoiceId);
     if (!inv) return;
     if (inv.verified && role !== "pusat") return;
-    persist({ invoices: invoices.map((i) => (i.id === invoiceId ? { ...i, verified: !i.verified } : i)) });
+    persist({ invoices: dataRef.current.invoices.map((i) => (i.id === invoiceId ? { ...i, verified: !i.verified } : i)) });
   }
   function addSetoran(entry) {
-    persist({ setoranList: [...setoranList, { id: uid(), ...entry }] });
+    persist({ setoranList: [...dataRef.current.setoranList, { id: uid(), ...entry }] });
   }
   function updateSetoran(id, patch) {
     if (role !== "pusat") return;
-    persist({ setoranList: setoranList.map((s) => (s.id === id ? { ...s, ...patch } : s)) });
+    persist({ setoranList: dataRef.current.setoranList.map((s) => (s.id === id ? { ...s, ...patch } : s)) });
   }
   function removeSetoran(id) {
     if (role !== "pusat") return;
-    persist({ setoranList: setoranList.filter((s) => s.id !== id) });
+    persist({ setoranList: dataRef.current.setoranList.filter((s) => s.id !== id) });
   }
 
   function setJenis(claimId, jenis) {
@@ -1721,7 +1725,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
 
   function markSentToSupplier({ supplier, itemIds, fotoResi, tanggalKirim, kodeBatch }) {
     const batch = { id: uid(), kodeBatch, supplier, tanggalKirim, fotoResi, fotoSuratJalanTTD: null, fotoBuktiTerimaBalik: null, itemIds };
-    const nextClaims = claims.map((c) => {
+    const nextClaims = dataRef.current.claims.map((c) => {
       if (!itemIds.includes(c.id)) return c;
       const isReimbursement = c.jenis === "Ganti Baru" && c.sumberPenyelesaian === "Stok Toko" && !c.stokReimbursed;
       if (isReimbursement) {
@@ -1729,7 +1733,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
       }
       return { ...c, batchId: batch.id, supplier, tanggalKirimSupplier: tanggalKirim, status: "Di Supplier", jenis: c.jenis || "Servis", updatedAt: dateToISO(tanggalKirim) };
     });
-    persist({ claims: nextClaims, batches: [...batches, batch] });
+    persist({ claims: nextClaims, batches: [...dataRef.current.batches, batch] });
     showToast(`${itemIds.length} barang dikirim ke ${supplier} (${kodeBatch})`);
     setShowSendModal(false);
     setSupplierPreselectIds(null);
@@ -1744,7 +1748,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   function markReceivedFromSupplier(itemsPatch, tanggal) {
     const today = tanggal || todayStr();
     const patchMap = Object.fromEntries(itemsPatch.map((p) => [p.id, p]));
-    const nextClaims = claims.map((c) => {
+    const nextClaims = dataRef.current.claims.map((c) => {
       if (!patchMap[c.id]) return c;
       const p = patchMap[c.id];
       return {
@@ -1776,7 +1780,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   }
 
   function markReadyFromStock(claimId, { sn, biaya, jenisOverride, tanggal } = {}) {
-    const claim = claims.find((c) => c.id === claimId);
+    const claim = dataRef.current.claims.find((c) => c.id === claimId);
     if (!claim) return;
     const patch = {
       snPenggantiStock: sn,
@@ -1787,11 +1791,11 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
     };
     patch.biayaToko = biaya !== undefined && biaya !== "" ? biaya : "";
     patch.updatedAt = dateToISO(tanggal || todayStr());
-    persist({ claims: claims.map((c) => (c.id === claimId ? { ...c, ...patch } : c)) });
+    persist({ claims: dataRef.current.claims.map((c) => (c.id === claimId ? { ...c, ...patch } : c)) });
   }
 
   function markServicedOnSite(claimId, { biaya, biayaJasaServis, partsUsed, jenisOverride, tanggal } = {}) {
-    const claim = claims.find((c) => c.id === claimId);
+    const claim = dataRef.current.claims.find((c) => c.id === claimId);
     if (!claim) return;
     const patch = {
       jenis: jenisOverride || claim.jenis || "Servis",
@@ -1810,7 +1814,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   }
 
   function markPickedUp(claimId, tanggal, metodeBayar) {
-    const claim = claims.find((c) => c.id === claimId);
+    const claim = dataRef.current.claims.find((c) => c.id === claimId);
     const finalDate = tanggal || todayStr();
     handleUpdateClaim(claimId, { tanggalAmbilCustomer: finalDate, status: "Selesai", updatedAt: dateToISO(finalDate), metodeBayarAmbil: metodeBayar || "" });
     if (metodeBayar && claim) {
@@ -1822,8 +1826,8 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   function markPickedUpBulk(claimIds, tanggal, metodeBayar) {
     const finalDate = tanggal || todayStr();
     const updatedAt = dateToISO(finalDate);
-    const targets = claims.filter((c) => claimIds.includes(c.id));
-    const nextClaims = claims.map((c) => (claimIds.includes(c.id) ? { ...c, tanggalAmbilCustomer: finalDate, status: "Selesai", updatedAt, metodeBayarAmbil: metodeBayar || "" } : c));
+    const targets = dataRef.current.claims.filter((c) => claimIds.includes(c.id));
+    const nextClaims = dataRef.current.claims.map((c) => (claimIds.includes(c.id) ? { ...c, tanggalAmbilCustomer: finalDate, status: "Selesai", updatedAt, metodeBayarAmbil: metodeBayar || "" } : c));
     persist({ claims: nextClaims });
     if (metodeBayar) {
       const invoiceIds = new Set();
@@ -1834,14 +1838,14 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
   }
 
   function findInvoiceForClaim(claimId) {
-    return invoices.find((inv) => (inv.claimIds || []).includes(claimId)) || null;
+    return dataRef.current.invoices.find((inv) => (inv.claimIds || []).includes(claimId)) || null;
   }
   function hasInvoice(claimId) {
     return !!findInvoiceForClaim(claimId);
   }
   function viewInvoiceForClaim(claimId) {
     const inv = findInvoiceForClaim(claimId);
-    if (inv) setInvoiceData(inv);
+    if (inv) { setInvoiceReturnClaimId(claimId); setInvoiceData(inv); }
   }
   function canStartNewInvoice(claimId) {
     return role === "pusat" || !hasInvoice(claimId);
@@ -2134,7 +2138,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
         />
       )}
 
-      {ticketDetailId && (
+      {ticketDetailId && claims.some((c) => c.id === ticketDetailId) && (
         <TicketDetailModal
           key={ticketDetailId}
           claim={claims.find((c) => c.id === ticketDetailId)}
@@ -2207,7 +2211,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
         />
       )}
 
-      {viewBatchId && (
+      {viewBatchId && batches.some((b) => b.id === viewBatchId) && (
         <SupplierBatchDetailModal
           batch={batches.find((b) => b.id === viewBatchId)}
           claims={claims}
@@ -2236,14 +2240,14 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
           onUpload={(batchId, docKey, dataUrl) => { uploadBatchDoc(batchId, docKey, dataUrl); setDocUploadTarget(null); }}
         />
       )}
-      {editBatchId && (
+      {editBatchId && batches.some((b) => b.id === editBatchId) && (
         <EditBatchModal
           batch={batches.find((b) => b.id === editBatchId)}
           onClose={() => setEditBatchId(null)}
           onSave={(patch) => { updateBatch(editBatchId, patch); setEditBatchId(null); }}
         />
       )}
-      {deleteBatchId && (
+      {deleteBatchId && batches.some((b) => b.id === deleteBatchId) && (
         <DeleteBatchModal
           batch={batches.find((b) => b.id === deleteBatchId)}
           canDelete={canDeleteBatch(batches.find((b) => b.id === deleteBatchId))}
@@ -2277,7 +2281,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
               reconcileSparepartsForInvoiceEdit(oldSparepartUsage, sparepartUsage);
               const record = updateInvoiceRecord(invoiceBuilderConfig.editingInvoiceId, data);
               setInvoiceBuilderConfig(null);
-              if (record) { setInvoiceData(record); showToast(`Invoice ${record.invoiceNo} diperbarui`); }
+              if (record) { setInvoiceReturnClaimId(null); setInvoiceData(record); showToast(`Invoice ${record.invoiceNo} diperbarui`); }
               return;
             }
             let finalData = data;
@@ -2318,6 +2322,7 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
               settings: { ...baseSettings, spareParts: nextSpareParts, sparepartStockLog: logEntry ? [...(baseSettings.sparepartStockLog || []), logEntry] : baseSettings.sparepartStockLog },
               invoices: [...dataRef.current.invoices, record],
             });
+            setInvoiceReturnClaimId(null);
             setInvoiceData(record);
             setInvoiceBuilderConfig(null);
           }}
@@ -2329,8 +2334,18 @@ function App({ branchId, branchInfo, currentUserId, isSuperAdmin, branchSwitcher
           claims={claims}
           branchInfo={branchInfo}
           onClose={() => {
-            const backToClaimId = (invoiceData.claimIds || [])[0];
+            // FIX 30 Sep 2026 -- BUG: dulu selalu balik ke claimIds[0] invoice.
+            // Kalau klaim itu sudah dihapus, TicketDetailModal dapat claim
+            // undefined -> crash "can't access property groupId". Kalau
+            // invoice-nya (salah) memuat barang customer lain, malah loncat ke
+            // tiket customer lain. Sekarang: balik ke tiket asal, atau klaim
+            // pertama di invoice yang MASIH ADA; kalau tidak ada, tidak ke mana-mana.
+            const exists = (id) => !!id && dataRef.current.claims.some((c) => c.id === id);
+            const backToClaimId = exists(invoiceReturnClaimId)
+              ? invoiceReturnClaimId
+              : (invoiceData.claimIds || []).find(exists);
             setInvoiceData(null);
+            setInvoiceReturnClaimId(null);
             if (backToClaimId) setTicketDetailId(backToClaimId);
           }}
         />
@@ -7185,6 +7200,14 @@ function seedFromServiceClaims(claims, preselectIds, invoices) {
   return { locked, jasaSeed };
 }
 
+// FIX 30 Sep 2026 -- normalisasi no HP buat bandingin customer
+// ("+62 878-..." == "0878...").
+function normPhone(p) {
+  let d = String(p || "").replace(/\D/g, "");
+  if (d.startsWith("62")) d = "0" + d.slice(2);
+  return d;
+}
+
 function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, preselectIds, editingInvoice, onClose, onGenerate }) {
   const isEditing = !!editingInvoice;
   const canManage = role === "pusat";
@@ -7202,11 +7225,17 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
   }), [claims, invoices, isEditing, editingInvoice, canManage]);
 
   const [query, setQuery] = useState("");
-  const [selectedIds, setSelectedIds] = useState(() => preselectIds || []);
+  // FIX 30 Sep 2026 -- BUG: waktu EDIT invoice, centangan awal cuma
+  // `preselectIds` (barang yang diklik), bukan SEMUA barang di invoice.
+  // Simpan edit -> barang lain di invoice itu hilang dari claimIds.
+  const [selectedIds, setSelectedIds] = useState(() =>
+    editingInvoice ? [...new Set([...(editingInvoice.claimIds || []), ...(preselectIds || [])])] : (preselectIds || [])
+  );
+  const [showOtherCustomers, setShowOtherCustomers] = useState(false);
   // Notice singkat pas toggleClaim otomatis menambah/melepas biaya (lihat catatan bug di linesForClaim/seedFromServiceClaims).
   const [autoAddNotice, setAutoAddNotice] = useState("");
   const [customerName, setCustomerName] = useState(editingInvoice?.customerName || (claims.find((c) => (preselectIds || []).includes(c.id))?.customerName || ""));
-  const [phone, setPhone] = useState(editingInvoice?.customerPhone || initialPhone || "");
+  const [phone, setPhone] = useState(editingInvoice?.customerPhone || initialPhone || (claims.find((c) => (preselectIds || []).includes(c.id))?.customerPhone || ""));
   const [date, setDate] = useState(editingInvoice?.date || todayStr());
 
   const [sparepartLines, setSparepartLines] = useState(() =>
@@ -7219,11 +7248,32 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
     sparepartLinesFromInvoice(editingInvoice).filter((l) => !l.locked).map((l) => ({ partId: l.partId, qty: Number(l.qty) || 0 }))
   );
 
+  // FIX 30 Sep 2026 -- BUG DITEMUKAN (invoice CIPTA KASTARA TEKNIK memuat
+  // DVR milik OPAL CCTV): daftar barang di modal ini menampilkan barang
+  // SEMUA customer, jadi barang customer lain dengan produk sama (mis. 2x
+  // "Dahua DVR 8CH DH-XVR1B08-I") gampang ketiban centang. Akibatnya barang
+  // itu tercatat "Sudah Diinvoice" di invoice orang lain, "Lihat Invoice"
+  // membuka invoice customer lain, dan invoice-nya sendiri tidak bisa dibuat.
+  // Sekarang: default cuma tampil barang customer yang sama (no HP, atau
+  // nama kalau HP kosong), dan simpan DIBLOK kalau ada barang customer lain.
+  const invPhone = normPhone(phone);
+  const invName = customerName.trim().toLowerCase();
+  function isSameCustomer(c) {
+    const cp = normPhone(c.customerPhone);
+    if (invPhone && cp) return cp === invPhone;
+    if (invName) return (c.customerName || "").trim().toLowerCase() === invName;
+    return true;
+  }
+  const hasCustomerKey = !!(invPhone || invName);
+  const otherCustomerCount = hasCustomerKey ? eligibleClaims.filter((c) => !isSameCustomer(c) && !selectedIds.includes(c.id)).length : 0;
+
   const filteredClaims = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return eligibleClaims;
-    return eligibleClaims.filter((c) => `${c.customerName} ${c.snDiterima} ${c.brand} ${c.produk}`.toLowerCase().includes(q));
-  }, [eligibleClaims, query]);
+    let list = eligibleClaims;
+    if (hasCustomerKey && !showOtherCustomers) list = list.filter((c) => isSameCustomer(c) || selectedIds.includes(c.id));
+    if (!q) return list;
+    return list.filter((c) => `${c.customerName} ${c.snDiterima} ${c.brand} ${c.produk}`.toLowerCase().includes(q));
+  }, [eligibleClaims, query, hasCustomerKey, showOtherCustomers, invPhone, invName, selectedIds]);
 
   function toggleClaim(c) {
     const nowSelected = selectedIds.includes(c.id);
@@ -7267,11 +7317,12 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
   }
 
   const selectedClaims = claims.filter((c) => selectedIds.includes(c.id));
+  const otherCustomerSelected = hasCustomerKey ? selectedClaims.filter((c) => !isSameCustomer(c)) : [];
   const sparepartTotal = sparepartLines.reduce((sum, l) => sum + (l.partId ? (Number(l.qty) || 0) * (Number(l.price) || 0) : 0), 0);
   const jasaTotal = jasaLines.reduce((sum, l) => sum + (l.label.trim() ? (Number(l.price) || 0) : 0), 0);
   const grandTotal = sparepartTotal + jasaTotal;
 
-  const canSubmit = customerName.trim() && phone.trim() && (selectedIds.length > 0 || sparepartLines.some((l) => l.partId) || jasaLines.some((l) => l.label.trim()));
+  const canSubmit = otherCustomerSelected.length === 0 && customerName.trim() && phone.trim() && (selectedIds.length > 0 || sparepartLines.some((l) => l.partId) || jasaLines.some((l) => l.label.trim()));
 
   // 2026-09 -- kalau lebih dari 1 barang di invoice ini sama-sama pakai
   // sparepart yang SAMA (mis. 2 unit yang masing-masing dipasangi 1 baterai
@@ -7314,7 +7365,16 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
   }
 
   function handleSubmit() {
+    // FIX 30 Sep 2026 -- waktu edit, klaim yang ada di invoice lama tapi
+    // SUDAH DIHAPUS dari data klaim tetap dipertahankan (claimId + baris
+    // barangnya), supaya riwayat invoice tidak ikut rusak diam-diam.
+    const orphanIds = isEditing ? (editingInvoice.claimIds || []).filter((id) => !claims.some((c) => c.id === id)) : [];
+    const knownSns = new Set(claims.filter((c) => (editingInvoice?.claimIds || []).includes(c.id)).map((c) => c.snDiterima));
+    const orphanBarangLines = isEditing && orphanIds.length
+      ? (editingInvoice.lines || []).filter((l) => l.isBarangInfo && !knownSns.has(l.sn))
+      : [];
     const lines = [
+      ...orphanBarangLines,
       ...selectedClaims.map((c) => ({
         label: `${c.brand} ${c.produk}`, sn: c.snDiterima,
         snPengganti: c.snPenggantiStock || c.snPenggantiSupplier || "",
@@ -7328,7 +7388,7 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
       date,
       customerName: customerName.trim(),
       customerPhone: phone.trim(),
-      claimIds: selectedIds,
+      claimIds: [...selectedClaims.map((c) => c.id), ...orphanIds],
       lines,
       total: grandTotal,
     };
@@ -7368,7 +7428,7 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
             <label key={c.id} className="flex items-center gap-3 p-3 text-sm cursor-pointer">
               <input type="checkbox" checked={checked} onChange={() => toggleClaim(c)} />
               <div className="flex-1 min-w-0">
-                <div className="truncate">{c.customerName} — {c.brand} {c.produk}</div>
+                <div className="truncate">{c.customerName} — {c.brand} {c.produk} <span className="text-xs text-slate-400">· terima {fmtDate(c.tanggalTerima)}</span></div>
                 <div className="text-xs text-slate-400 font-mono">SN {c.snDiterima}{snPengganti ? ` → SN Pengganti ${snPengganti}` : ""}</div>
               </div>
               {alreadyInvoicedElsewhere && (
@@ -7380,6 +7440,19 @@ function InvoiceBuilderModal({ claims, settings, invoices, role, initialPhone, p
         })}
         {filteredClaims.length === 0 && <div className="p-4 text-sm text-slate-400">Tidak ada barang yang cocok / tersedia untuk diinvoice.</div>}
       </div>
+      {hasCustomerKey && (otherCustomerCount > 0 || showOtherCustomers) && (
+        <button type="button" onClick={() => setShowOtherCustomers((v) => !v)} className="text-xs text-slate-500 hover:text-indigo-600 underline mb-2">
+          {showOtherCustomers ? "Sembunyikan barang customer lain" : `Tampilkan barang customer lain (${otherCustomerCount})`}
+        </button>
+      )}
+      {otherCustomerSelected.length > 0 && (
+        <div className="mb-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+          <div className="font-medium mb-1">Ada {otherCustomerSelected.length} barang milik customer lain — lepas centangnya dulu sebelum simpan:</div>
+          {otherCustomerSelected.map((c) => (
+            <div key={c.id}>• {c.customerName} ({c.customerPhone || "-"}) — {c.brand} {c.produk} · SN {c.snDiterima}</div>
+          ))}
+        </div>
+      )}
 
       {autoAddNotice && (
         <div className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
