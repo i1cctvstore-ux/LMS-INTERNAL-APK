@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/client'
+import { sanitizeOrSearch } from '@/lib/stok/api'
 
 // =====================================================
 // Data layer buat fitur Transfer/Konsinyasi Stok Antar Cabang.
@@ -39,7 +40,7 @@ export async function searchProductsForTransfer(
   const { data, error } = await supabase
     .from('service_products')
     .select('id, sku, name')
-    .or(`sku.ilike.%${query}%,name.ilike.%${query}%`)
+    .or(`sku.ilike.%${sanitizeOrSearch(query)}%,name.ilike.%${sanitizeOrSearch(query)}%`)
     .limit(20)
   if (error) throw new Error(error.message)
   return (data || []).map((p: any) => ({ id: p.id, sku: p.sku || '', name: p.name }))
