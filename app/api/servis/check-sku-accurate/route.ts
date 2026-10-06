@@ -23,8 +23,12 @@
 //      otomatis bikin produk baru) — kalau ada isinya, tandanya sync
 //      belum sempat jalan buat item ini.
 
+// 6 Okt 2026: ambil detail ~1600+ item Accurate butuh waktu lama.
+export const maxDuration = 300
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/supabase/require-admin'
 import {
   getAccurateBranchConfigs,
   connectToAccurateBranch,
@@ -45,6 +49,13 @@ function normalizeName(s: string): string {
 }
 
 export async function GET(req: NextRequest) {
+  // FIX 6 Okt 2026 -- KEAMANAN: /api tidak dilindungi middleware login,
+  // jadi endpoint ini dulu bisa dibuka SIAPA SAJA yang tahu URL-nya (tanpa
+  // login) -- memakai token Accurate & menghabiskan kuota API harian.
+  // Sekarang hanya Super Admin yang sudah login.
+  const auth = await requireAdmin()
+  if ('error' in auth) return auth.error
+
   const branchIdParam = req.nextUrl.searchParams.get('branchId')
 
   try {
@@ -63,7 +74,7 @@ export async function GET(req: NextRequest) {
       const PAGE = 1000
       let from = 0
       while (true) {
-        const { data, error } = await supabase.from('service_products').select('id, sku, name').range(from, from + PAGE - 1)
+        const { data, error } = await supabase.from('service_products').select('id, sku, name').order('id').range(from, from + PAGE - 1)
         if (error) throw new Error(error.message)
         catalog.push(...((data as any) || []))
         if (!data || data.length < PAGE) break
