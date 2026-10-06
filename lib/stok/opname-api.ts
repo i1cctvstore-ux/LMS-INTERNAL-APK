@@ -27,7 +27,25 @@ export interface OpnameItem {
   kategori: string;
   nama: string;
   saldo_snapshot: number;
+  accounts: Record<string, number>;
   real: number | null;
+  /** Alasan selisih / catatan bebas per barang (migration 20260923). */
+  catatan: string | null;
+  /** Status keputusan buat barang yang selisih -- pilihan tertutup, lihat KEPUTUSAN_SELISIH_OPTIONS (migration 20260923000001). */
+  keputusan_selisih: string | null;
+}
+
+/** Pilihan tetap untuk dropdown "Keputusan" -- HARUS sama persis dengan CHECK constraint di migration 20260923000001_stock_opname_items_keputusan.sql. */
+export const KEPUTUSAN_SELISIH_OPTIONS = [
+  "Dibuat SO nya",
+  "Benerin Dulu yang Ketuker",
+  "Coba Cek Ulang",
+] as const;
+
+export interface BranchAccount {
+  code: string;
+  label: string;
+  exclude_total: boolean;
 }
 
 export interface OpnameItemStatus {
@@ -97,53 +115,83 @@ export async function getSessionDetail(
     .single();
   if (sessionErr) throw sessionErr;
 
-  // FIX 6 Okt 2026 -- BUG batas 1000 baris: dulu tanpa paging, jadi sesi
-  // opname cabang dengan > 1000 barang (mis. Purwokerto ~1600) cuma
-  // tampil 1000 barang pertama (urut nama) -- sisanya hilang dari lembar
-  // hitung & cetakan. Sama seperti fix di lib/stok-opname/api.ts.
+  // 2026-09-14: SEBELUMNYA query ini query .eq("session_id",...) doang
+  // tanpa .range() -- Supabase/PostgREST defaultnya cuma balikin
+  // MAKSIMAL 1000 BARIS per query kalau gak dikasih range eksplisit.
+  // Sesi Jakarta sekarang ~4300 item (setelah fix "Tanpa Kategori"),
+  // jadi cuma 1000 item pertama (alfabetis) yang ke-load & ke-print --
+  // sisanya kepotong diam-diam tanpa error apapun. Sekarang di-loop per
+  // 1000 baris sampai semua ke-ambil.
+  const PAGE = 1000;
   const items: any[] = [];
-  {
-    const PAGE = 1000;
-    for (let from = 0; ; from += PAGE) {
-      const { data: page, error: itemsErr } = await supabase
-        .from("stock_opname_items")
-        .select("id, session_id, product_id, kategori, nama, saldo_snapshot, real")
-        .eq("session_id", sessionId)
-        .order("nama", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, from + PAGE - 1);
-      if (itemsErr) throw itemsErr;
-      items.push(...(page ?? []));
-      if (!page || page.length < PAGE) break;
-    }
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error: itemsErr } = await supabase
+      .from("stock_opname_items")
+      .select("id, session_id, product_id, kategori, nama, saldo_snapshot, accounts, real, catatan, keputusan_selisih")
+      .eq("session_id", sessionId)
+      .order("nama", { ascending: true })
+      // 6 Okt 2026: pemecah seri -- nama barang bisa kembar, tanpa ini
+      // paging bisa dobel/kelewat 1 baris di batas halaman.
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (itemsErr) throw itemsErr;
+    items.push(...(page ?? []));
+    if (!page || page.length < PAGE) break;
   }
 
   return {
     session: { ...(session as any), branch_nama: (session as any).branches?.name },
-    items: items ?? [],
+    items: items.map((it: any) => ({ ...it, accounts: it.accounts ?? {} })),
   };
+}
+
+/** Kolom akun per cabang untuk Mode Detail (mis. JKT / JKT-K / JKT-K-SOLO), diurutkan sesuai sort_order. */
+export async function listBranchAccounts(branchId: string): Promise<BranchAccount[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("stock_opname_branch_accounts")
+    .select("code, label, exclude_total")
+    .eq("branch_id", branchId)
+    .order("sort_order", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
 }
 
 /** Daftar kategori master, untuk sheet "Pilih Kategori" saat opname baru & filter kategori di halaman detail. */
 export async function listCatalogCategories(): Promise<string[]> {
   const supabase = createClient();
-  // FIX 6 Okt 2026 -- sama dengan bug "kategori HILOOK hilang" yang sudah
-  // diperbaiki di lib/stok-opname/api.ts: tanpa paging cuma 1000 produk
-  // pertama yang dibaca, kategori yang produknya di luar itu tidak muncul.
-  const set = new Set<string>();
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
+  // 2026-09-14: SEBELUMNYA query ini .not("kategori","is",null) --
+  // produk dengan kategori kosong jadi gak pernah muncul sebagai
+  // pilihan scope, DAN (bug utamanya) di RPC stock_opname_create_session
+  // produk kayak ini gak pernah ke-include ke sesi opname manapun sama
+  // sekali, walau pilih "Semua Kategori" -- lihat migration
+  // 20260914000000_stock_opname_tanpa_kategori.sql. Sekarang produk
+  // tanpa kategori dikelompokkan sebagai "Tanpa Kategori" (string biasa,
+  // bukan NULL) supaya konsisten dipakai di seluruh filter/grouping yang
+  // sudah ada -- termasuk di sini, biar user bisa pilih scope itu secara
+  // spesifik kalau perlu.
+  // 2026-09 -- BUG DITEMUKAN: query ini SEBELUMNYA cuma `.select("kategori")`
+  // tanpa pagination sama sekali. `service_products` tabelnya BESAR (di
+  // semua tempat LAIN yang query tabel ini di codebase SELALU pakai
+  // `.range()` berulang justru karena sudah tau ini) -- PostgREST diam-diam
+  // membatasi hasil ke 1000 baris pertama kalau tidak dikasih tahu utk ambil
+  // lebih. Kategori yang produknya kebetulan SEMUA ada di luar 1000 baris
+  // pertama (mis. HILOOK, ~67 produk, kemungkinan besar diinput belakangan
+  // jadi posisinya di ujung tabel) jadi TIDAK PERNAH muncul di pilihan
+  // kategori sama sekali -- bukan soal scroll, benar-benar tidak pernah
+  // ke-fetch. Fix: paginasi 1000 baris per halaman sampai tabelnya habis.
+  const PAGE_SIZE = 1000;
+  const allKategori: string[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase
       .from("service_products")
       .select("kategori")
-      .not("kategori", "is", null)
-      .order("id", { ascending: true })
-      .range(from, from + PAGE - 1);
+      .order('id').range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
-    (data ?? []).forEach((r: any) => { if (r.kategori) set.add(r.kategori); });
-    if (!data || data.length < PAGE) break;
+    (data ?? []).forEach((r: any) => allKategori.push(r.kategori ? r.kategori : "Tanpa Kategori"));
+    if (!data || data.length < PAGE_SIZE) break;
   }
-  return [...set].sort();
+  return [...new Set(allKategori)].sort();
 }
 
 // ============================================================
@@ -178,6 +226,26 @@ export async function updateItemReal(itemId: string, value: number | null): Prom
   const { error } = await supabase
     .from("stock_opname_items")
     .update({ real: value })
+    .eq("id", itemId);
+  if (error) throw error;
+}
+
+/** Update kolom "catatan" (keterangan/alasan selisih) untuk satu item. RLS sama seperti updateItemReal. */
+export async function updateItemCatatan(itemId: string, value: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("stock_opname_items")
+    .update({ catatan: value.trim() || null })
+    .eq("id", itemId);
+  if (error) throw error;
+}
+
+/** Update kolom "keputusan_selisih" untuk satu item. value harus salah satu KEPUTUSAN_SELISIH_OPTIONS atau "" (kosongkan pilihan). RLS sama seperti updateItemReal. */
+export async function updateItemKeputusan(itemId: string, value: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("stock_opname_items")
+    .update({ keputusan_selisih: value || null })
     .eq("id", itemId);
   if (error) throw error;
 }
@@ -223,5 +291,15 @@ export async function revertSession(params: {
       confirmed_at: null,
     })
     .eq("id", params.sessionId);
+  if (error) throw error;
+}
+
+/**
+ * Hapus sesi permanen (+ semua item-nya via ON DELETE CASCADE). HANYA
+ * super_admin — RLS `opname_sessions_delete` menolak selain super_admin.
+ */
+export async function deleteSession(sessionId: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from("stock_opname_sessions").delete().eq("id", sessionId);
   if (error) throw error;
 }
