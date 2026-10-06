@@ -365,7 +365,7 @@ async function createNewProductsAndRefreshCatalog(
   let from = 0
   const PAGE_SIZE = 1000
   while (true) {
-    const { data, error } = await supabase.from('service_products').select('id, sku').range(from, from + PAGE_SIZE - 1)
+    const { data, error } = await supabase.from('service_products').select('id, sku').order('id').range(from, from + PAGE_SIZE - 1)
     if (error) throw new Error(error.message)
     ;(data || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
     if (!data || data.length < PAGE_SIZE) break
@@ -447,7 +447,7 @@ export async function resolveNewProductSkus(
     let from = 0
     const PAGE_SIZE = 1000
     while (true) {
-      const { data, error } = await supabase.from('service_products').select('id, name').range(from, from + PAGE_SIZE - 1)
+      const { data, error } = await supabase.from('service_products').select('id, name').order('id').range(from, from + PAGE_SIZE - 1)
       if (error) throw new Error(`Gagal ambil katalog produk (nama): ${error.message}`)
       ;(data || []).forEach((p: any) => {
         const key = normalizeNameForMatch(p.name)
@@ -551,7 +551,7 @@ export async function syncAccurateForBranch(
     let from = 0
     const PAGE_SIZE = 1000
     while (true) {
-      const { data, error } = await supabase.from('service_products').select('id, sku, name').range(from, from + PAGE_SIZE - 1)
+      const { data, error } = await supabase.from('service_products').select('id, sku, name').order('id').range(from, from + PAGE_SIZE - 1)
       if (error) throw new Error(error.message)
       ;(data || []).forEach((p: any) => {
         productIdBySku.set(normalizeSku(p.sku), p.id)
@@ -572,14 +572,28 @@ export async function syncAccurateForBranch(
     const CONCURRENCY = 15
     const allDetails: { no: string; name: string; balance: number; kategori: string | null }[] = []
     let failedIds: number[] = itemIds
+    // FIX 6 Okt 2026 -- BUG (Purwokerto, 1646 item): dulu kalau waktu
+    // habis di tahap ini, sync LANGSUNG dilempar error -> 1228 item yang
+    // SUDAH terambil dibuang semua, stok Purwokerto tidak ter-update sama
+    // sekali. Sekarang: berhenti ambil detail ~45 detik sebelum batas
+    // (sisa waktu buat nulis ke database), lalu item yang sudah terambil
+    // TETAP ditulis. Item yang belum terambil dihitung "gagal" -> otomatis
+    // cleanup data basi DILEWATI (lihat `detailFetchFailed === 0` di
+    // bawah), jadi stok lamanya tidak terhapus.
+    const fetchDeadline = deadlineAt - 45_000
+    let timedOut = false
     // Coba sampai 3x total (1 percobaan awal + 2 retry) — kegagalan
     // ambil detail sering cuma sementara (rate limit sesaat, koneksi
     // putus-nyambung), jadi diulang dulu sebelum beneran dianggap
     // gagal permanen.
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 3 && !timedOut; attempt++) {
       const stillFailed: number[] = []
       for (let i = 0; i < failedIds.length; i += CONCURRENCY) {
-        assertTimeLeft(deadlineAt, 'ambil detail item', `${allDetails.length} dari ${itemIds.length} item sudah terambil, putaran ke-${attempt}`)
+        if (Date.now() > fetchDeadline) {
+          timedOut = true
+          stillFailed.push(...failedIds.slice(i))
+          break
+        }
         const batch = failedIds.slice(i, i + CONCURRENCY)
         const details = await Promise.all(batch.map((id) => fetchItemDetail(conn, id)))
         details.forEach((detail, idx) => {
@@ -588,10 +602,14 @@ export async function syncAccurateForBranch(
         })
       }
       failedIds = stillFailed
-      if (failedIds.length === 0) break
+      if (failedIds.length === 0 || timedOut) break
       if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 1500)) // jeda sebentar sebelum retry
     }
     detailFetchFailed = failedIds.length
+    // Waktu habis TANPA satu item pun terambil -> tidak ada yang bisa ditulis.
+    if (timedOut && allDetails.length === 0) {
+      assertTimeLeft(0, 'ambil detail item', `0 dari ${itemIds.length} item terambil`)
+    }
 
     // Pisahkan dulu: item KONSI (K) dipetakan ke SKU/nama DASARNYA
     // (suffix dibuang), item normal tetap pakai SKU aslinya. SKU angka
@@ -798,7 +816,9 @@ export async function syncAccurateForBranch(
 
     const totalSkipped = itemsSkipped + detailFetchFailed
     const notes: string[] = []
-    if (detailFetchFailed > 0) {
+    if (timedOut) {
+      notes.push(`Waktu habis: ${allDetails.length} dari ${itemIds.length} item sudah diperbarui, ${detailFetchFailed} item sisanya BELUM (stok lamanya tetap, tidak dihapus). Jalankan sync cabang ini lagi.`)
+    } else if (detailFetchFailed > 0) {
       notes.push(`${detailFetchFailed} item gagal diambil detailnya (kemungkinan kuota API atau item bermasalah), dilewati.`)
     }
     if (newProductsCreated > 0) {
@@ -810,10 +830,13 @@ export async function syncAccurateForBranch(
     await supabase
       .from('stock_sync_log')
       .update({
-        status: 'success',
+        // Waktu habis = sebagian saja -> tetap tampil "Gagal" di Riwayat
+        // Stok supaya kelihatan perlu dijalankan ulang, walau data yang
+        // sudah terambil sudah tersimpan.
+        status: timedOut ? 'error' : 'success',
         items_updated: itemsUpdated,
         items_skipped: totalSkipped,
-        error_message: notes.length > 0 ? `Info: ${notes.join(' | ')}` : null,
+        error_message: notes.length > 0 ? `${timedOut ? 'Sebagian' : 'Info'}: ${notes.join(' | ')}` : null,
         finished_at: new Date().toISOString(),
       })
       .eq('id', logId)
@@ -950,7 +973,7 @@ export async function syncAccurateSoloMultiGudang(
       let from = 0
       const PAGE_SIZE = 1000
       while (true) {
-        const { data, error } = await supabase.from('service_products').select('id, sku, name').range(from, from + PAGE_SIZE - 1)
+        const { data, error } = await supabase.from('service_products').select('id, sku, name').order('id').range(from, from + PAGE_SIZE - 1)
         if (error) throw new Error(error.message)
         ;(data || []).forEach((p: any) => {
           productIdBySku.set(normalizeSku(p.sku), p.id)
