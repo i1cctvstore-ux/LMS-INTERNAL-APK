@@ -282,7 +282,7 @@ export async function syncZohoForBranch(
       const { data, error } = await supabase
         .from('service_products')
         .select('id, sku, name')
-        .range(from, from + PAGE_SIZE - 1)
+        .order('id').range(from, from + PAGE_SIZE - 1)
       if (error) throw new Error(error.message)
       ;(data || []).forEach((p: any) => {
         productIdBySku.set(normalizeSku(p.sku), p.id)
