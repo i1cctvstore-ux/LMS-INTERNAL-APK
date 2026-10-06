@@ -22,6 +22,28 @@ export type SyncLogRow = {
 
 // Ambil stok per cabang, lewat paging (jumlah produk sudah pernah lebih
 // dari 1000 — sama seperti perbaikan yang sama di lib/service/api.ts).
+// FIX 6 Okt 2026 -- helper paging katalog produk (id, sku). Dipakai
+// upload Stok Supplier & Koreksi Stok Cabang yang dulu ambil
+// service_products TANPA paging -> cuma 1000 produk pertama terbaca,
+// SKU sisanya dianggap "tidak ada di katalog" dan DILEWATI diam-diam.
+async function fetchAllProductIdSku(supabase: ReturnType<typeof createClient>): Promise<{ id: string; sku: string }[]> {
+  const rows: { id: string; sku: string }[] = []
+  const PAGE = 1000
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase.from('service_products').select('id, sku').order('id').range(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    rows.push(...((data || []) as any[]))
+    if (!data || data.length < PAGE) break
+  }
+  return rows
+}
+
+// Karakter yang punya arti khusus di filter .or() PostgREST (koma,
+// kurung) bikin query error kalau diketik user (mis. cari "(K)").
+export function sanitizeOrSearch(q: string): string {
+  return (q || '').replace(/[,()*%\\]/g, ' ').trim()
+}
+
 export async function loadStockForBranch(branchId: string): Promise<StockRow[]> {
   const supabase = createClient()
   const rows: StockRow[] = []
@@ -32,6 +54,7 @@ export async function loadStockForBranch(branchId: string): Promise<StockRow[]> 
       .from('product_stock')
       .select('product_id, qty_on_hand, service_products(sku, name)')
       .eq('branch_id', branchId)
+      .order('product_id')
       .range(from, from + PAGE - 1)
     if (error) throw new Error(error.message)
     ;(data || []).forEach((r: any) => {
@@ -179,7 +202,7 @@ export async function searchSupplierStock(query: string): Promise<SupplierStockP
       const { data, error } = await supabase
         .from('service_products')
         .select('id, sku, name, kategori, subjenis, supplier_stock!inner(gudang, qty, updated_at, service_suppliers(name))')
-        .range(from, from + PAGE - 1)
+        .order('id').range(from, from + PAGE - 1)
       if (error) throw new Error(error.message)
       allRows.push(...(data || []))
       if (!data || data.length < PAGE) break
@@ -237,11 +260,10 @@ export async function uploadSupplierStockPaste(
 ): Promise<PasteResult> {
   const supabase = createClient()
 
-  const [{ data: products, error: pErr }, { data: suppliers, error: sErr }] = await Promise.all([
-    supabase.from('service_products').select('id, sku'),
+  const [products, { data: suppliers, error: sErr }] = await Promise.all([
+    fetchAllProductIdSku(supabase),
     supabase.from('service_suppliers').select('id, name'),
   ])
-  if (pErr) throw new Error(pErr.message)
   if (sErr) throw new Error(sErr.message)
 
   const productIdBySku = new Map<string, string>()
@@ -345,7 +367,7 @@ export async function resolveSupplierRows(
       const { data, error: pErr } = await supabase
         .from('service_products')
         .select('id, sku, name')
-        .range(from, from + PAGE - 1)
+        .order('id').range(from, from + PAGE - 1)
       if (pErr) throw new Error(pErr.message)
       products.push(...(data || []))
       if (!data || data.length < PAGE) break
@@ -456,7 +478,7 @@ export async function bulkCreateProductsAndMap(
     const PAGE = 1000
     let from = 0
     while (true) {
-      const { data, error } = await supabase.from('service_products').select('id, sku, name').range(from, from + PAGE - 1)
+      const { data, error } = await supabase.from('service_products').select('id, sku, name').order('id').range(from, from + PAGE - 1)
       if (error) throw new Error(error.message)
       ;(data || []).forEach((p: any) => {
         existingSkuSet.add(normalizeSku(p.sku))
@@ -603,7 +625,7 @@ export async function searchProductsForMapping(query: string): Promise<ProductSe
   const { data, error } = await supabase
     .from('service_products')
     .select('id, sku, name')
-    .or(`name.ilike.%${q}%,sku.ilike.%${q}%`)
+    .or(`name.ilike.%${sanitizeOrSearch(q)}%,sku.ilike.%${sanitizeOrSearch(q)}%`)
     .limit(20)
   if (error) throw new Error(error.message)
   return (data || []).map((p: any) => ({ id: p.id, sku: p.sku || '', name: p.name }))
@@ -630,11 +652,21 @@ export async function uploadSupplierStockFile(
   const supabase = createClient()
 
   // Snapshot angka LAMA punya supplier ini, sebelum ditimpa (buat riwayat).
-  const { data: oldRows, error: oldErr } = await supabase
-    .from('supplier_stock')
-    .select('product_id, gudang, qty')
-    .eq('supplier_id', supplierId)
-  if (oldErr) throw new Error(oldErr.message)
+  // 6 Okt 2026: di-paging -- supplier dengan > 1000 baris stok dulu
+  // cuma tersimpan 1000 baris pertama di snapshot riwayat.
+  const oldRows: any[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data: page, error: oldErr } = await supabase
+      .from('supplier_stock')
+      .select('product_id, gudang, qty')
+      .eq('supplier_id', supplierId)
+      .order('product_id')
+      .order('gudang')
+      .range(from, from + 999)
+    if (oldErr) throw new Error(oldErr.message)
+    oldRows.push(...(page || []))
+    if (!page || page.length < 1000) break
+  }
 
   // syncTimestamp diambil SEKALI, dipakai jadi updated_at SEMUA baris
   // yang ditulis upload ini — biar bisa jadi "batas" buat cleanup di
@@ -700,8 +732,7 @@ export async function uploadBranchStockCorrection(
 ): Promise<PasteResult> {
   const supabase = createClient()
 
-  const { data: products, error: pErr } = await supabase.from('service_products').select('id, sku')
-  if (pErr) throw new Error(pErr.message)
+  const products = await fetchAllProductIdSku(supabase)
   const productIdBySku = new Map<string, string>()
   ;(products || []).forEach((p: any) => productIdBySku.set(normalizeSku(p.sku), p.id))
 
@@ -806,11 +837,16 @@ export async function loadStockMatrix(): Promise<StockMatrixData> {
   const supabase = createClient()
   const PAGE = 1000
 
-  async function fetchAllPaged(table: string, select: string, extra?: (q: any) => any) {
+  // 6 Okt 2026: paging WAJIB pakai ORDER BY yang unik -- tanpa itu
+  // Postgres tidak menjamin urutan antar halaman (apalagi kalau sync
+  // sedang menulis), jadi bisa ada baris dobel/kelewat di matriks stok.
+  async function fetchAllPaged(table: string, select: string, extra?: (q: any) => any, orderCols: string[] = ['id']) {
     const rows: any[] = []
     let from = 0
     while (true) {
-      let q = supabase.from(table).select(select).range(from, from + PAGE - 1)
+      let q = supabase.from(table).select(select)
+      orderCols.forEach((col) => { q = q.order(col) })
+      q = q.range(from, from + PAGE - 1)
       if (extra) q = extra(q)
       const { data, error } = await q
       if (error) throw new Error(error.message)
@@ -823,7 +859,7 @@ export async function loadStockMatrix(): Promise<StockMatrixData> {
 
   const [productRows, stockRows, claimRows] = await Promise.all([
     fetchAllPaged('service_products', 'id, sku, name, kategori, subjenis'),
-    fetchAllPaged('product_stock', 'branch_id, product_id, qty_on_hand'),
+    fetchAllPaged('product_stock', 'branch_id, product_id, qty_on_hand', undefined, ['branch_id', 'product_id']),
     fetchAllPaged('service_claims', 'branch_id, produk_sku, status', (q) => q.neq('status', 'Selesai')),
   ])
 
@@ -1065,7 +1101,7 @@ export async function findDuplicateProductGroups(): Promise<DuplicateProductGrou
     const PAGE = 1000
     let from = 0
     while (true) {
-      const { data, error } = await supabase.from('service_products').select('id, sku, name, kategori').range(from, from + PAGE - 1)
+      const { data, error } = await supabase.from('service_products').select('id, sku, name, kategori').order('id').range(from, from + PAGE - 1)
       if (error) throw new Error(error.message)
       ;(data || []).forEach((p: any) => products.push({ id: p.id, sku: p.sku || '', name: p.name, kategori: p.kategori }))
       if (!data || data.length < PAGE) break
@@ -1078,7 +1114,7 @@ export async function findDuplicateProductGroups(): Promise<DuplicateProductGrou
     const PAGE = 1000
     let from = 0
     while (true) {
-      const { data, error } = await supabase.from('product_stock').select('product_id, qty_on_hand').range(from, from + PAGE - 1)
+      const { data, error } = await supabase.from('product_stock').select('product_id, qty_on_hand').order('branch_id').order('product_id').range(from, from + PAGE - 1)
       if (error) throw new Error(error.message)
       ;(data || []).forEach((r: any) => stockByProduct.set(r.product_id, (stockByProduct.get(r.product_id) || 0) + (Number(r.qty_on_hand) || 0)))
       if (!data || data.length < PAGE) break
