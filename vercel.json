@@ -1,8 +1,12 @@
 {
   "crons": [
     {
-      "path": "/api/stok/sync-accurate",
+      "path": "/api/stok/sync-accurate?branch=jakarta",
       "schedule": "0 20 * * *"
+    },
+    {
+      "path": "/api/stok/sync-accurate?branch=purwokerto",
+      "schedule": "10 20 * * *"
     },
     {
       "path": "/api/stok/sync-accurate-solo-konsi",
