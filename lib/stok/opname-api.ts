@@ -97,12 +97,26 @@ export async function getSessionDetail(
     .single();
   if (sessionErr) throw sessionErr;
 
-  const { data: items, error: itemsErr } = await supabase
-    .from("stock_opname_items")
-    .select("id, session_id, product_id, kategori, nama, saldo_snapshot, real")
-    .eq("session_id", sessionId)
-    .order("nama", { ascending: true });
-  if (itemsErr) throw itemsErr;
+  // FIX 6 Okt 2026 -- BUG batas 1000 baris: dulu tanpa paging, jadi sesi
+  // opname cabang dengan > 1000 barang (mis. Purwokerto ~1600) cuma
+  // tampil 1000 barang pertama (urut nama) -- sisanya hilang dari lembar
+  // hitung & cetakan. Sama seperti fix di lib/stok-opname/api.ts.
+  const items: any[] = [];
+  {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error: itemsErr } = await supabase
+        .from("stock_opname_items")
+        .select("id, session_id, product_id, kategori, nama, saldo_snapshot, real")
+        .eq("session_id", sessionId)
+        .order("nama", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (itemsErr) throw itemsErr;
+      items.push(...(page ?? []));
+      if (!page || page.length < PAGE) break;
+    }
+  }
 
   return {
     session: { ...(session as any), branch_nama: (session as any).branches?.name },
@@ -113,12 +127,22 @@ export async function getSessionDetail(
 /** Daftar kategori master, untuk sheet "Pilih Kategori" saat opname baru & filter kategori di halaman detail. */
 export async function listCatalogCategories(): Promise<string[]> {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("service_products")
-    .select("kategori")
-    .not("kategori", "is", null);
-  if (error) throw error;
-  const set = new Set<string>((data ?? []).map((r: any) => r.kategori).filter(Boolean));
+  // FIX 6 Okt 2026 -- sama dengan bug "kategori HILOOK hilang" yang sudah
+  // diperbaiki di lib/stok-opname/api.ts: tanpa paging cuma 1000 produk
+  // pertama yang dibaca, kategori yang produknya di luar itu tidak muncul.
+  const set = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("service_products")
+      .select("kategori")
+      .not("kategori", "is", null)
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    (data ?? []).forEach((r: any) => { if (r.kategori) set.add(r.kategori); });
+    if (!data || data.length < PAGE) break;
+  }
   return [...set].sort();
 }
 
