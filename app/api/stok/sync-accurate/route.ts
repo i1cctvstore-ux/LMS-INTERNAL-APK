@@ -9,7 +9,7 @@ export const maxDuration = 300 // detik (5 menit)
 import { createClient } from '@/lib/supabase/server'
 import { getAccurateBranchConfigs, syncAccurateForBranch } from '@/lib/stok/accurate-sync'
 
-async function runSync(branchIdFilter?: string, createdBy?: string) {
+async function runSync(branchIdFilter?: string, createdBy?: string, trigger?: 'manual' | 'cron') {
   // 2026-09: SEMUA cabang jalan berurutan dalam 1 function (maxDuration
   // 300 detik) -- batas waktunya dipakai bersama. Cabang yang kehabisan
   // waktu berhenti rapi & tercatat "Gagal" di Riwayat Stok (bukan
@@ -22,7 +22,7 @@ async function runSync(branchIdFilter?: string, createdBy?: string) {
   const results = []
   for (const config of configs) {
     try {
-      const r = await syncAccurateForBranch(config, branchIdFilter ? 'manual' : 'cron', createdBy, deadlineAt)
+      const r = await syncAccurateForBranch(config, trigger || (branchIdFilter ? 'manual' : 'cron'), createdBy, deadlineAt)
       results.push({ ...r, status: 'success' as const })
     } catch (err: any) {
       results.push({ branchName: config.branchName, status: 'error' as const, message: String(err?.message || err) })
@@ -37,7 +37,23 @@ export async function GET(request: Request) {
   if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return Response.json({ message: 'Unauthorized.' }, { status: 401 })
   }
-  const result = await runSync()
+  // FIX 6 Okt 2026 -- cron dipecah PER CABANG (?branch=jakarta /
+  // ?branch=purwokerto, lihat vercel.json). Dulu 1 cron menjalankan
+  // semua cabang berurutan dalam 1 function, berbagi 270 detik yang
+  // sama -- Purwokerto (1646 item) jalan SETELAH Jakarta, sisa waktunya
+  // tidak cukup -> "Waktu habis di tahap ambil detail item". Sekarang
+  // tiap cabang dapat function & batas waktu sendiri.
+  // Tanpa ?branch tetap jalan semua cabang (perilaku lama).
+  const branchParam = new URL(request.url).searchParams.get('branch')?.trim().toLowerCase()
+  let branchId: string | undefined
+  if (branchParam) {
+    const configs = await getAccurateBranchConfigs()
+    branchId = configs.find((c) => c.branchName.toLowerCase() === branchParam || c.branchId === branchParam)?.branchId
+    if (!branchId) {
+      return Response.json({ message: `Cabang "${branchParam}" tidak ditemukan / belum dikonfigurasi Accurate.` }, { status: 400 })
+    }
+  }
+  const result = await runSync(branchId, undefined, 'cron')
   return Response.json(result)
 }
 
