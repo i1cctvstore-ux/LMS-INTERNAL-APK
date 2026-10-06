@@ -9,6 +9,7 @@
 // GitHub kalau mau (bukan bagian permanen dari fitur sync).
 
 import { NextRequest, NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/supabase/require-admin'
 
 const ACCOUNT_BASE_URL = 'https://account.accurate.id'
 
@@ -17,6 +18,13 @@ function basicAuthHeader(clientId: string, clientSecret: string): string {
 }
 
 export async function GET(req: NextRequest) {
+  // FIX 6 Okt 2026 -- KEAMANAN: /api tidak dilindungi middleware login,
+  // jadi endpoint ini dulu bisa dibuka SIAPA SAJA yang tahu URL-nya (tanpa
+  // login) -- memakai token Accurate & menghabiskan kuota API harian.
+  // Sekarang hanya Super Admin yang sudah login.
+  const auth = await requireAdmin()
+  if ('error' in auth) return auth.error
+
   const branchId = req.nextUrl.searchParams.get('branchId')
   if (!branchId) {
     return NextResponse.json({ error: 'Tambahkan ?branchId=<uuid cabang> di URL.' }, { status: 400 })
