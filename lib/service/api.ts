@@ -484,20 +484,35 @@ async function fetchAllRows<T = any>(
 export async function loadServiceData(branchId: string): Promise<ServiceData> {
   const supabase = createClient()
 
+  // FIX 6 Okt 2026 -- BUG batas 1000 baris Supabase/PostgREST: query di
+  // bawah dulu TANPA paging, jadi begitu 1 cabang punya > 1000 klaim /
+  // invoice / log sparepart / customer, sisanya DIAM-DIAM tidak termuat
+  // (klaim lama hilang dari daftar, invoice lama tidak ketemu -> barang
+  // yang sudah diinvoice muncul "Perlu Invoice" lagi, dst). Sekarang
+  // semua yang bisa tumbuh tanpa batas diambil lewat fetchAllRows.
+  // Urutan ditambah `id` sebagai pemecah seri supaya paging stabil
+  // (tidak ada baris dobel/kelewat antar halaman).
+  const paged = async (qb: () => any) => {
+    try {
+      return { data: await fetchAllRows<any>(qb), error: null as any }
+    } catch (e: any) {
+      return { data: null as any[] | null, error: { message: String(e?.message || e) } }
+    }
+  }
   const [claimsRes, batchesRes, invoicesRes, setoranRes, sparepartsRes, sparepartStockRes, customersRes, stockLogRes, settingsRes, brandsRes] =
     await Promise.all([
-      supabase.from('service_claims').select('*').eq('branch_id', branchId).order('tanggal_terima', { ascending: false }),
-      supabase.from('service_batches').select('*').eq('branch_id', branchId).order('tanggal_kirim', { ascending: false }),
-      supabase.from('service_invoices').select('*').eq('branch_id', branchId).order('date', { ascending: false }),
-      supabase.from('service_setoran').select('*').eq('branch_id', branchId).order('tanggal', { ascending: false }),
+      paged(() => supabase.from('service_claims').select('*').eq('branch_id', branchId).order('tanggal_terima', { ascending: false }).order('id')),
+      paged(() => supabase.from('service_batches').select('*').eq('branch_id', branchId).order('tanggal_kirim', { ascending: false }).order('id')),
+      paged(() => supabase.from('service_invoices').select('*').eq('branch_id', branchId).order('date', { ascending: false }).order('id')),
+      paged(() => supabase.from('service_setoran').select('*').eq('branch_id', branchId).order('tanggal', { ascending: false }).order('id')),
       // Katalog sparepart (nama+satuan) sekarang BERSAMA (semua cabang);
       // qty-nya dari tabel terpisah sparepart_stock, per cabang.
-      supabase.from('service_spareparts').select('*').order('name'),
-      supabase.from('sparepart_stock').select('sparepart_id, qty').eq('branch_id', branchId),
-      supabase.from('service_customers').select('*').eq('branch_id', branchId).order('name'),
-      supabase.from('service_sparepart_stock_log').select('*').eq('branch_id', branchId).order('created_at', { ascending: false }),
+      paged(() => supabase.from('service_spareparts').select('*').order('name').order('id')),
+      paged(() => supabase.from('sparepart_stock').select('sparepart_id, qty').eq('branch_id', branchId).order('sparepart_id')),
+      paged(() => supabase.from('service_customers').select('*').eq('branch_id', branchId).order('name').order('id')),
+      paged(() => supabase.from('service_sparepart_stock_log').select('*').eq('branch_id', branchId).order('created_at', { ascending: false }).order('id')),
       supabase.from('service_settings').select('*').eq('branch_id', branchId).maybeSingle(),
-      supabase.from('service_brands').select('name').order('name'),
+      paged(() => supabase.from('service_brands').select('name').order('name')),
     ])
 
   // Produk & Supplier sekarang katalog BERSAMA (semua cabang, TIDAK
@@ -752,7 +767,7 @@ async function fetchAllExistingSkus(supabase: ReturnType<typeof createClient>): 
     const { data, error } = await supabase
       .from('service_products')
       .select('sku')
-      .range(from, from + PAGE_SIZE - 1)
+      .order('id').range(from, from + PAGE_SIZE - 1)
     if (error) throw new Error(error.message)
     ;(data || []).forEach((r: any) => skuSet.add(normalizeSku(r.sku)))
     if (!data || data.length < PAGE_SIZE) break
