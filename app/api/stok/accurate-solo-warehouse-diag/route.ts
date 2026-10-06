@@ -11,11 +11,19 @@
 
 import { NextResponse } from 'next/server'
 import { connectToAccurateBranch } from '@/lib/stok/accurate-sync'
+import { requireAdmin } from '@/lib/supabase/require-admin'
 
 const SOLO_BRANCH_ID = 'ff24cbd3-f11a-4f12-b658-88ff40b1a8e3' // dipakai sebagai kunci token tersimpan
 const SOLO_DB_ID = process.env.ACCURATE_DB_ID_SOLO || ''
 
 export async function GET() {
+  // FIX 6 Okt 2026 -- KEAMANAN: /api tidak dilindungi middleware login,
+  // jadi endpoint ini dulu bisa dibuka SIAPA SAJA yang tahu URL-nya (tanpa
+  // login) -- memakai token Accurate & menghabiskan kuota API harian.
+  // Sekarang hanya Super Admin yang sudah login.
+  const auth = await requireAdmin()
+  if ('error' in auth) return auth.error
+
   if (!SOLO_DB_ID) {
     return NextResponse.json({ error: 'Env var ACCURATE_DB_ID_SOLO belum diisi.' }, { status: 400 })
   }
