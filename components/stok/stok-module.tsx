@@ -1783,7 +1783,11 @@ function StokDestyTab() {
       {showDestyUpload && (
         <DestyUploadModal
           onClose={() => setShowDestyUpload(false)}
-          onUploaded={(count) => { setDestyCount(count); loadDestyList() }}
+          onUploaded={() => {
+            // FIX 6 Okt 2026: dulu panggil setDestyCount() yang TIDAK ADA -> error,
+            // daftar Desty tidak ter-refresh setelah upload. destyCount dihitung dari destySkuList.
+            loadDestyList()
+          }}
         />
       )}
     </div>
