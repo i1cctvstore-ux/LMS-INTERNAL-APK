@@ -130,6 +130,9 @@ export async function getSessionDetail(
       .select("id, session_id, product_id, kategori, nama, saldo_snapshot, accounts, real, catatan, keputusan_selisih")
       .eq("session_id", sessionId)
       .order("nama", { ascending: true })
+      // 6 Okt 2026: pemecah seri -- nama barang bisa kembar, tanpa ini
+      // paging bisa dobel/kelewat 1 baris di batas halaman.
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (itemsErr) throw itemsErr;
     items.push(...(page ?? []));
@@ -183,7 +186,7 @@ export async function listCatalogCategories(): Promise<string[]> {
     const { data, error } = await supabase
       .from("service_products")
       .select("kategori")
-      .range(from, from + PAGE_SIZE - 1);
+      .order('id').range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
     (data ?? []).forEach((r: any) => allKategori.push(r.kategori ? r.kategori : "Tanpa Kategori"));
     if (!data || data.length < PAGE_SIZE) break;
