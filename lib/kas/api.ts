@@ -9,11 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 // Field di sisi app pakai camelCase, kolom database pakai snake_case —
 // fungsi *FromRow() di bawah yang menjembatani konversinya.
 //
-// Catatan: query select di bawah TIDAK pakai .range() pagination —
-// wajar untuk buku kas 1 cabang (jumlah baris masih jauh dari limit
-// default Supabase 1000 baris). Kalau nanti volumenya sangat besar,
-// tambahkan filter periode di level query (bukan cuma di UI) seperti
-// yang sudah pernah jadi masalah di modul Stok.
+// Catatan: select entri kas di-paging (fetchAllKasRows) sejak 6 Okt 2026.
 // =====================================================
 
 export type KasBukuEntryType = 'masuk' | 'setor'
@@ -128,18 +124,35 @@ function umFromRow(row: any): KasUmEntry {
   }
 }
 
+
+// FIX 6 Okt 2026 -- paging. Dulu TANPA .range(): begitu 1 cabang punya
+// > 1000 entri (buku kas harian gampang tembus dalam setahun), entri
+// paling lama DIAM-DIAM tidak termuat -> SALDO yang dihitung dari semua
+// entri jadi salah tanpa ada tanda error. Sekarang diambil per 1000.
+async function fetchAllKasRows(table: string, branchId: string): Promise<any[]> {
+  const supabase = createClient()
+  const rows: any[] = []
+  const PAGE = 1000
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .eq('branch_id', branchId)
+      .order('tanggal', { ascending: false })
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    rows.push(...(data ?? []))
+    if (!data || data.length < PAGE) break
+  }
+  return rows
+}
+
 // ================= Buku Kas =================
 
 export async function fetchKasBukuEntries(branchId: string): Promise<KasBukuEntry[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase
-    .from('kas_buku_entries')
-    .select('*')
-    .eq('branch_id', branchId)
-    .order('tanggal', { ascending: false })
-    .order('created_at', { ascending: false })
-  if (error) throw new Error(error.message)
-  return (data ?? []).map(bukuFromRow)
+  return (await fetchAllKasRows('kas_buku_entries', branchId)).map(bukuFromRow)
 }
 
 export type CreateKasBukuMasukInput = {
@@ -244,15 +257,7 @@ export async function deleteKasBukuEntry(id: string): Promise<void> {
 // ================= Kas Kecil =================
 
 export async function fetchKasKecilEntries(branchId: string): Promise<KasKecilEntry[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase
-    .from('kas_kecil_entries')
-    .select('*')
-    .eq('branch_id', branchId)
-    .order('tanggal', { ascending: false })
-    .order('created_at', { ascending: false })
-  if (error) throw new Error(error.message)
-  return (data ?? []).map(kecilFromRow)
+  return (await fetchAllKasRows('kas_kecil_entries', branchId)).map(kecilFromRow)
 }
 
 export type CreateKasKecilMasukInput = {
@@ -350,15 +355,7 @@ export async function deleteKasKecilEntry(id: string): Promise<void> {
 // ================= Kas UM & Reimburse =================
 
 export async function fetchKasUmEntries(branchId: string): Promise<KasUmEntry[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase
-    .from('kas_um_reimburse_entries')
-    .select('*')
-    .eq('branch_id', branchId)
-    .order('tanggal', { ascending: false })
-    .order('created_at', { ascending: false })
-  if (error) throw new Error(error.message)
-  return (data ?? []).map(umFromRow)
+  return (await fetchAllKasRows('kas_um_reimburse_entries', branchId)).map(umFromRow)
 }
 
 export type CreateKasUmMasukInput = {
