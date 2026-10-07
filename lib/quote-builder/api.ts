@@ -300,6 +300,7 @@ function mapAlternativeRow(row: QuoteAlternativeRow & { quote_items: QuoteItemRo
     vatMode: row.vat_mode,
     usePackagePrice: row.use_package_price,
     packagePrice: Number(row.package_price ?? 0),
+    hidePrices: Boolean(row.hide_prices),
     includeInGrandTotal: row.include_in_grand_total,
     items: [...row.quote_items]
       .sort((a, b) => a.sort_order - b.sort_order)
@@ -415,6 +416,31 @@ export async function saveQuoteFull(
     p_notes: input.notes.map((note, index) => ({ sort_order: index, text: note.text })),
   });
   if (error) throw error;
+
+  // "Harga tidak ditampilkan" per ALT -- kolom quote_alternatives.hide_prices
+  // (migration 20261007000000). RPC save_quote_full belum tahu kolom ini, jadi
+  // ditulis terpisah per urutan ALT. Kalau migration belum dijalankan, dan tidak
+  // ada ALT yang memakai fitur ini, diam saja; kalau ada, beri pesan jelas.
+  const hideFlags = input.alternatives.map((alt) => alt.hidePrices);
+  const needsHide = hideFlags.some(Boolean);
+  for (let i = 0; i < hideFlags.length; i++) {
+    const { data: updated, error: hideError } = await supabase
+      .from("quote_alternatives")
+      .update({ hide_prices: hideFlags[i] })
+      .eq("quote_id", quoteId)
+      .eq("sort_order", i)
+      .select("id");
+    if (hideError || !updated || updated.length === 0) {
+      if (needsHide) {
+        throw new Error(
+          hideError?.message?.includes("hide_prices")
+            ? "Fitur 'Harga tidak ditampilkan' butuh migration 20261007000000_quote_alt_hide_prices.sql dijalankan di Supabase dulu."
+            : `Gagal menyimpan pengaturan 'Harga tidak ditampilkan' untuk ALT ${i + 1}: ${hideError?.message ?? "tidak ada baris yang berubah (cek izin)"}`,
+        );
+      }
+      break;
+    }
+  }
 
   if (input.clientAddress !== undefined) {
     const { error: addressError } = await supabase
