@@ -32,6 +32,8 @@ export type Alternative = {
   vatMode: VatMode;
   usePackagePrice: boolean;
   packagePrice: number;
+  /** true = harga satuan/jumlah item tidak dicetak di dokumen ALT ini (total tetap tampil). */
+  hidePrices: boolean;
   includeInGrandTotal: boolean;
 };
 
