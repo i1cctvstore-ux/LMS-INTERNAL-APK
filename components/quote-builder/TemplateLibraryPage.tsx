@@ -28,6 +28,7 @@ import {
 } from "@/lib/quote-builder/api";
 import type { Product } from "@/lib/quote-builder/quoteTypes";
 import type { TemplateRow } from "@/lib/quote-builder/database.types";
+import { buildPresetSlotQty, getPaketConfig, listBranchPrices, type Jenis } from "@/lib/paket-cctv/api";
 
 const formatIDR = (value: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value);
 
@@ -67,6 +68,8 @@ export default function TemplateLibraryPage({ onUseTemplate }: TemplateLibraryPa
   const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [listQuery, setListQuery] = useState("");
+  const [importing, setImporting] = useState(false);
 
   const dragKeyRef = useRef<string | null>(null);
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
@@ -263,6 +266,69 @@ export default function TemplateLibraryPage({ onUseTemplate }: TemplateLibraryPa
     }
   };
 
+  // ---------------- impor dari Paket CCTV ----------------
+  // Membuat template dari preset Kalkulator Paket CCTV (jenis x brand x 1/2/4/8/16 kamera)
+  // untuk cabang aktif. Slot paket dicocokkan ke produk katalog lewat nama (persis, lalu
+  // saling-mengandung). Template yang namanya sudah ada dilewati -> aman dijalankan ulang.
+  const importFromPaket = async () => {
+    if (!branchId || !session || importing) return;
+    if (!window.confirm("Buat template otomatis dari preset Paket CCTV untuk cabang ini? Template dengan nama yang sudah ada akan dilewati.")) return;
+    setImporting(true);
+    try {
+      const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const [config, branchPrices] = await Promise.all([getPaketConfig(), listBranchPrices(branchId)]);
+      const catNorm = catalog.map((product) => ({ product, n: norm(product.name) }));
+      const priceBySlot = new Map(branchPrices.map((price) => [price.slot_key, price]));
+      const matchCache = new Map<string, Product | null>();
+      const matchSlot = (slotKey: string): Product | null => {
+        if (matchCache.has(slotKey)) return matchCache.get(slotKey) ?? null;
+        const nama = priceBySlot.get(slotKey)?.nama ?? "";
+        const n = norm(nama);
+        let found: Product | null = null;
+        if (n) {
+          found = catNorm.find((c) => c.n === n)?.product ?? catNorm.find((c) => c.n.includes(n) || n.includes(c.n))?.product ?? null;
+        }
+        matchCache.set(slotKey, found);
+        return found;
+      };
+      const existing = new Set(templates.map((t) => t.name.trim().toLowerCase()));
+      let created = 0, skipped = 0, empty = 0;
+      const missing = new Set<string>();
+      for (const jenis of Object.keys(config.brands) as Jenis[]) {
+        const jenisDef = config.brands[jenis];
+        for (const [brandKey, brand] of Object.entries(jenisDef.brands)) {
+          for (const qty of [1, 2, 4, 8, 16]) {
+            const name = `Paket ${qty} Kamera ${brand.label} (${jenisDef.label})`;
+            if (existing.has(name.toLowerCase())) { skipped++; continue; }
+            const recipe = buildPresetSlotQty(jenisDef, brandKey, qty, config.cable_meter_per_camera);
+            const merged = new Map<string, number>();
+            const lost: string[] = [];
+            for (const row of recipe) {
+              const product = matchSlot(row.slot_key);
+              if (!product) { lost.push(priceBySlot.get(row.slot_key)?.nama ?? row.slot_key); continue; }
+              merged.set(product.id, (merged.get(product.id) ?? 0) + row.qty);
+            }
+            lost.forEach((l) => missing.add(l));
+            if (merged.size === 0) { empty++; continue; }
+            const tpl = await createTemplate(branchId, name, session.user.id);
+            await updateTemplate(tpl.id, { name, description: lost.length ? `Diimpor dari Paket CCTV. Belum ada di katalog: ${lost.join(", ")}` : "Diimpor dari Paket CCTV" });
+            await replaceTemplateItems(tpl.id, [...merged.entries()].map(([productId, q]) => ({ productId, qty: q })));
+            created++;
+          }
+        }
+      }
+      await reloadList();
+      toast.success(`Impor selesai: ${created} template dibuat, ${skipped} sudah ada${empty ? `, ${empty} dilewati (produk tidak ada di katalog)` : ""}.`, {
+        description: missing.size ? `Belum ada di katalog cabang: ${[...missing].slice(0, 6).join(", ")}${missing.size > 6 ? ` +${missing.size - 6} lagi` : ""}` : undefined,
+        duration: 10000,
+      });
+    } catch (err) {
+      toast.error("Gagal impor dari Paket CCTV.", { description: (err as Error).message });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // ---------------- turunan tampilan ----------------
   const searchResults = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -394,7 +460,7 @@ export default function TemplateLibraryPage({ onUseTemplate }: TemplateLibraryPa
             <h1>Template</h1>
             <p>Paket produk siap pakai untuk mempercepat pembuatan ALT di penawaran. Setiap cabang punya daftar template sendiri.</p>
           </div>
-          <div><button className="save-button" onClick={newTemplate}><Plus size={16} /> Template Baru</button></div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="outline-button" onClick={importFromPaket} disabled={importing}>{importing ? "Mengimpor…" : "Impor dari Paket CCTV"}</button><button className="save-button" onClick={newTemplate}><Plus size={16} /> Template Baru</button></div>
         </div>
 
         <div className="template-list-card">
@@ -402,13 +468,17 @@ export default function TemplateLibraryPage({ onUseTemplate }: TemplateLibraryPa
             <div><h2>Semua template</h2><p>Klik baris untuk mengisi atau mengubah isinya.</p></div>
             <span>{templates.length} template</span>
           </div>
+          <label className="template-product-search" style={{ margin: "0 0 10px" }}>
+            <Search size={17} />
+            <input value={listQuery} onChange={(event) => setListQuery(event.target.value)} placeholder="Cari template…" />
+          </label>
           <p className="template-scroll-hint">Geser tabel ke samping untuk melihat semua kolom</p>
           <div className="template-list-table-wrap">
             <table className="template-list-table">
               <colgroup><col className="template-number-col" /><col className="template-name-col" /><col className="template-items-col" /><col className="template-action-col" /></colgroup>
               <thead><tr><th>NO</th><th>NAMA TEMPLATE</th><th>ISI</th><th /></tr></thead>
               <tbody>
-                {templates.map((template, index) => {
+                {templates.filter((t) => `${t.name} ${t.description ?? ""}`.toLowerCase().includes(listQuery.trim().toLowerCase())).map((template, index) => {
                   const count = counts[template.id] ?? 0;
                   return (
                     <tr key={template.id} onClick={() => openTemplate(template)}>
