@@ -83,6 +83,7 @@ export default function PaketCctvModule({
           (current) =>
             current ??
             active.find((b) => b.id === remembered)?.id ??
+            active.find((b) => b.name.trim().toLowerCase() === "jakarta")?.id ??
             active.find((b) => b.id === currentUserBranchId)?.id ??
             active[0]?.id ??
             null
