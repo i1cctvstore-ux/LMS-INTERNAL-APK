@@ -84,6 +84,7 @@ export type QuoteAlternativeRow = {
   discount_pct: number;
   vat_mode: VatMode;
   use_package_price: boolean;
+  hide_prices?: boolean;
   package_price: number | null;
   include_in_grand_total: boolean;
 };
