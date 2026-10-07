@@ -55,7 +55,7 @@ export default function PaketPrintPreview({
 }: Props) {
   const [branch, setBranch] = useState<BranchWithLetterhead | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"total" | "rinci">("total");
+  // Tampilan ini dibalik ke customer -> hanya total paket, tanpa toggle rinci.
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +96,6 @@ export default function PaketPrintPreview({
   const logoIsBanner = Boolean(branchLogo) && Boolean(usesPpn ? branch?.logo_ppn_is_banner : branch?.logo_non_ppn_is_banner);
 
   const printLines = toPrintLines(lines, jenis);
-  const rinciTotal = printLines.reduce((sum, l) => sum + l.subtotal, 0);
 
   return (
     <div
@@ -104,26 +103,18 @@ export default function PaketPrintPreview({
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(23,27,38,.55)",
-        zIndex: 50,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
+        background: "#fff",
+        zIndex: 99999,
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
       }}
     >
-      <div className="paket-print-card" style={{ background: "#fff", borderRadius: 12, maxWidth: 720, width: "100%", maxHeight: "90vh", overflowY: "auto", padding: 20 }}>
-        <div className="paket-print-toolbar" style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <button type="button" onClick={() => setMode("total")} style={mode === "total" ? tabActive : tabInactive}>
-            Total paket saja
-          </button>
-          <button type="button" onClick={() => setMode("rinci")} style={mode === "rinci" ? tabActive : tabInactive}>
-            Dengan harga rinci
-          </button>
-          <button type="button" onClick={handlePrint} style={{ ...tabActive, marginLeft: "auto", background: "#171b26" }}>
+      <div className="paket-print-card" style={{ background: "#fff", maxWidth: 820, width: "100%", margin: "0 auto", padding: "56px 20px 40px", minHeight: "100%" }}>
+        <div className="paket-print-toolbar" style={{ position: "fixed", top: 10, right: 10, display: "flex", gap: 6, zIndex: 100000, opacity: 0.55 }}>
+          <button type="button" onClick={handlePrint} style={floatBtn}>
             Cetak / PDF
           </button>
-          <button type="button" onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16 }}>
+          <button type="button" onClick={onClose} aria-label="Tutup" style={{ ...floatBtn, width: 40, padding: 0 }}>
             ✕
           </button>
         </div>
@@ -164,7 +155,6 @@ export default function PaketPrintPreview({
             <div style={{ textAlign: "right" }}>
               {quoteNo && <div>No. {quoteNo}</div>}
               <div>{quoteDate}</div>
-              <div style={{ color: "#707786" }}>{custTypeLabel}</div>
             </div>
           </section>
 
@@ -175,7 +165,6 @@ export default function PaketPrintPreview({
                 <th style={th}>Keterangan</th>
                 <th style={th}>Qty</th>
                 <th style={th}>Satuan</th>
-                {mode === "rinci" && <th style={th}>Jumlah</th>}
               </tr>
             </thead>
             <tbody>
@@ -185,16 +174,13 @@ export default function PaketPrintPreview({
                   <td style={td}>{l.nama}</td>
                   <td style={td}>{l.qty}</td>
                   <td style={td}>{l.satuan}</td>
-                  {mode === "rinci" && <td style={td}>{currency(l.subtotal)}</td>}
                 </tr>
               ))}
             </tbody>
           </table>
 
           <div style={{ textAlign: "right", fontSize: 14, fontWeight: 800, marginBottom: 20 }}>
-            TOTAL {mode === "rinci" ? "(RINCI, BELUM DIBULATKAN)" : `(${custTypeLabel.toUpperCase()}, DIBULATKAN)`}
-            {": "}
-            {currency(mode === "rinci" ? rinciTotal : displayTotal)}
+            TOTAL: {currency(displayTotal)}
           </div>
 
           {usesPpn && (
@@ -238,6 +224,7 @@ export default function PaketPrintPreview({
             background: none !important;
             display: block !important;
             padding: 0 !important;
+            overflow: visible !important;
             z-index: auto !important;
           }
           .paket-print-card {
@@ -249,6 +236,7 @@ export default function PaketPrintPreview({
             overflow: visible !important;
             width: 100% !important;
             padding: 0 !important;
+            margin: 0 !important;
             border-radius: 0 !important;
           }
         }
@@ -259,5 +247,4 @@ export default function PaketPrintPreview({
 
 const th = { padding: "6px 8px", fontWeight: 700, color: "#4b5566" };
 const td = { padding: "6px 8px" };
-const tabActive = { padding: "6px 14px", borderRadius: 999, border: "none", background: "#2f6fed", color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer" };
-const tabInactive = { padding: "6px 14px", borderRadius: 999, border: "1px solid #dfe5ed", background: "#fff", fontSize: 12.5, cursor: "pointer" };
+const floatBtn = { height: 40, padding: "0 14px", borderRadius: 999, border: "1px solid #dfe5ed", background: "#fff", color: "#171b26", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,.15)" } as const;
