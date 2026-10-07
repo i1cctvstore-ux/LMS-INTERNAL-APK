@@ -529,11 +529,11 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
   return (
     <div>
       {viewToggle}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 20, padding: 20 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 20, padding: "16px 12px" }}>
       {/* ---------- Panel kiri: pilih preset ---------- */}
-      <div style={{ flex: "0 0 280px", minWidth: 260 }}>
+      <div style={{ flex: "1 1 280px", minWidth: 0, maxWidth: "100%" }}>
         <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Jenis Kamera</h3>
-        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
           {(Object.keys(config.brands) as Jenis[]).map((j) => (
             <button
               key={j}
@@ -545,8 +545,9 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
                 setActivePreset(null);
               }}
               style={{
-                flex: 1,
-                padding: "8px 6px",
+                flex: "1 1 auto",
+                whiteSpace: "nowrap",
+                padding: "8px 10px",
                 borderRadius: 8,
                 border: j === jenis ? "2px solid #2f6fed" : "1px solid #dfe5ed",
                 background: j === jenis ? "#eaf1ff" : "#fff",
@@ -628,7 +629,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
       </div>
 
       {/* ---------- Panel kanan: form paket + tabel item ---------- */}
-      <div style={{ flex: "1 1 480px", minWidth: 320 }}>
+      <div style={{ flex: "1 1 480px", minWidth: 0, maxWidth: "100%" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
           <label style={{ fontSize: 12.5 }}>
             Nama Customer
@@ -675,7 +676,8 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
           </div>
         )}
 
-        <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse", marginBottom: 10 }}>
+        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", marginBottom: 10 }}>
+        <table style={{ width: "100%", minWidth: isSuperAdmin ? 720 : 620, fontSize: 12.5, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ textAlign: "left", borderBottom: "1px solid #dfe5ed" }}>
               <th style={thStyle}>Item</th>
@@ -750,6 +752,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
             )}
           </tbody>
         </table>
+        </div>
 
         <button
           type="button"
