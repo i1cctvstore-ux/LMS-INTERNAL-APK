@@ -857,11 +857,22 @@ export async function loadStockMatrix(): Promise<StockMatrixData> {
     return rows
   }
 
-  const [productRows, stockRows, claimRows] = await Promise.all([
+  const [productRows, stockRows, claimRowsOpen, claimRowsGantiBaru] = await Promise.all([
     fetchAllPaged('service_products', 'id, sku, name, kategori, subjenis'),
     fetchAllPaged('product_stock', 'branch_id, product_id, qty_on_hand', undefined, ['branch_id', 'product_id']),
     fetchAllPaged('service_claims', 'branch_id, produk_sku, status', (q) => q.neq('status', 'Selesai')),
+    // 7 Okt 2026 -- "Ganti Baru - Stok Kita": unit dari stok toko sudah
+    // diberikan ke customer (klaim sudah 'Selesai' setelah diambil), tapi
+    // belum diganti supplier (stok_reimbursed = false). Fisiknya sudah
+    // tidak ada di toko, jadi HARUS ikut mengurangi stok yang tampil --
+    // sama dengan daftar "Ganti Baru - Stok Kita" di menu Inventaris.
+    // Dulu cuma klaim yang belum 'Selesai' yang dihitung, jadi unit-unit
+    // ini tidak pernah mengurangi stok (H1C tampil 16, harusnya 16-2).
+    fetchAllPaged('service_claims', 'branch_id, produk_sku, status', (q) =>
+      q.eq('status', 'Selesai').eq('jenis', 'Ganti Baru').eq('garansi', 'Ya').eq('sumber_penyelesaian', 'Stok Toko').or('stok_reimbursed.is.null,stok_reimbursed.eq.false'),
+    ),
   ])
+  const claimRows = [...claimRowsOpen, ...claimRowsGantiBaru]
 
   const physical: Record<string, number> = {}
   stockRows.forEach((r) => {
