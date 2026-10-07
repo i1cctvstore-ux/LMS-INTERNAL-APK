@@ -67,7 +67,18 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => ({}))
-  const branchId = typeof body?.branchId === 'string' ? body.branchId : undefined
+  let branchId = typeof body?.branchId === 'string' ? body.branchId : undefined
+  // 7 Okt 2026 -- boleh juga pakai nama cabang ({ branch: 'purwokerto' }) supaya
+  // tombol "Sync Semua" bisa memanggil tiap cabang di request terpisah (tiap
+  // request dapat batas waktu 300 detik sendiri, tidak berbagi dengan cabang lain).
+  const branchName = typeof body?.branch === 'string' ? body.branch.trim().toLowerCase() : ''
+  if (!branchId && branchName) {
+    const configs = await getAccurateBranchConfigs()
+    branchId = configs.find((c) => c.branchName.toLowerCase() === branchName)?.branchId
+    if (!branchId) {
+      return Response.json({ message: `Cabang "${body.branch}" tidak ditemukan / belum dikonfigurasi Accurate.`, results: [] }, { status: 400 })
+    }
+  }
   const result = await runSync(branchId, user.id)
   return Response.json(result)
 }
