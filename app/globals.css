@@ -1130,3 +1130,43 @@
     padding: 0 !important;
   }
 }
+/* ---- Template picker (Penawaran): tombol X selalu terjangkau + kolom cari ---- */
+.qb-root .template-modal .close-modal {
+  position: sticky;
+  float: right;
+  top: 8px;
+  right: auto;
+  z-index: 5;
+  width: 44px;
+  height: 44px;
+  margin: 8px 8px -52px 0;
+  border-radius: 12px;
+  touch-action: manipulation;
+  box-shadow: 0 1px 6px rgba(21, 29, 43, 0.18);
+}
+.qb-root .template-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 0 12px;
+  height: 40px;
+  border: 1px solid #dfe5ee;
+  border-radius: 10px;
+  background: #fff;
+  color: #748098;
+}
+.qb-root .template-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 16px;
+  color: #26334b;
+}
+.qb-root .template-modal-head { padding-right: 56px; }
+@media (max-width: 600px) {
+  .qb-root .modal-backdrop { padding: 0; }
+  .qb-root .template-modal { width: 100%; max-height: 100dvh; height: 100dvh; border-radius: 0; }
+}
