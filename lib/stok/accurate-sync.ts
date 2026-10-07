@@ -569,7 +569,10 @@ export async function syncAccurateForBranch(
     // FASE 1: ambil detail (no/name/balance) semua item, PARALEL per
     // batch 15 (bukan 1-per-1) — dengan 1.200+ produk, panggilan
     // berurutan bisa makan waktu puluhan menit dan kena timeout server.
-    const CONCURRENCY = 15
+    // 7 Okt 2026: 15 -> 30. Purwokerto (1646 item) cuma sempat 997 item dalam ~225 detik
+    // pada 15 paralel -> butuh ~6 menit, melewati batas 300 detik. Item yang gagal
+    // (mis. kena batas laju Accurate) tetap diulang oleh logika retry di bawah.
+    const CONCURRENCY = 30
     const allDetails: { no: string; name: string; balance: number; kategori: string | null }[] = []
     let failedIds: number[] = itemIds
     // FIX 6 Okt 2026 -- BUG (Purwokerto, 1646 item): dulu kalau waktu
