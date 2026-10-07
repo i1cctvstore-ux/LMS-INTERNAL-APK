@@ -943,14 +943,28 @@ export async function triggerAccurateSoloKonsi(): Promise<{ results: any[]; mess
 }
 
 export async function triggerAccurateSyncAll(): Promise<{ results: any[]; message?: string }> {
-  const res = await fetch('/api/stok/sync-accurate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
-  })
-  const body = await res.json()
-  if (!res.ok) throw new Error(body?.message || 'Gagal menjalankan sinkronisasi Accurate.')
-  return body
+  // 7 Okt 2026 -- tiap cabang dipanggil di REQUEST TERPISAH (berurutan), jadi
+  // masing-masing dapat batas waktu server 300 detik sendiri. Dulu satu
+  // request untuk semua cabang: Purwokerto (1646 item) kehabisan waktu
+  // karena berbagi 300 detik dengan Jakarta.
+  const results: any[] = []
+  let lastMessage: string | undefined
+  for (const branch of ['jakarta', 'purwokerto']) {
+    const res = await fetch('/api/stok/sync-accurate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      // Cabang yang belum dikonfigurasi Accurate dilewati, bukan menggagalkan semuanya.
+      if (res.status === 400) continue
+      throw new Error(body?.message || `Gagal menjalankan sinkronisasi Accurate (${branch}).`)
+    }
+    results.push(...(body.results || []))
+    if (body.message) lastMessage = body.message
+  }
+  return { results, message: results.length === 0 ? lastMessage : undefined }
 }
 
 // Riwayat sekarang ditampilkan lintas cabang (gak terikat 1 cabang aktif
