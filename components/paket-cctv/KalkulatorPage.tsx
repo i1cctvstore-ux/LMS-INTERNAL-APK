@@ -57,6 +57,7 @@ import {
 } from "@/lib/paket-cctv/api";
 
 import PaketPrintPreview from "./PaketPrintPreview";
+import { formatTanggalID, todayLocalISO } from "@/lib/paket-cctv/date";
 
 /** Set oleh RiwayatPage sebelum pindah ke menu Kalkulator ("Buka di Kalkulator") -- dibaca sekali lalu langsung dihapus. */
 export const OPEN_QUOTE_SESSION_KEY = "paket-open-quote-id";
@@ -75,6 +76,8 @@ const currency = (n: number) =>
   "Rp" + Math.round(n).toLocaleString("id-ID", { maximumFractionDigits: 0 });
 
 const PRESET_QTYS = [1, 2, 4, 8, 16];
+
+
 
 let localIdCounter = 0;
 function newLocalId() {
@@ -101,7 +104,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
   // Form paket (panel kanan)
   const [custName, setCustName] = useState("");
   const [custAddress, setCustAddress] = useState("");
-  const [quoteDate, setQuoteDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [quoteDate, setQuoteDate] = useState(() => todayLocalISO());
   const [custTypeKey, setCustTypeKey] = useState<CustomerTypeKey>("standar");
   const [ppnMode, setPpnMode] = useState<PpnMode>("non");
   const [lines, setLines] = useState<WorkingLine[]>([]);
@@ -638,6 +641,7 @@ export default function KalkulatorPage({ branchId, branchName, currentUserId, cu
           <label style={{ fontSize: 12.5 }}>
             Tanggal
             <input type="date" value={quoteDate} onChange={(e) => setQuoteDate(e.target.value)} style={inputStyle} />
+            <span style={{ display: "block", fontSize: 11.5, color: "#707786", marginTop: 3 }}>{formatTanggalID(quoteDate)}</span>
           </label>
           <label style={{ fontSize: 12.5, gridColumn: "1 / -1" }}>
             Alamat Customer
