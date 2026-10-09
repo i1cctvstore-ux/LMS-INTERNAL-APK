@@ -71,6 +71,7 @@ import { type QuoteWithAddress,
   updateQuoteStatus as apiUpdateQuoteStatus,
 } from "@/lib/quote-builder/api";
 import { calculateAlternative } from "@/lib/quote-builder/pricing";
+import { buildFileName, printElement } from "@/lib/print/print-element";
 import type { Alternative, PriceType, Product, QuoteItem, QuoteNote, ReviewStatus, VatMode } from "@/lib/quote-builder/quoteTypes";
 import type { BranchRow, TemplateRow } from "@/lib/quote-builder/database.types";
 
@@ -82,9 +83,13 @@ const priceTypeLabels: Record<PriceType, string> = {
 
 const currency = (value: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Math.round(value));
 const displayDate = (value: string) => new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric" }).format(new Date(`${value}T12:00:00`));
-const oneMonthLater = (value: string) => { const date = new Date(`${value}T12:00:00`); date.setMonth(date.getMonth() + 1); return date.toISOString().slice(0, 10); };
-const todayISO = () => new Date().toISOString().slice(0, 10);
+// Tanggal memakai jam perangkat (WIB), BUKAN UTC -- toISOString() membuat
+// tanggal salah jadi kemarin antara pukul 00.00-07.00 WIB.
+const toLocalISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const oneMonthLater = (value: string) => { const date = new Date(`${value}T12:00:00`); date.setMonth(date.getMonth() + 1); return toLocalISO(date); };
+const todayISO = () => toLocalISO(new Date());
 const safeFilePart = (value: string) => value.trim().replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") || "penawaran";
+const PROPOSAL_PRINT_CSS = "#print-clone-root .proposal-document{position:static!important;width:210mm!important;max-width:none!important;min-height:0!important;margin:0!important;padding:11mm 12mm 13mm!important;box-shadow:none!important;border:0!important;border-radius:0!important}#print-clone-root .proposal-alt{break-inside:avoid}";
 
 const FALLBACK_PRODUCT: Product = { id: "", name: "(produk tidak ditemukan di katalog)", sku: "", brand: "", prices: { net: 0, reseller: 0, special: 0 } };
 
@@ -202,26 +207,63 @@ function QuotePreview({ alternatives, clientName, clientAddress, projectName, qu
     const html2canvas = (await import("html2canvas-pro")).default;
     const { jsPDF } = await import("jspdf");
 
-    const canvas = await html2canvas(documentRef.current, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false });
-    const imgData = canvas.toDataURL("image/jpeg", 0.98);
+    const docEl = documentRef.current;
+    const SCALE = 2;
+    const canvas = await html2canvas(docEl, { scale: SCALE, useCORS: true, backgroundColor: "#ffffff", logging: false });
+
+    // Titik potong aman = batas bawah baris tabel / blok (bukan di tengah
+    // baris). Dihitung dari DOM, lalu diubah ke piksel canvas.
+    const docTop = docEl.getBoundingClientRect().top;
+    const safeBreaks = Array.from(docEl.querySelectorAll<HTMLElement>("tr, section, header, footer, p, li, .proposal-alt, table"))
+      .filter((el) => el.tagName === "TR" || !el.closest("td, th"))
+      .map((el) => Math.round((el.getBoundingClientRect().bottom - docTop) * SCALE))
+      .filter((y) => y > 0 && y < canvas.height)
+      .sort((x, y) => x - y);
 
     const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const imgWidth = pageWidth;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    const MARGIN_Y = 10; // mm, atas & bawah di setiap halaman
+    const contentHeightMm = pageHeight - MARGIN_Y * 2;
+    const pxPerMm = canvas.width / pageWidth;
+    const pagePx = Math.floor(contentHeightMm * pxPerMm);
 
-    let heightLeft = imgHeight;
-    let position = 0;
-    pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-    while (heightLeft > 0) {
-      position = -(imgHeight - heightLeft);
-      pdf.addPage();
-      pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+    let start = 0;
+    let pageIndex = 0;
+    while (start < canvas.height - 2) {
+      let end = Math.min(start + pagePx, canvas.height);
+      if (end < canvas.height) {
+        // Ambil titik aman terjauh yang masih muat di halaman ini (minimal separuh halaman terisi).
+        const candidates = safeBreaks.filter((y) => y > start + pagePx * 0.5 && y <= end);
+        if (candidates.length) end = candidates[candidates.length - 1];
+      }
+      const sliceH = end - start;
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width;
+      slice.height = sliceH;
+      const ctx = slice.getContext("2d");
+      if (!ctx) throw new Error("Canvas tidak tersedia.");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, slice.width, slice.height);
+      ctx.drawImage(canvas, 0, start, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+      if (pageIndex > 0) pdf.addPage();
+      pdf.addImage(slice.toDataURL("image/jpeg", 0.98), "JPEG", 0, MARGIN_Y, pageWidth, sliceH / pxPerMm);
+      start = end;
+      pageIndex += 1;
     }
     return pdf.output("blob");
+  };
+
+  // "Cetak": salinan dokumen dicetak sendirian (lib/print/print-element.ts) --
+  // nama file PDF = Penawaran_<kode>_<klien>, sama dengan tombol Unduh PDF.
+  const printProposal = () => {
+    if (!documentRef.current) return;
+    void printElement(documentRef.current, {
+      title: buildFileName("Penawaran", internalCode, clientName) || "Penawaran",
+      wrapperClassName: "qb-root",
+      page: "size: A4 portrait; margin: 0",
+      extraCss: PROPOSAL_PRINT_CSS,
+    });
   };
 
   const exportPdf = async () => {
@@ -294,7 +336,7 @@ function QuotePreview({ alternatives, clientName, clientAddress, projectName, qu
     }
   };
 
-  return <div className="preview-mode"><header className="preview-toolbar"><button className="back-editor" onClick={onBack}><ArrowLeft size={17} /> Kembali ke editor</button><div className="preview-toolbar-actions"><span><CheckCircle2 size={15} /> Data dari draft aktif</span><button className="outline-button" onClick={() => window.print()}><Printer size={17} /> Cetak</button><button className="outline-button" onClick={sharePdf} disabled={isSharing} aria-busy={isSharing}><Share2 size={17} /> {isSharing ? "Menyiapkan…" : "Bagikan PDF"}</button><button className="outline-button" onClick={exportPdf} disabled={isExporting} aria-busy={isExporting}><Printer size={17} /> {isExporting ? "Menyiapkan PDF…" : "Unduh PDF"}</button></div></header><main className="preview-canvas"><ProposalDocument alternatives={alternatives} clientName={clientName} clientAddress={clientAddress} projectName={projectName} quoteDate={quoteDate} validDate={validDate} notes={notes} branch={branch} documentRef={documentRef} /></main></div>;
+  return <div className="preview-mode"><header className="preview-toolbar"><button className="back-editor" onClick={onBack}><ArrowLeft size={17} /> Kembali ke editor</button><div className="preview-toolbar-actions"><span><CheckCircle2 size={15} /> Data dari draft aktif</span><button className="outline-button" onClick={printProposal}><Printer size={17} /> Cetak</button><button className="outline-button" onClick={sharePdf} disabled={isSharing} aria-busy={isSharing}><Share2 size={17} /> {isSharing ? "Menyiapkan…" : "Bagikan PDF"}</button><button className="outline-button" onClick={exportPdf} disabled={isExporting} aria-busy={isExporting}><Printer size={17} /> {isExporting ? "Menyiapkan PDF…" : "Unduh PDF"}</button></div></header><main className="preview-canvas"><ProposalDocument alternatives={alternatives} clientName={clientName} clientAddress={clientAddress} projectName={projectName} quoteDate={quoteDate} validDate={validDate} notes={notes} branch={branch} documentRef={documentRef} /></main></div>;
 }
 
 export type QuoteEditorPageProps = {
