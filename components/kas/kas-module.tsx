@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { buildFileName, printElement } from '@/lib/print/print-element'
 import {
   Plus,
   ArrowUpRight,
@@ -108,13 +109,14 @@ const KATEGORI_BADGE_UM: Record<KasUmKategori, string> = {
 function rupiah(n: number) {
   return 'Rp ' + Math.round(n || 0).toLocaleString('id-ID')
 }
+const localISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; // jam perangkat (WIB), bukan UTC
 function todayISO() {
-  return new Date().toISOString().slice(0, 10)
+  return localISO(new Date())
 }
 function daysAgoISO(n: number) {
   const d = new Date()
   d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
+  return localISO(d)
 }
 function formatTgl(iso: string) {
   const d = new Date(iso + 'T00:00:00')
@@ -829,9 +831,20 @@ export default function KasModule({
     showToast('CSV berhasil diunduh')
   }
 
+  // Cetak lewat salinan halaman (lib/print/print-element.ts): hanya isi modul
+  // Kas yang tercetak (tanpa sidebar), mengalir antar halaman, dan nama file
+  // PDF-nya jelas: Kas_<cabang>_<jenis>_<rentang>_<tanggal>.
+  const printRootRef = useRef<HTMLDivElement | null>(null)
   function exportPdf() {
     setShowExport(false)
-    setTimeout(() => window.print(), 150)
+    setTimeout(() => {
+      if (!printRootRef.current) return
+      const jenis = isBuku ? 'Buku_Kas' : isUm ? 'Kas_UM_Reimburse' : 'Kas_Kecil'
+      void printElement(printRootRef.current, {
+        title: buildFileName(jenis, activeBranch?.name ?? 'cabang', range, todayISO()),
+        page: 'size: A4 portrait; margin: 12mm',
+      })
+    }, 150)
   }
 
   // ---------- Render ----------
@@ -862,7 +875,7 @@ export default function KasModule({
   }
 
   return (
-    <div className="mx-auto max-w-5xl p-4 pb-16 sm:p-6 print:p-0">
+    <div ref={printRootRef} className="mx-auto max-w-5xl p-4 pb-16 sm:p-6 print:p-0">
       {/* Header */}
       <header className="mb-4 print:hidden">
         <h1 className="text-2xl font-bold text-foreground">{title}</h1>
