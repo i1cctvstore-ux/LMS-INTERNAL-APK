@@ -28,8 +28,9 @@ const uid = () =>
     : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) =>
         (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16)
       );
-const todayStr = () => new Date().toISOString().slice(0, 10);
-const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+const localISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; // jam perangkat (WIB), bukan UTC
+const todayStr = () => localISO(new Date());
+const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return localISO(d); };
 const fmtDate = (d) => {
   if (!d) return "-";
   const dt = new Date(d + "T00:00:00");
