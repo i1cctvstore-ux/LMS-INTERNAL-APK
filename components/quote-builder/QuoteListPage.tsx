@@ -38,7 +38,7 @@ const statusMeta: Record<QuoteStatus, { label: string; helper: string; className
 
 function presetRange(preset: "today" | "week" | "month") {
   const now = new Date();
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   if (preset === "today") return [iso(now), iso(now)];
   if (preset === "week") {
     const start = new Date(now);
