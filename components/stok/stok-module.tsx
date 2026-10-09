@@ -134,6 +134,7 @@ const DESTY_GUDANG_ID: Record<string, string> = {
   Purwokerto: '2037758773581979264',
 }
 
+const localISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` // jam perangkat (WIB), bukan UTC
 function sourcesInGroup(group: string): CabangSource[] {
   return CABANG_SOURCES.filter((s) => s.group === group)
 }
@@ -1282,7 +1283,7 @@ function StokCabangMatrix({ myBranchId }: { myBranchId: string | null }) {
     ws['!cols'] = [{ wch: 14 }, { wch: 40 }, { wch: 20 }, { wch: 22 }, ...headerRow.slice(4).map(() => ({ wch: 12 }))]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Stok Cabang')
-    const dateStr = new Date().toISOString().slice(0, 10)
+    const dateStr = localISO(new Date())
     XLSX.writeFile(wb, `cek-stok-cabang-${dateStr}.xlsx`)
   }
 
@@ -1687,7 +1688,7 @@ function StokDestyTab() {
     ws['!cols'] = [{ wch: 28 }, { wch: 20 }, { wch: 22 }, { wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 18 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'IND_Update_OnHandStock')
-    const dateStr = new Date().toISOString().slice(0, 10)
+    const dateStr = localISO(new Date())
     XLSX.writeFile(wb, `desty-update-stok-${dateStr}.xlsx`)
   }
 
