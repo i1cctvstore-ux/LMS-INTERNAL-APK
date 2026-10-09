@@ -16,8 +16,10 @@
 // qty->harga per brand; dicatat sebagai simplifikasi, bukan replika
 // pixel-perfect grid 3-kolomnya.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getBranch, toPrintLines, type BranchWithLetterhead, type Jenis, type WorkingLine } from "@/lib/paket-cctv/api";
+import { formatTanggalID } from "@/lib/paket-cctv/date";
+import { buildFileName, printElement } from "@/lib/print/print-element";
 import { LOGO_NON_PPN_BASE64, LOGO_PPN_BASE64 } from "@/components/quote-builder/QuoteEditorPage";
 
 const currency = (n: number) => "Rp" + Math.round(n).toLocaleString("id-ID", { maximumFractionDigits: 0 });
@@ -71,17 +73,18 @@ export default function PaketPrintPreview({
     };
   }, [branchId]);
 
-  // 6.4: dokumen ini dicetak A4 portrait -- @page disuntik sebelum
-  // window.print(), sama seperti pola printDoc() di mockup asli, supaya
-  // tidak tercampur dengan orientasi landscape dokumen lain (Daftar
-  // Harga Paket) kalau dua-duanya dibuka di sesi print yang sama.
+  // Cetak lewat salinan dokumen (lib/print/print-element.ts): hanya
+  // <article> ini yang dicetak, mengalir normal antar halaman A4 portrait,
+  // dan nama file PDF = judul dokumen di bawah.
+  const articleRef = useRef<HTMLElement | null>(null);
   function handlePrint() {
-    const style = document.createElement("style");
-    style.id = "paket-print-orientation";
-    style.textContent = "@page { size: A4 portrait; margin: 14mm; }";
-    document.head.appendChild(style);
-    window.print();
-    setTimeout(() => style.remove(), 500);
+    if (!articleRef.current) return;
+    const title = buildFileName("Penawaran_Paket_CCTV", jenis ?? "", custName, quoteNo ?? quoteDate) || "Penawaran_Paket_CCTV";
+    void printElement(articleRef.current, {
+      title,
+      page: "size: A4 portrait; margin: 14mm",
+      extraCss: "#print-clone-root article { font-size: 12.5px; color: #1d2433; } #print-clone-root footer { break-inside: avoid; }",
+    });
   }
 
   const usesPpn = ppnMode === "ppn";
@@ -110,7 +113,7 @@ export default function PaketPrintPreview({
       }}
     >
       <div className="paket-print-card" style={{ background: "#fff", maxWidth: 820, width: "100%", margin: "0 auto", padding: "56px 20px 40px", minHeight: "100%" }}>
-        <div className="paket-print-toolbar" style={{ position: "fixed", top: 10, right: 10, display: "flex", gap: 6, zIndex: 100000, opacity: 0.55 }}>
+        <div className="paket-print-toolbar" data-no-print style={{ position: "fixed", top: 10, right: 10, display: "flex", gap: 6, zIndex: 100000, opacity: 0.55 }}>
           <button type="button" onClick={handlePrint} style={floatBtn}>
             Cetak / PDF
           </button>
@@ -121,7 +124,7 @@ export default function PaketPrintPreview({
 
         {loadError && <p style={{ color: "#b23b2c", fontSize: 12.5 }}>Gagal memuat kop surat: {loadError}</p>}
 
-        <article style={{ fontSize: 12.5, color: "#1d2433" }}>
+        <article ref={articleRef} style={{ fontSize: 12.5, color: "#1d2433" }}>
           <header
             style={
               logoIsBanner
@@ -154,7 +157,7 @@ export default function PaketPrintPreview({
             </div>
             <div style={{ textAlign: "right" }}>
               {quoteNo && <div>No. {quoteNo}</div>}
-              <div>{quoteDate}</div>
+              <div>{formatTanggalID(quoteDate)}</div>
             </div>
           </section>
 
@@ -197,50 +200,6 @@ export default function PaketPrintPreview({
         </article>
       </div>
 
-      <style>{`
-        @media print {
-          /* BUG 29 Sep 2026 (revisi ke-2): reset kotak previewnya sendiri
-             (position:static, tinggi/scroll dilepas) TERNYATA BELUM CUKUP --
-             sisa halaman di belakangnya (sidebar, panel Kalkulator Paket)
-             tetap ada di DOM & tetap ke-print, cuma urutannya jadi SEBELUM
-             dokumen ini. Makanya halaman 1 kelihatan kosong -- itu bukan
-             kosong, itu ruang sisa dari sidebar/panel yang harusnya gak
-             usah keprint sama sekali, dan dokumen aslinya baru mulai di
-             halaman 2 atau 3.
-             Fixed dengan pola standar "print 1 elemen doang": SEMUANYA di
-             <body> disembunyikan (visibility:hidden, bukan display:none --
-             biar layout & page break box ini sendiri gak ikut kacau), lalu
-             cuma .paket-print-card & isinya yang divisibility:visible lagi
-             dan dipaksa position:fixed nempel di pojok kiri-atas halaman.
-             Hasilnya CUMA dokumen ini yang keprint, mulai dari halaman 1. */
-          body * { visibility: hidden !important; }
-          .paket-print-card, .paket-print-card * { visibility: visible !important; }
-
-          .paket-print-toolbar { display: none !important; }
-
-          .paket-print-overlay {
-            position: static !important;
-            inset: auto !important;
-            background: none !important;
-            display: block !important;
-            padding: 0 !important;
-            overflow: visible !important;
-            z-index: auto !important;
-          }
-          .paket-print-card {
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            max-width: none !important;
-            max-height: none !important;
-            overflow: visible !important;
-            width: 100% !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            border-radius: 0 !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }
