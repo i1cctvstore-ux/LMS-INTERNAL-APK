@@ -911,8 +911,16 @@ export async function persistServiceData(
 ) {
   const tasks: Promise<void>[] = []
 
+  // 9 Okt 2026 -- URUTAN: pengiriman (batch) HARUS tersimpan dulu, baru klaim.
+  // Klaim punya kolom batch_id / stok_reimbursed_batch_id yang menunjuk ke
+  // service_batches (foreign key). Dulu keduanya ditulis BERSAMAAN: kalau
+  // update klaim sampai ke database sebelum batch-nya selesai di-insert,
+  // database menolak update klaim itu -> status klaim tidak pernah tersimpan
+  // (tampil "Di Supplier"/terkirim di layar, tapi setelah dimuat ulang balik
+  // ke "belum dikirim"). Sekarang batch ditulis duluan dan ditunggu.
+  if (patch.batches) await syncBatches(branchId, prev.batches, patch.batches, userId)
+
   if (patch.claims) tasks.push(syncClaims(branchId, prev.claims, patch.claims, userId))
-  if (patch.batches) tasks.push(syncBatches(branchId, prev.batches, patch.batches, userId))
   if (patch.invoices) tasks.push(syncInvoices(branchId, prev.invoices, patch.invoices, userId))
   if (patch.setoranList) tasks.push(syncSetoran(branchId, prev.setoranList, patch.setoranList, userId))
 
