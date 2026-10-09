@@ -24,6 +24,7 @@ import {
   updateQuoteStatus,
 } from "@/lib/paket-cctv/api";
 import { OPEN_QUOTE_SESSION_KEY } from "./KalkulatorPage";
+import { formatTanggalID } from "@/lib/paket-cctv/date";
 
 type Props = {
   branchId: string;
@@ -212,7 +213,7 @@ export default function RiwayatPage({ branchId, isSuperAdmin, currentUserId, onN
                 <span style={{ marginLeft: 8, color: "#4b5566" }}>{r.cust_name || "(tanpa nama)"}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flex: "1 1 260px" }}>
-                <span style={{ fontSize: 11, color: "#9aa1ac" }}>{r.quote_date}</span>
+                <span style={{ fontSize: 11, color: "#9aa1ac" }}>{formatTanggalID(r.quote_date)}</span>
                 <strong>{currency(r.total)}</strong>
                 <select
                   value={r.status}
